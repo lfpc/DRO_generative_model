@@ -1,0 +1,425 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage[numbers]{natbib}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{booktabs}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{assumption}{Assumption}
+\providecommand*{\assumptionautorefname}{Assumption}
+\newtheorem{remark}{Remark}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Phibox}{\Phi}
+\newcommand{\design}{\varphi}
+\newcommand{\latent}{z}
+\newcommand{\surr}{f_w}
+\newcommand{\gendist}{p_\theta}
+\newcommand{\amb}{\mathcal{U}}
+\newcommand{\base}{p_0}
+\newcommand{\Div}{D_f}
+
+\title{Distributionally Robust Optimization with\\
+ Local Surrogates and Normalizing Flows}
+\author{Luís Felipe P. Cattelan \\
+\small Physik-Institut, Universit\"at Z\"urich \\
+\small \texttt{lfp.cattelan@cern.ch}}
+\date{\today\ --- Draft}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Distributionally robust optimization (DRO) is difficult when the loss is produced by an
+expensive simulator and the admissible distribution shift must remain physically plausible.
+We propose Latent-DRO, a model-based framework that addresses both issues with a normalizing
+flow and a differentiable surrogate. The flow maps a simple latent distribution to the input
+space; an adversary then changes the latent distribution rather than perturbing individual
+inputs. For any $f$-divergence, this construction preserves the divergence exactly under the
+flow. With a Gaussian base distribution and a scalar affine latent transformation, the
+ambiguity constraint has a closed form that controls both mean and variance. A branch--trunk surrogate supplies gradients through the
+simulator's design variables, so the resulting objective can be optimized without simulator
+calls inside the minimax loop. We give the invariance result, characterize the local inner
+problem, and specify an evaluation protocol against empirical reweighting and data-space
+adversaries. The empirical section is intentionally left for future work.
+\end{abstract}
+
+\section{Introduction}
+
+Many scientific and engineering challenges fundamentally rely on stochastic optimization, commonly framed as Empirical Risk Minimization (ERM):
+\begin{equation}
+  \label{eq:erm}
+  \design^\star = \arg\min_{\design \in \Phibox}
+  \E_{x \sim P}[\ell(\design,x)].
+\end{equation}
+Here, $\design$ is a controllable design variable we want to optimize, $x$ is a random input representing an unpredictable environmental or physical state, $\ell$ is the loss function, and $P$ is the nominal input distribution. This formulation is central to real world applications where the performance of a system must be evaluated under uncertainty. In the design of particle physics detectors, for instance, $x$ represents simulated particle collision events generated in an accelerator; in aerodynamic shaping, $x$ captures stochastic wind profiles or turbulence flow fields; and in supply chain management, $x$ denotes fluctuating customer demand patterns and network disruptions. In these complex systems, the loss $\ell$ is rarely available in closed form and must instead be evaluated through numerical simulators that models the underlying physical processes.
+
+In practice, such simulations may be non-differentiable and computationally expensive; moreover, the loss function $\ell$ may itself be stochastic, making traditional numerical gradient estimation techniques impractical.
+Consequently, derivative-free approaches, such as Bayesian optimization and evolutionary strategies, are widely used to navigate the design space. More recently, deep-learning assisted optimization has become increasingly popular: by fitting a differentiable model that compresses the simulator's stochastic input--output behavior, it unlocks gradient-based search in high-dimensional regimes without requiring costly simulator evaluations at every step.
+
+These approaches optimize performance strictly under the nominal distribution $P$. In practice, our knowledge of $x$ is inherently imperfect: $P$ is either estimated from limited empirical data or produced by a simulator whose underlying physics, calibration, and environmental assumptions only approximate reality. In deployment, $P$ is estimated from finite data and may differ from the
+distribution encountered by the system. 
+For critical systems, where unexpected performance drops carry high operational or scientific costs, this distributional discrepancy cannot be ignored. Distributionally robust optimization (DRO) addresses this discrepancy by optimizing against the worst-case distribution within a predefined ambiguity set $\amb(P)$ around $P$:
+\begin{equation}
+  \label{eq:dro}
+  \min_{\design \in \Phibox}\ \sup_{Q \in \amb(P)}
+  \E_{x \sim Q}[\ell(\design,x)].
+\end{equation}
+
+Solving this minimax problem in practice, however, presents two fundamental obstacles. First, the nested optimization drastically amplifies the computational bottleneck: repeatedly resolving the inner maximization over $\amb(P)$ using direct simulator queries is intractable. Second, conventional formulations of the ambiguity set force an undesirable geometric compromise. Empirical $f$-divergence sets can only reweight observed samples, precluding the discovery of new, unobserved failure modes. Conversely, Wasserstein and norm-ball adversaries perturb inputs directly in the ambient data space, frequently generating unphysical points that violate the system's true data-generating manifold. While recent works have turned to generative models to confine perturbations to the data manifold, integrating them into simulator-based DRO without sacrificing exact divergence guarantees or computational tractability remains an open challenge.
+
+To address these challenges simultaneously, we propose a framework that combines a local differentiable surrogate with a generative model. We first resolve the computational bottleneck of the nested search by introducing a differentiable surrogate model that approximates the loss across both design and input spaces. By querying the simulator only at the outer step to retrain this surrogate, the inner adversarial loop can be solved entirely via fast gradient ascent without expensive simulator evaluations in the inner loop. We then ensure physically plausible distribution shifts using a normalizing flow trained offline on the nominal sample. By placing the adversary in the flow's latent space, ambiguity constraint can be formulated and computed analytically in closed form. Together, these components transform an intractable simulator-in-the-loop minimax problem into an efficient, gradient-based game where expensive simulations are restricted strictly to periodic surrogate updates.
+
+
+Our primary contributions are summarized as follows:
+
+\begin{itemize}
+    \item \textbf{Sample-Efficient Local Quadratic Surrogates:} We improve upon existing surrogate-assisted optimization methods by constructing locally quadratic approximations of the objective. Our formulation significantly enhances sample efficiency and reduces the total number of expensive simulator evaluations required.
+
+  \item \textbf{Analytic Ambiguity Formulation:} We formalize distributional shifts directly within the latent space of an invertible normalizing flow and prove that any $f$-divergence is invariant under the flow's diffeomorphism. This moves the divergence constraint to a tractable latent space while confining worst-case distributions to the physical manifold. 
+
+  \item \textbf{Simulator-Decoupled Minimax Algorithm:} We develop a practical gradient descent--ascent framework that interfaces the latent adversary with a local differentiable surrogate. This design completely eliminates expensive simulator queries from the inner adversarial search, confining black-box evaluations strictly to outer-loop surrogate refitting.
+\end{itemize}
+
+
+\section{Background}
+\label{sec:background}
+
+\paragraph{Distributionally robust optimization.}
+The choice of ambiguity set determines which distribution shifts are considered plausible and
+how the inner maximization can be solved. Moment-based sets constrain only low-order summaries
+and are tractable but often coarse \citep{delage2010}. Empirical $f$-divergence sets lead to
+finite-dimensional reweighting problems \citep{ben-tal2009,namkoong2016,duchi2021}; because
+they are built on the empirical distribution, every admissible distribution has the same finite
+support as the observed sample. Wasserstein sets allow mass to move to unobserved inputs and
+are a standard tool for data-driven robustness \citep{esfahani2018,kuhn2019}, but their
+transport geometry is usually specified directly in the ambient input space. Such a geometry
+need not respect the physical data-generating process. These alternatives therefore differ in
+both the support of their admissible distributions and the geometry used to measure a shift.
+In general, an $f$-divergence ambiguity set around a nominal distribution $P$ is
+\begin{equation}
+  \label{eq:background-dro}
+  \mathcal{U}_\rho(P)=\left\{Q:\;D_f(Q\|P)\leq\rho\right\},
+\end{equation}
+and the corresponding robust risk is
+\begin{equation}
+  \label{eq:background-robust-risk}
+  R_\rho(\design)=\sup_{Q\in\mathcal{U}_\rho(P)}
+  \E_{x\sim Q}[\ell(\design,x)].
+\end{equation}
+For an empirical distribution $\widehat P_n=\frac{1}{n}\sum_{i=1}^n\delta_{x_i}$,
+$f$-DRO changes only the weights assigned to the observed points $x_i$.
+
+\paragraph{Normalizing flows.}
+A normalizing flow represents a distribution through an invertible differentiable map from a
+simple base distribution \citep{rezende2015,dinh2017,papamakarios2021}. The change-of-variables
+formula gives exact likelihoods, while the explicit inverse and Jacobian determinant make
+sampling and density evaluation tractable. Invertibility also allows samples and densities to
+be represented in both data and latent coordinates, making flows useful for modeling complex
+input distributions while retaining tractable likelihood evaluation and sampling.
+For $x=G_\theta(z)$ and a base density $p_0$, its density is
+\begin{equation}
+  \label{eq:background-flow}
+  p_\theta(x)=p_0\big(G_\theta^{-1}(x)\big)
+  \left|\det\nabla G_\theta^{-1}(x)\right|.
+\end{equation}
+The flow can be trained by maximum likelihood, for example by minimizing
+$-\sum_i\log p_\theta(x_i)$. The inverse map can also be used to transform data-space
+operations into latent coordinates.
+
+\paragraph{Local Surrogate Optimization.}
+Using deep learning surrogates to approximate expensive black-box objectives is a common strategy in simulation-based optimization. Typically built as neural networks, these models are trained on simulator evaluations to predict the loss function across the joint design and input space. Once fitted, they provide a differentiable proxy of the simulator, enabling the use of efficient gradient-based search algorithms. However, training a global models can be challenging, especially in high-dimensional spaces. Fortunately, because the optimizer requires only an estimate of the search direction at the current operating point, global accuracy is not strictly necessary.
+
+Motivated by this observation, \cite{shirobokov2020} proposed local generative surrogate optimization (LGSO), which  restricts model fitting to an immediate neighborhood of the current design, using the resulting local gradient to determine the subsequent step. The surrogate is iteratively retrained as the optimization progresses, concentrating representational capacity strictly on the trajectory traversed by the solver. In the original paper, a generative model is used as the surrogate, to model the stochasticity of the simulator. 
+
+
+\section{Method: Latent-DRO with a Differentiable Surrogate}
+\label{sec:method}
+
+Let $F(\design,x)$ denote the expected loss returned by the simulator for design
+$\design\in\Phibox$. Simulator evaluations are available during an offline data-collection
+or surrogate-fitting stage, but are too expensive to use at every inner and outer optimization
+step. We therefore fit a differentiable surrogate and reserve the simulator for surrogate
+training, validation, and final evaluation.
+
+\subsection{Generative model}
+
+We use a normalizing flow (though any differentiable model that respects
+Assumption~\ref{ass:flow} is valid) as a sample generator for the nominal input distribution. It is
+trained once, a priori, on nominal samples and then held fixed during robust optimization.
+The flow provides a differentiable map from a simple latent variable to an input sample, while
+its invertibility permits exact density evaluation.
+
+\begin{assumption}[Flow model]
+\label{ass:flow}
+Let $z\sim p_0$ be a latent variable and define the generated input by
+$x=G_\theta(z)$. We assume that
+$G_\theta:\R^{d_x}\to\R^{d_x}$ is a measurable bijection with a measurable inverse. For the
+differential statements below, $G_\theta$ is assumed to be a diffeomorphism.
+\end{assumption}
+
+The flow is trained independently of the robust optimization objective using the likelihood
+described in the Background section. After training, it is not updated by the outer optimizer;
+only the latent transformation used by the adversary changes.
+
+As a practical advantage, many applications already use a validated generative model to
+produce simulator inputs or synthetic samples (See e.g. SHIP GAN). In that case, the existing generator can be
+used directly, and no additional generator needs to be trained specifically for Latent-DRO.
+
+\subsection{Surrogate model}
+
+We use a factorized branch--trunk model:
+\begin{equation}
+  \label{eq:factorized}
+  s_w(\design,x) = \langle b_w(\design),t_w(x)\rangle+\beta_w,
+  \qquad \surr(\design,x)=h\big(s_w(\design,x)\big),
+\end{equation}
+where $b_w$ encodes the design, $t_w$ encodes the input, and $h$ is a task-specific link
+function. This architecture supports continuous losses and differentiable approximations to
+rare-event or classification losses. It also separates the design and input representations,
+which is useful when many designs are evaluated against the same input batch.
+
+\subsection{Latent ambiguity set}
+\label{sec:invariance}
+
+We fit a normalizing flow to the nominal input distribution and keep it fixed during robust
+optimization. Let $P_\theta$ be the distribution obtained by sampling $z\sim p_0$ and
+returning $G_\theta(z)$. Let $Q_\eta$ be the distribution obtained by returning
+$G_\theta(T_\eta(z))$, and let $\widetilde Q_\eta$ be the distribution of $T_\eta(z)$.
+Here $T_\eta$ is an invertible latent transformation. The flow density and training objective
+are given in the Background section; no additional density evaluation is required inside the
+minimax loop.
+
+\begin{proposition}[Diffeomorphic invariance]
+\label{prop:invariance}
+Under Assumption~\ref{ass:flow}, for every $f$-divergence for which the two quantities are
+defined,
+\begin{equation}
+  \label{eq:invariance}
+  \Div(Q_\eta\|P_\theta)
+  = \Div(\widetilde Q_\eta\|p_0).
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+The two measures in the left-hand side are obtained by applying the same bijection
+$G_\theta$ to the latent laws of $T_\eta(z)$ and $z$. $f$-divergences are invariant under a
+common measurable bijection, which gives Equation~\ref{eq:invariance}.
+\end{proof}
+
+This result moves the constraint to a space where it can be computed analytically. Consider
+the scalar affine family
+\begin{equation}
+  \label{eq:affine-transform}
+  T_{a,\mu}(z)=az+\mu, \qquad a>0,
+\end{equation}
+and $p_0=\mathcal{N}(0,I)$. Then $T_{a,\mu}(z)\sim\mathcal{N}(\mu,a^2I)$ and
+\begin{equation}
+  \label{eq:affine-kl}
+  \mathrm{KL}\left(\mathcal{N}(\mu,a^2I)\,\middle\|\,\mathcal{N}(0,I)\right)
+  =\frac{1}{2}\left(\|\mu\|_2^2+d_z(a^2-1-\log a^2)\right).
+\end{equation}
+The KL radius therefore constrains both the latent mean and its isotropic variance. The
+translation family is recovered at $a=1$. More expressive diagonal or full affine maps can
+model coordinate-specific or correlated variance changes, but require additional parameters.
+
+\subsection{Minimax optimization}
+
+For a latent family $T_\eta$ and feasible parameter set $\mathcal{H}_\rho$, Latent-DRO solves
+\begin{equation}
+  \label{eq:latent-objective}
+  \min_{\design\in\Phibox}\ \max_{\eta\in\mathcal{H}_\rho}
+  \Psi(\design,\eta).
+\end{equation}
+For the affine family, let
+\begin{equation}
+  \label{eq:affine-feasible}
+  \mathcal{H}_\rho=\left\{(a,\mu):a>0,\quad
+  \|\mu\|_2^2+d_z(a^2-1-\log a^2)\leq 2\rho\right\}.
+\end{equation}
+With samples
+$z_1,\ldots,z_m\sim p_0$, the Monte Carlo objective is
+\begin{equation}
+  \label{eq:mc-objective}
+  \widehat\Psi(\design,\eta)=\frac{1}{m}\sum_{i=1}^m
+  \surr\big(\design,G_\theta(T_\eta(z_i))\big).
+\end{equation}
+Because the samples are reparameterized from a distribution independent of $\eta$, standard
+automatic differentiation provides gradients through $T_\eta$, $G_\theta$, and $\surr$.
+
+\begin{algorithm}[ht]
+\caption{Latent-DRO with a differentiable surrogate}
+\label{alg:latent-dro}
+\begin{algorithmic}[1]
+\REQUIRE Fitted flow $G_\theta$, surrogate $\surr$, radius $\rho$, step sizes
+$\gamma_{\mathrm{in}},\gamma_{\mathrm{out}}$
+\STATE Initialize $\design\in\Phibox$ and $\eta\in\mathcal{H}_\rho$.
+\WHILE{the stopping criterion is not met}
+  \STATE Draw $z_1,\ldots,z_m\sim p_0$.
+  \STATE For $k=1,\ldots,K$, set
+  $\eta\leftarrow\arg\min_{\zeta\in\mathcal{H}_\rho}
+  \left\|\zeta-\left(\eta+\gamma_{\mathrm{in}}\nabla_\eta
+  \widehat\Psi(\design,\eta)\right)\right\|_2^2$.
+  \STATE Set
+  $\design\leftarrow\arg\min_{\varphi\in\Phibox}
+  \left\|\varphi-\left(\design-\gamma_{\mathrm{out}}\nabla_\design
+  \widehat\Psi(\design,\eta)\right)\right\|_2^2$.
+\ENDWHILE
+\STATE Evaluate the final design with the true simulator under nominal and held-out shifts.
+\end{algorithmic}
+\end{algorithm}
+
+The projected ascent step is a practical solver for the inner problem; it is not, in general,
+a certificate of global optimality. When a local quadratic model is appropriate, the inner
+problem admits a stronger trust-region analysis.
+
+\section{Local Theory}
+\label{sec:theory}
+
+Define $\psi(\eta)=\Psi(\design,\eta)$ for a fixed design. Around $\eta=0$, a second-order
+model is
+\begin{equation}
+  \label{eq:taylor}
+  \widehat\psi(\eta)=\psi(0)+g^\top\eta+\frac{1}{2}\eta^\top H\eta,
+  \qquad g=\nabla_\eta\psi(0),\quad H=\nabla^2_\eta\psi(0).
+\end{equation}
+For the affine family, write $a=\exp(s)$ and let $\eta=(s,\mu)$. The KL constraint is
+\begin{equation}
+  \label{eq:affine-local-constraint}
+  d_z(e^{2s}-1-2s)+\|\mu\|_2^2\leq 2\rho.
+\end{equation}
+Near $(s,\mu)=(0,0)$, this is the ellipsoid $d_zs^2+\|\mu\|_2^2/2\leq\rho$.
+After rescaling the coordinates, the KL-constrained local adversary is a generalized
+trust-region problem:
+\begin{equation}
+  \label{eq:trs}
+  \max_{\eta^\top W\eta\leq\rho}\quad g^\top\eta+\frac{1}{2}\eta^\top H\eta,
+  \qquad W=\mathrm{diag}(d_z,\tfrac12 I_{d_z}),
+\end{equation}
+
+\begin{theorem}[Trust-region characterization]
+\label{thm:trs}
+The problem in Equation~\ref{eq:trs} has zero duality gap. A global maximizer satisfies the
+trust-region optimality conditions: there exists $\lambda$ at least as large as the largest
+eigenvalue of $W^{-1/2}HW^{-1/2}$ such that
+\begin{equation}
+  (\lambda W-H)\eta=g,\qquad \eta^\top W\eta\leq\rho,
+\end{equation}
+and, when the constraint is active, $\eta^\top W\eta=\rho$. The solution can be obtained by
+whitening the ellipsoid and solving the associated secular equation, including when $H$ is indefinite
+\citep{more1983}.
+\end{theorem}
+
+The theorem applies to the quadratic approximation, not automatically to the nonlinear
+neural-network objective. It provides an exact local inner oracle and a diagnostic for
+assessing projected ascent. It also yields the small-radius expansion
+\begin{equation}
+  \label{eq:first-order}
+  \max_{\eta^\top W\eta\leq\rho}\psi(\eta)
+  = \psi(0)+\sqrt{\rho}\,\|W^{-1/2}\nabla_\eta\psi(0)\|_2+O(\rho),
+\end{equation}
+provided $\psi$ is twice continuously differentiable near zero. The first-order term is a
+latent gradient-norm penalty, but it should be interpreted as a local approximation rather
+than an exact replacement for the inner maximization.
+
+If the nonlinear inner maximum is solved globally and the regularity conditions of Danskin's
+theorem hold, a gradient with respect to $\design$ at a maximizing $\eta$ is a valid
+subgradient of the value function \citep{danskin1967}. In practice, the quality of this
+argument depends on both the surrogate approximation and the accuracy of the inner solver.
+
+\section{Evaluation Protocol}
+\label{sec:experiments}
+
+This section defines the experiments to be reported in a future version. The goal is to
+separate three sources of behavior: the quality of the learned distribution, the geometry of
+the ambiguity set, and the cost of using a surrogate.
+
+\subsection{Benchmarks}
+
+We will use five stochastic design problems:
+\begin{enumerate}
+  \item a capacitated multi-item newsvendor with bimodal lognormal demand;
+  \item a short column under biaxial bending with correlated lognormal inputs;
+  \item the same column with its inputs embedded in a curved low-dimensional manifold;
+  \item a welded beam with competing failure modes; and
+  \item a chance-constrained DC optimal power-flow problem with bounded, skewed wind.
+\end{enumerate}
+The suite varies non-Gaussianity, intrinsic dimension, the number of competing failure modes,
+and the number of coupled design decisions. The portfolio factor model may be retained as a
+negative control because its loss depends on a single effective input direction.
+
+\subsection{Methods and ablations}
+
+All methods use the same design constraints, simulator budget, training data, and final
+validation distributions. We will compare:
+\begin{itemize}
+  \item ERM on the observed sample and ERM on samples from the fitted flow;
+  \item flow temperature scaling and random latent affine transformations;
+  \item KL-DRO and $\chi^2$-DRO over the observed sample;
+  \item data-space projected gradient ascent and Wasserstein robust optimization;
+  \item Latent-DRO with scalar, diagonal, and full affine families; and
+  \item the first-order gradient-norm approximation in Equation~\ref{eq:first-order}.
+\end{itemize}
+The primary ablations will vary flow quality, latent dimension, surrogate budget, inner-solver
+iterations, and the latent radius. The flow is fixed during robust optimization so that any
+improvement can be attributed to the ambiguity family rather than simultaneous model drift.
+
+\subsection{Metrics}
+
+The main metric will be worst-case regret over held-out shifts. For a shift distribution
+$P_j$, define
+\begin{equation}
+  \label{eq:regret}
+  \mathrm{Regret}_j(\design)=R(P_j,\design)-
+  \inf_{\varphi\in\Phibox}R(P_j,\varphi).
+\end{equation}
+We will also report nominal risk, the worst-case risk predicted by the surrogate, true simulator
+risk, calibration of the learned flow, and the number of simulator calls. For inner-solver
+analysis, we will report feasibility, stationarity, and the gap between projected ascent and
+the trust-region solution of the local quadratic model. Results will be averaged over multiple
+random seeds with confidence intervals, and radius selection will use training or validation
+shifts disjoint from the final test shifts.
+
+
+
+\section{Conclusion}
+
+Latent-DRO combines a learned generative model with a differentiable surrogate to make a
+specific class of simulator-based DRO problems tractable. The flow provides a structured
+support for distribution shift, while invertibility transfers the divergence constraint to
+latent space. For Gaussian inputs and scalar affine transformations, the resulting ambiguity
+set has a closed-form mean--variance constraint, and the surrogate makes both the design and
+adversarial variables differentiable.
+The local trust-region result clarifies what can be solved exactly and what remains an
+optimization approximation.
+
+The central empirical question is not whether a latent adversary is universally better than
+sample reweighting or data-space perturbations. It is when its learned geometry is useful:
+when the nominal flow is accurate, when physically plausible shifts are smooth in latent
+space, and when the surrogate preserves the local ordering of designs. The evaluation
+protocol above is designed to answer that question without conflating those three effects.
+
+\begin{thebibliography}{99}
+\bibitem{ben-tal2009} A. Ben-Tal, L. El Ghaoui, A. Nemirovski. \emph{Robust Optimization.} Princeton University Press, 2009.
+\bibitem{esfahani2018} P. Mohajerin Esfahani, D. Kuhn. Data-driven distributionally robust optimization using the Wasserstein metric. \emph{Mathematical Programming}, 2018.
+\bibitem{sinha2018} A. Sinha, H. Namkoong, J. Duchi. Certifying some distributional robustness with principled adversarial training. In \emph{ICLR}, 2018.
+\bibitem{delage2010} E. Delage, Y. Ye. Distributionally robust optimization under moment uncertainty with application to data-driven problems. \emph{Operations Research}, 2010.
+\bibitem{shirobokov2020} S. Shirobokov, V. Belavin, M. Kagan, A. Ustyuzhanin, A. G. Baydin. Black-box optimization with local generative surrogates. In \emph{NeurIPS}, 2020.
+\bibitem{dinh2017} L. Dinh, J. Sohl-Dickstein, S. Bengio. Density estimation using Real NVP. In \emph{ICLR}, 2017.
+\bibitem{rezende2015} D. J. Rezende, S. Mohamed. Variational inference with normalizing flows. In \emph{ICML}, 2015.
+\bibitem{papamakarios2021} G. Papamakarios, E. Nalisnick, D. J. Rezende, S. Mohamed, B. Lakshminarayanan. Normalizing flows for probabilistic modeling and inference. \emph{Journal of Machine Learning Research}, 2021.
+\bibitem{namkoong2016} H. Namkoong, J. C. Duchi. Stochastic gradient methods for distributionally robust optimization with $f$-divergences. In \emph{NeurIPS}, 2016.
+\bibitem{duchi2021} J. C. Duchi, H. Namkoong. Learning models with uniform performance via distributionally robust optimization. \emph{The Annals of Statistics}, 2021.
+\bibitem{kuhn2019} D. Kuhn, P. Mohajerin Esfahani, V. A. Nguyen, S. Shafieezadeh-Abadeh. Wasserstein distributionally robust optimization: theory and applications in machine learning. In \emph{INFORMS TutORials in Operations Research}, 2019.
+\bibitem{more1983} J. J. Mor\'e, D. C. Sorensen. Computing a trust region step. \emph{SIAM Journal on Scientific and Statistical Computing}, 1983.
+\bibitem{danskin1967} J. M. Danskin. \emph{The Theory of Max-Min and its Application to Weapons Allocation Problems.} Springer, 1967.
+\end{thebibliography}
+
+\end{document}
