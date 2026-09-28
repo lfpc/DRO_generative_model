@@ -18,13 +18,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import inner                                                       # noqa: E402
 from optb.lcso import _fit, _make_surrogate                        # noqa: E402
-from problem import Portfolio                                      # noqa: E402
+from problem import Newsvendor                                      # noqa: E402
 from train_generator import train                                  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
 MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 RHOS = [0.05, 0.2, 0.5, 1.0]
-EPS = [0.02, 0.05, 0.1, 0.15]
+EPS = [0.1, 0.25, 0.5, 1.0]
 STYLE = {'KL-DRO': ('C2', 'o'), 'Wasserstein': ('C1', 'v'),
          'Latent-DRO (surrogate)': ('C0', 'D')}
 
@@ -33,7 +33,7 @@ class Adapter:
     link = 'identity'
 
     def __init__(self, p):
-        self.p, self.dim = p, p.n_assets + 1
+        self.p, self.dim = p, p.design_dim
 
     def sample(self, n, generator=None):
         return self.p.sample(n, generator)
@@ -44,7 +44,7 @@ class Adapter:
         return torch.stack([self.p.loss(q, x) for q in phi])
 
 
-def fit_surrogate(problem, phi, n_designs=60, n_samples=2000, delta=0.08, seed=0):
+def fit_surrogate(problem, phi, n_designs=60, n_samples=2000, delta=0.5, seed=0):
     """Fit s(phi, x) near the incumbent. Returns (loss_fn, evaluations spent).
 
     The design perturbations are small and projected back onto the simplex: the surrogate
@@ -85,10 +85,10 @@ def load_surrogate(path, problem):
 if __name__ == '__main__':
     torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
-    problem = Portfolio()
+    problem = Newsvendor()
     x = problem.sample(20000, torch.Generator().manual_seed(0))
     phi = problem.solve(x)
-    flow, _ = train(problem, n_train=4000, epochs=800, seed=0)
+    flow, _ = train(problem, seed=0)
     surrogate, setup = fit_surrogate(problem, phi)
     print(f'surrogate fitted with {setup:,} evaluations (one-off, shared by every solve)')
     os.makedirs(MODELS, exist_ok=True)

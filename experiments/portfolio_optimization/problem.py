@@ -28,6 +28,7 @@ class Portfolio:
 
     def __init__(self, n_assets=10, rho=10.0, alpha=0.2, dtype=torch.float32):
         self.n_assets, self.rho, self.alpha, self.dtype = n_assets, rho, alpha, dtype
+        self.input_dim, self.design_dim = n_assets, n_assets + 1
         i = torch.arange(1, n_assets + 1, dtype=dtype)
         self.sys_sd = 0.02                  # systematic factor
         self.mu, self.sd = i * 0.03, i * 0.025      # idiosyncratic mean and spread

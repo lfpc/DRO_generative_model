@@ -31,6 +31,7 @@ from problem import TwoMoons                                       # noqa: E402
 from train_generator import train                                  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
+MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 RHOS = [0.05, 0.2, 0.5, 1.0]
 EPS = [0.05, 0.1, 0.15, 0.2]
 STYLE = {'KL-DRO': ('C2', 'o'), 'Wasserstein': ('C1', 'v'),
@@ -71,10 +72,23 @@ def fit_surrogate(problem, phi, n_designs=60, n_samples=2000, delta=0.25, seed=0
     model = _make_surrogate(ad, 'mlp', seed)
     model, _ = _fit(model, designs, torch.stack(X), torch.stack(Y), 400, seed,
                     link='identity')
+    return surrogate_loss_fn(model), n_designs * n_samples
 
+
+def surrogate_loss_fn(model):
+    """The surrogate as a loss: (phi, x, y) -> per-sample loss."""
     def loss_fn(p, x, y):
         return model(p, torch.cat([x, y.unsqueeze(1)], 1))
-    return loss_fn, n_designs * n_samples
+    loss_fn.model = model
+    return loss_fn
+
+
+def load_surrogate(path, problem):
+    """Rebuild the surrogate saved by this script."""
+    model = _make_surrogate(Adapter(problem), 'mlp', 0)
+    model.load_state_dict(torch.load(path, weights_only=False))
+    model.eval()
+    return surrogate_loss_fn(model)
 
 
 if __name__ == '__main__':
@@ -86,6 +100,10 @@ if __name__ == '__main__':
     flows, _ = train(problem, n_train=4000, epochs=1500, seed=0)
     surrogate, setup = fit_surrogate(problem, phi)
     print(f'surrogate fitted with {setup:,} evaluations (one-off, shared by every solve)')
+    os.makedirs(MODELS, exist_ok=True)
+    torch.save(phi, os.path.join(MODELS, 'design.pt'))
+    torch.save(surrogate.model.state_dict(), os.path.join(MODELS, 'surrogate.pt'))
+    print(f'  saved design and surrogate to {MODELS}/')
 
     rows = {k: [] for k in STYLE}
     for rho in RHOS:

@@ -18,10 +18,11 @@ import matplotlib.pyplot as plt
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dro.flows import Flow                                        # noqa: E402
+from dro.flows import Flow, load_flow                                        # noqa: E402
 from problem import Portfolio                                     # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
+MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 
 
 def train(problem, n_train=4000, epochs=800, batch=512, lr=3e-3, seed=0, every=10,
@@ -70,6 +71,28 @@ def train(problem, n_train=4000, epochs=800, batch=512, lr=3e-3, seed=0, every=1
     hist['stopped_at'] = best[1]
     flow.eval()
     return flow, hist
+
+
+class Generator:
+    """The fitted flow behind the (latent_dim, model(z)) interface the samplers expect.
+
+    One latent per asset and no discrete coordinate, so unlike the two-moons generator this
+    is a plain diffeomorphism of a standard normal -- which is also why a quadrature rule
+    over the latent costs m**n_assets here and prices itself out immediately.
+    """
+
+    def __init__(self, flow):
+        self.flow, self.latent_dim = flow, flow.dim
+
+    def __call__(self, z):
+        return self.flow(z)[0]
+
+    def save(self, path):
+        torch.save({'flow': self.flow.state_dict(), 'flow_config': self.flow.config()}, path)
+
+    @staticmethod
+    def load(path):
+        return Generator(load_flow(torch.load(path, weights_only=False)))
 
 
 def plot_training(hist, ax_loss, ax_kl):
@@ -147,3 +170,8 @@ if __name__ == '__main__':
           f'KL {hist["kl"][i]:.4f}   (last epoch would give KL {hist["kl"][-1]:.4f})')
     plot_summary(problem, flow, hist)
     plot_marginals(problem, flow)
+    os.makedirs(MODELS, exist_ok=True)
+    Generator(flow).save(os.path.join(MODELS, 'generator.pt'))
+    torch.save(problem.sample(200000, torch.Generator().manual_seed(7)),
+               os.path.join(MODELS, 'data.pt'))
+    print(f'  saved generator and nominal sample to {MODELS}/')

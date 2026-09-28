@@ -69,33 +69,64 @@ class ActNorm(nn.Module):
 class Flow(nn.Module):
     """RealNVP-style flow. forward: latent -> data. inverse: data -> latent."""
 
-    def __init__(self, dim, n_layers=6, hidden=64, seed=0):
+    def __init__(self, dim, n_layers=6, hidden=64, seed=0, split='alternating',
+                 interleave_actnorm=False, scale_cap=2.0):
+        """split='random' draws a fresh half of the coordinates to condition on at every
+        coupling instead of taking every other one, and interleave_actnorm puts a
+        normalisation before each coupling rather than one at the end. Both are free and
+        both matter once the dimension is large: on 784 MNIST pixels they take the held-out
+        negative log-likelihood from 512 to 486, and with twice the depth to 460. Neither
+        changes anything in two or ten dimensions, so the defaults are the old behaviour and
+        existing checkpoints load unchanged.
+
+        `scale_cap` bounds each coupling's log-scale, and it matters for a reason that held-
+        out likelihood alone will not reveal. The sampling direction multiplies by exp(s) at
+        every layer while the density direction divides by it, so a deep flow can fit a
+        density well and still generate points far outside the data. On these 784 pixels the
+        real range is about +-4; at the old cap of 2.0 a twelve-layer flow samples out to 67,
+        at 0.25 to 16.6 -- and the tighter cap also fits BETTER, 448 against 468. Anything
+        that uses the sampling path, which is everything the inner problem does, should
+        check the range of its samples and not only its likelihood.
+        """
         super().__init__()
         torch.manual_seed(seed)
-        self.dim = dim
-        layers = []
+        self.dim, self.split, self.scale_cap = dim, split, scale_cap
+        self.interleave_actnorm = interleave_actnorm
+        g = torch.Generator().manual_seed(seed)
+        layers, norms = [], []
         for i in range(n_layers):
             mask = torch.zeros(dim)
-            mask[i % 2::2] = 1.0
+            if split == 'random':
+                mask[torch.randperm(dim, generator=g)[:dim // 2]] = 1.0
+            else:
+                mask[i % 2::2] = 1.0
             if dim == 1:            # coupling needs >= 2 dims; fall back to actnorm only
                 mask = torch.ones(dim)
-            layers.append(AffineCoupling(dim, hidden, mask))
+            layers.append(AffineCoupling(dim, hidden, mask, scale_cap=scale_cap))
+            norms.append(ActNorm(dim))
         self.couplings = nn.ModuleList(layers)
+        self.norms = nn.ModuleList(norms) if interleave_actnorm else None
         self.actnorm = ActNorm(dim)
 
     def forward(self, z):
         """Latent -> data. Differentiable sampling path used by the inner problem."""
         logdet = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
-        for c in self.couplings:
+        for i, c in enumerate(self.couplings):
             z, ld = c(z)
             logdet = logdet + ld
+            if self.norms is not None:
+                z, ld = self.norms[i](z)
+                logdet = logdet + ld
         x, ld = self.actnorm(z)
         return x, logdet + ld
 
     def inverse(self, x):
         z, logdet = self.actnorm.inverse(x)
-        for c in reversed(self.couplings):
-            z, ld = c.inverse(z)
+        for i in reversed(range(len(self.couplings))):
+            if self.norms is not None:
+                z, ld = self.norms[i].inverse(z)
+                logdet = logdet + ld
+            z, ld = self.couplings[i].inverse(z)
             logdet = logdet + ld
         return z, logdet
 
@@ -107,7 +138,9 @@ class Flow(nn.Module):
     def config(self):
         """Everything needed to rebuild this flow, saved next to its weights."""
         return dict(dim=self.dim, n_layers=len(self.couplings),
-                    hidden=self.couplings[0].net[0].out_features)
+                    hidden=self.couplings[0].net[0].out_features,
+                    split=self.split, interleave_actnorm=self.norms is not None,
+                    scale_cap=self.scale_cap)
 
     @torch.no_grad()
     def sample(self, n, generator=None, temperature=1.0):
@@ -193,7 +226,10 @@ def load_flow(ckpt, key='flow'):
         n_layers = 1 + max(int(k.split('.')[1]) for k in sd if k.startswith('couplings.'))
         w = sd['couplings.0.net.0.weight']
         cfg = dict(dim=w.shape[1], n_layers=n_layers, hidden=w.shape[0])
-    flow = Flow(cfg['dim'], n_layers=cfg['n_layers'], hidden=cfg['hidden'], seed=0)
+    flow = Flow(cfg['dim'], n_layers=cfg['n_layers'], hidden=cfg['hidden'], seed=0,
+                split=cfg.get('split', 'alternating'),
+                interleave_actnorm=cfg.get('interleave_actnorm', False),
+                scale_cap=cfg.get('scale_cap', 2.0))
     flow.load_state_dict(sd)
     flow.eval()
     return flow

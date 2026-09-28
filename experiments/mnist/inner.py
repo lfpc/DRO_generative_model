@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dro.baselines import kl_weights                              # noqa: E402
 from dro.transforms import TRANSFORMS, project_to_ball            # noqa: E402
 
-CLASSES = (1.0, -1.0)
+from problem import CLASSES                                    # noqa: E402
 
 
 def nominal(problem, phi, x, y):
@@ -55,15 +55,15 @@ def latent_dro(problem, flows, phi, rho, family='shift', n=20000, steps=300, lr=
     and each class gets the same budget.
     """
     g = torch.Generator().manual_seed(seed)
-    tf = {s: TRANSFORMS[family](2) for s in CLASSES}
+    tf = {s: TRANSFORMS[family](flows[s].dim) for s in CLASSES}
     opt = torch.optim.Adam([p for s in CLASSES for p in tf[s].parameters()], lr=lr)
-    z = {s: torch.randn(n // 2, 2, generator=g) for s in CLASSES}
+    z = {s: torch.randn(n // len(CLASSES), flows[s].dim, generator=g) for s in CLASSES}
 
     for _ in range(steps):
         loss = 0.0
         for s in CLASSES:
             x, _ = flows[s](tf[s](z[s]))
-            loss = loss + (loss_fn or problem.loss)(phi, x, torch.full((x.shape[0],), s)).mean()
+            loss = loss + (loss_fn or problem.loss)(phi, x, torch.full((x.shape[0],), s, dtype=torch.long)).mean()
         opt.zero_grad()
         (-loss / len(CLASSES)).backward()
         opt.step()
@@ -75,14 +75,20 @@ def latent_dro(problem, flows, phi, rho, family='shift', n=20000, steps=300, lr=
         for s in CLASSES:
             xi, _ = flows[s](tf[s](z[s]))
             xs.append(xi)
-            ys.append(torch.full((xi.shape[0],), s))
+            ys.append(torch.full((xi.shape[0],), s, dtype=torch.long))
         xa, ya = torch.cat(xs), torch.cat(ys)
         return float(problem.risk(phi, xa, ya)), xa, ya
 
 
 # ---------------------------------------------------------------------------
-def plausibility(problem, x, y):
-    """Mean log-density of the adversarial points under the TRUE model.
+def plausibility(judge, x, y=None):
+    """Mean log-density of the adversarial points under the HELD-OUT judge flow.
+
+    Elsewhere in this suite this is the exact density of the true model. MNIST has none, so
+    the judge is a flow fitted to the 10,000 test images -- data neither the classifier nor
+    the class-conditional generator ever saw. It answers the same question, less sharply:
+    the judge and the generator are the same model class, so a shift the judge cannot see is
+    not thereby proven plausible.
 
     The common axis the three radii do not provide. A reweighting radius measures a
     divergence between weightings of one sample, a transport radius measures a distance in
@@ -90,7 +96,8 @@ def plausibility(problem, x, y):
     comparable. What is comparable is whether the points the adversary certifies against
     are points the world can produce.
     """
-    return float(problem.log_prob(x, y).mean())
+    with torch.no_grad():
+        return float(judge.log_prob(x).mean())
 
 class Counter:
     """Counts true-loss evaluations, in (design, sample) pairs.

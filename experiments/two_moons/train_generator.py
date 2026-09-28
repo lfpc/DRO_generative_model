@@ -20,10 +20,11 @@ import matplotlib.pyplot as plt
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dro.flows import Flow                                        # noqa: E402
+from dro.flows import Flow, load_flow                             # noqa: E402
 from problem import TwoMoons                                      # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
+MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 CLASSES = (1.0, -1.0)
 
 
@@ -76,6 +77,37 @@ def train(problem, n_train=4000, epochs=1500, batch=512, lr=3e-3, seed=0, every=
         flows[s].eval()
     hist['stopped_at'] = best[1]
     return flows, hist
+
+
+class Generator:
+    """The two class-conditional flows as one map of a standard normal.
+
+    Three latent coordinates: the first two are the input, the sign of the third picks the
+    class. Keeping the class inside the latent -- rather than drawing it separately -- is
+    what lets a single low-discrepancy sequence drive the whole generator, and it gives the
+    (latent_dim, model(z)) interface that the samplers elsewhere expect.
+    """
+
+    latent_dim = 3
+
+    def __init__(self, flows):
+        self.flows = flows
+
+    def __call__(self, z):
+        y = torch.where(z[:, 2] > 0, 1.0, -1.0)
+        x = torch.empty(z.shape[0], 2)
+        for s in CLASSES:
+            x[y == s], _ = self.flows[s](z[y == s, :2])
+        return torch.cat([x, y.unsqueeze(1)], 1)
+
+    def save(self, path):
+        torch.save({k: v for s, f in self.flows.items() for k, v in
+                    ((str(s), f.state_dict()), (str(s) + '_config', f.config()))}, path)
+
+    @staticmethod
+    def load(path):
+        ck = torch.load(path, weights_only=False)
+        return Generator({s: load_flow(ck, str(s)) for s in CLASSES})
 
 
 def sample_flows(flows, n, seed=2):
@@ -133,3 +165,8 @@ if __name__ == '__main__':
     print(f'  kept epoch {hist["stopped_at"]}: held out {hist["val"][i]:.3f}   '
           f'KL {hist["kl"][i]:.4f}   (last epoch would give {hist["kl"][-1]:.4f})')
     plot(problem, flows, hist)
+    os.makedirs(MODELS, exist_ok=True)
+    Generator(flows).save(os.path.join(MODELS, 'generator.pt'))
+    torch.save(problem.sample(200000, torch.Generator().manual_seed(7)),
+               os.path.join(MODELS, 'data.pt'))
+    print(f'  saved generator and nominal sample to {MODELS}/')

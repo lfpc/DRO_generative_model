@@ -12,7 +12,12 @@ experiments/**/results/
 *.pt
 *.h5
 *_log.txt
+log_*.txt
 tune_*.txt
+
+# Downloaded datasets. MNIST's raw IDX files are 53 MB and problem.py re-fetches them on
+# first use, so the repository carries the code that gets them rather than the bytes.
+experiments/mnist/data/
 
 # LaTeX build products
 *.aux

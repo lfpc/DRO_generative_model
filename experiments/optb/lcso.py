@@ -1,23 +1,4 @@
-"""The LCSO loop: fit a local surrogate, step on it, refit, repeat.
 
-`lcso.py` and `lcso_resample.py` in the project root fit the surrogate;
-`optimization_test.py` takes one step off the nominal design and checks it against the
-simulator. This closes that into an iterative optimizer, which is what has to be compared
-against derivative-free baselines.
-
-One iteration:
-
-  1. draw designs in a trust box of half-width `delta` around the incumbent and simulate
-     each one (this is the only thing charged to the budget),
-  2. fit or refit the surrogate on them,
-  3. take a step -- steepest descent, or the exactly solved trust-region Newton step when
-     the surrogate supplies a Hessian,
-  4. evaluate the proposed design with the simulator and accept or reject it on the ratio
-     of actual to predicted improvement, adapting `delta`.
-
-Step 4 is what makes the scheme safe: the surrogate is trusted only as far as it has just
-been shown to be right, so a bad fit costs one wasted design rather than the run.
-"""
 import torch
 
 from dro.method import trust_region_max
