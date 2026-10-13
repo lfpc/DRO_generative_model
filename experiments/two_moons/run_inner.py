@@ -2,17 +2,8 @@
 
     python3 run_inner.py
 
-Sweeps each adversary's radius and records what it costs the classifier. Two views,
-because the radii are in different units and only one of them is comparable:
-
-  left    worst-case risk against each method's own radius. Honest but not a like-for-like
-          comparison: a reweighting radius is a divergence between weightings of one
-          sample, a transport radius is a distance in input units, a latent radius is a
-          data-space divergence.
-  right   worst-case risk against the mean log-density of the points the adversary
-          certifies against, under the TRUE model. This is comparable, and it is the
-          question that matters for a physical design: damage is only meaningful if the
-          inputs that cause it can occur.
+Left: worst-case risk vs each method's own radius (units differ across methods).
+Right: the same risk vs the mean true log-density of the adversarial points.
 """
 import json
 import os
@@ -41,7 +32,7 @@ def sweep(problem, flows, phi, x, y):
     rows = {k: [] for k in STYLE}
     for rho in KL_RHOS:
         risk, w = inner.kl_dro(problem, phi, x, y, rho)
-        # reweighting moves no points: its samples are the observed ones, reweighted
+        # reweighting moves no points: weight the observed log-densities
         lp = float((w * problem.log_prob(x, y)).sum())
         rows['KL-DRO'].append((rho, risk, lp))
     for eps in W_EPS:
@@ -79,7 +70,6 @@ def plot(nom, lp_nom, rows):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     problem = TwoMoons(kind='poly', degree=5)
     x, y = problem.sample(20000, torch.Generator().manual_seed(0))
     phi = problem.fit(x, y, steps=3000)

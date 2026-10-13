@@ -2,22 +2,10 @@
 
     min_theta  sup_{Q in U(P)}  E_{(x,y) ~ Q} [ log(1 + exp(-y f_theta(x))) ]
 
-the synthetic binary-classification setting used for adversarially robust training and
-Wasserstein DRO (Sinha, Namkoong & Duchi 2018, Sec. 5). Two interleaving half-circles with
-Gaussian noise: not linearly separable, so the classifier has to be nonlinear, and the
-region between the arcs is where a shifted distribution does the damage.
-
-Random variable: the pair (x, y) with x in R^2 and y in {-1, +1}. The label is drawn first
-and the input conditionally, so a generative model of the inputs is class-conditional and
-an adversary that moves x leaves y intact -- the usual adversarial-example semantics.
-
-Decision variable: the weights of a small tanh network, flattened. `design_dim` is
-4 * hidden + 1.
-
-The density has no closed form, but each class-conditional is a Gaussian mixture along one
-arc parameter, so integrating that single parameter numerically gives p(x | y) to
-quadrature accuracy. That makes an exact KL available for validating the generator, which
-a purely geometric construction would not.
+(Sinha, Namkoong & Duchi 2018, Sec. 5.) y in {-1, +1} is drawn first, then x | y on a noisy
+half-circle, so an adversary that moves x leaves y intact. The classifier is either a small
+tanh network ('nn') or logistic regression on polynomial features ('poly'). log p(x | y) is
+exact up to a 1-d quadrature over the arc parameter.
 """
 import math
 
@@ -33,7 +21,6 @@ class TwoMoons:
         self.design_dim = (degree + 1) * (degree + 2) // 2 if kind == 'poly' \
             else 4 * hidden + 1
 
-    # -- the data ---------------------------------------------------------
     def _arc(self, t, y):
         """Centre of the noise kernel at arc parameter t, for class y in {-1, +1}."""
         upper = torch.stack([torch.cos(t), torch.sin(t)], -1)
@@ -49,13 +36,7 @@ class TwoMoons:
         return x, y
 
     def log_prob(self, x, y, n_quad=512, chunk=20000):
-        """log p(x | y), by midpoint quadrature over the arc parameter.
-
-        Each class-conditional is a continuous Gaussian mixture along one arc,
-        p(x|y) = (1/pi) int_0^pi N(x; c_y(t), sigma^2 I) dt, so a single-variable
-        quadrature gives it to essentially machine accuracy -- and with it an exact KL for
-        validating the generator, which a purely geometric construction would not provide.
-        """
+        """log p(x | y) = log (1/pi) int_0^pi N(x; c_y(t), sigma^2 I) dt, by midpoint rule."""
         t = math.pi * (torch.arange(n_quad, dtype=self.dtype) + 0.5) / n_quad
         cent = {s: self._arc(t, torch.full((n_quad,), s, dtype=self.dtype))
                 for s in (-1.0, 1.0)}
@@ -70,18 +51,8 @@ class TwoMoons:
             out.append(torch.where(yb > 0, per[1.0], per[-1.0]))
         return torch.cat(out)
 
-    # -- the classifier ---------------------------------------------------
-    # Two parameterisations of the same decision boundary, because they put the design in
-    # completely different places relative to a branch-trunk surrogate.
-    #
-    #   'nn'    a tanh network; the weights enter the score nonlinearly and are
-    #           permutation-symmetric (swapping two hidden units changes nothing), so a
-    #           surrogate fitted in the raw weight coordinates is fighting the geometry.
-    #   'poly'  logistic regression on polynomial features; the score is theta' phi(x),
-    #           LINEAR in the design. A branch-trunk surrogate <b(theta), t(x)> can
-    #           represent that exactly with b = identity, which is the structure the
-    #           architecture was built for -- and the structure a physical design problem
-    #           usually has, where a handful of parameters enter a smooth response.
+    # 'nn': score nonlinear and permutation-symmetric in the weights.
+    # 'poly': score theta' phi(x) is linear in the design (easy for a branch-trunk surrogate).
     def _features(self, x):
         """Polynomial features up to `degree`, including the constant."""
         cols = [torch.ones_like(x[:, :1])]
@@ -106,17 +77,10 @@ class TwoMoons:
         return (torch.tanh(x @ W1 + b1) @ W2 + b2).squeeze(-1)
 
     def loss(self, phi, x, y):
-        """Per-sample logistic loss, with a ridge penalty on the weights.
+        """Per-sample logistic loss plus a ridge penalty.
 
-        The penalty is not cosmetic. Without it the problem is separable, so the risk
-        falls monotonically just by scaling theta up and the optimum is at infinity; boxed
-        in, it sits in a corner of the design box, and the risk surface is a long flat
-        plateau leading to it. That is the worst case for a trust-region method whose
-        acceptance test is driven by sampling noise -- it stalls on the plateau while an
-        exact gradient crawls to the corner, and the comparison measures that rather than
-        the surrogate. With a ridge term the optimum is interior and the problem is
-        strongly convex, which is also the structure the target application has: a bounded
-        objective (area plus a penalised failure probability) with an interior optimum.
+        The ridge keeps the optimum interior: without it the data are nearly separable and
+        the risk keeps falling as theta is scaled up.
         """
         pen = self.ridge * (phi ** 2).sum()
         return torch.nn.functional.softplus(-y * self.logits(phi, x)) + pen

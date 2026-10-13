@@ -1,71 +1,20 @@
-"""Robustness of the nominal design, read off the surrogate, with every number error-barred.
+"""Robustness of the nominal muon-shield design, read off the LCSO surrogate.
 
-The questions, and how each answer is established rather than asserted:
+Per-parameter sensitivity (gradient, curvature, exact one-at-a-time), Hessian spectrum,
+active subspace, worst directions (+grad, trust-region maximizer of the quadratic model,
+projected-gradient ascent in the box) and walks along them, checked with the simulator.
+Every number gets a jackknife error over --n_folds disjoint muon folds (muon i -> fold i % K).
 
-  which parameters matter     the gradient, the diagonal curvature, and the exact
-                              one-at-a-time response to a full +-delta move of each single
-                              parameter. Each comes with a jackknife error over disjoint
-                              muon folds, and is called RESOLVED only if it exceeds
-                              --n_sigma of it. The ranking itself is re-derived in every
-                              fold, so the table says how often each parameter really is
-                              in the top few.
-  which directions are worst  first order (+grad), second order (the trust-region
-                              maximizer of the quadratic model on a ball, with its KKT
-                              residual checked), and the worst design in the whole
-                              tolerance box, found by projected gradient ascent on the
-                              surrogate. A direction is only a conclusion if it is stable:
-                              every one is re-derived per fold and reported with the angle
-                              it moves by.
-  how curved the response is  the Hessian spectrum with jackknife errors, and the active
-                              subspace of the per-muon response, summarised by a
-                              participation ratio rather than an eyeballed knee.
-  how far the model reaches   the quadratic model is compared against the surrogate itself
-                              along every direction, and each walk reports the |t| out to
-                              which they agree within --quad_tol. Second-order statements
-                              beyond that range are not made.
-  is any of it real           every direction is walked with the simulator on the same
-                              muons, as grad_test.py does, and the difference is quoted as
-                              a z-score against the combined uncertainty.
+Frame: u = 0 is the nominal design, u_i = +-1 puts parameter i on the face of the +-delta box.
 
-Everything is in the NORMALIZED frame: u = 0 is the nominal design and u_i = +-1 puts
-parameter i on the face of the +-delta box the surrogate was trained in (delta = 0.1, so
-+-10% of its nominal value). Two of the 43 parameters (the negative NI of magnets 6 and 7)
-have phi_0 < 0, so for those u > 0 means a LARGER |NI|. The tolerance box reaches
-||u|| = sqrt(43) = 6.6 at its corners and the designs lcso.py trains on sit at
-||u|| ~ sqrt(43/3) = 3.8, which is the scale --t_max should be read against.
+The logit is z(u, x) = <b(u), t(x)> + bias, so one pass over the muons accumulating
+    T = sum w s t,   A = sum w s (1 - 2p) t t^T,   S = sum w s^2 t t^T     (s = p(1-p))
+gives grad = J^T T, hess = J^T A J + d2(b.T)/du2 and active = J^T S J / sum w, with J = db/du
+from autograd on the branch net alone. The trunk features of --n_cache muons are cached, so
+the hits of any design are then one matmul (scans, Monte Carlo, ascent).
 
-How it is affordable. The logit is z(u, x) = <b(u), t(x)> + bias and the muon side t(x)
-carries no design dependence, so ONE pass over the muons accumulating
-
-    T = sum_x w s_x t_x                   (p,)     with p_x = sigma(z), s_x = p_x(1-p_x)
-    A = sum_x w s_x (1 - 2 p_x) t_x t_x^T (p, p)
-    S = sum_x w s_x^2 t_x t_x^T           (p, p)
-
-reconstructs, exactly and with no further muon work,
-
-    H    = sum_x w p_x                    the weighted expected hits
-    grad = J^T T                          J = db/du at the nominal design
-    hess = J^T A J + d2(b.T)/du2
-    C    = J^T S J / sum_x w              the active subspace of the per-muon response
-
-where J and d2(b.T)/du2 come from autograd on the branch net alone -- 43 inputs, no muons
-involved, so the cost of the Hessian is independent of the muon count. Those accumulators
-are kept per fold (muon i goes to fold i % --n_folds, a systematic split that survives any
-ordering in the file), which is what makes every quantity above jackknife-able for free.
---check verifies grad and hess against LCSONet.grad_phi / hess_phi on a small batch.
-
-The same pass caches the trunk features of --n_cache muons -- strided across the whole
-sample, not the first block -- after which the hits of ANY design are one matmul. That
-pays for the one-at-a-time scans, the Monte Carlo over the box and the ascent. The ascent
-runs on half of those folds and is scored on the other half, so the worst case it reports
-is a held-out number rather than the subsample it was fitted to.
-
-A caveat worth keeping in view: H depends on the design only through the p branch outputs,
-so at most p independent directions exist. outputs/lcso_model.pt has p = 8;
-lcso_model_big.pt has p = 128.
-
-    python robustness.py --no_sim --n_muons 20000000          # analysis only, no simulator
-    python robustness.py --n_muons 50000000 --n_muons_sim 5000000 --n_points 5
+    python robustness.py --no_sim --n_muons 20000000          # surrogate only
+    python robustness.py --n_muons 50000000 --n_muons_sim 5000000
     python robustness.py --muons data --dirs ascent,worst,pga,corner,random
 """
 import argparse
@@ -91,91 +40,49 @@ class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter,
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
 parser.add_argument('--model', default='outputs/lcso_model.pt')
 parser.add_argument('--muons', default='gen', choices=['gen', 'data'],
-                    help="'gen' samples the generative flow (unweighted, what lcso.py "
-                         "trains on); 'data' reads the real file (per-muon weights, which "
-                         "every sum then carries)")
-parser.add_argument('--temperature', type=float, default=1.0, help='gen: flow temperature')
-parser.add_argument('--seed', type=int, default=0,
-                    help='Base seed: the muon blocks (gen), the random direction, the '
-                         'Monte Carlo and the ascent restarts')
-parser.add_argument('--pz_min', type=float, default=None,
-                    help='gen: reject sampled muons below this p_z (GeV)')
-parser.add_argument('--pt_max', type=float, default=None,
-                    help='gen: reject sampled muons above this p_t (default 14)')
+                    help='gen: flow samples (unweighted); data: the real file (weighted)')
+parser.add_argument('--temperature', type=float, default=1.0, help='flow temperature (gen)')
+parser.add_argument('--seed', type=int, default=0)
+parser.add_argument('--pz_min', type=float, default=None, help='reject gen muons below this p_z')
+parser.add_argument('--pt_max', type=float, default=None, help='reject gen muons above this p_t')
 parser.add_argument('--n_muons', type=int, default=int(2e7),
-                    help='Muons for the derivatives (one pass; 0 = all of the file)')
+                    help='muons for the derivatives (0 = all)')
 parser.add_argument('--n_muons_sim', type=int, default=0,
-                    help='Muons for the walks (0 = same as --n_muons). These are the first '
-                         '--n_muons_sim of the same sample')
-parser.add_argument('--n_folds', type=int, default=8,
-                    help='Disjoint muon folds. Every reported number is jackknifed over '
-                         'them, so this is what turns the estimates into conclusions. '
-                         'Muon i goes to fold i %% n_folds, which is immune to any '
-                         'ordering in the muon file. 1 disables the error bars')
-parser.add_argument('--n_sigma', type=float, default=3.0,
-                    help='How many jackknife sigma a quantity must exceed to be called '
-                         'resolved')
+                    help='muons for the walks (0 = n_muons)')
+parser.add_argument('--n_folds', type=int, default=8, help='jackknife folds (>= 2)')
+parser.add_argument('--n_sigma', type=float, default=3.0, help='significance for "resolved"')
 parser.add_argument('--n_cache', type=int, default=int(1e6),
-                    help='Muons whose trunk features are kept for the cheap scans, taken '
-                         'strided across the whole sample. Costs n_cache * p * 4 bytes on '
-                         'the device (512 MB at p = 128)')
+                    help='muons whose trunk features are cached')
 parser.add_argument('--dirs', default='ascent,worst,pga,random',
-                    help='Directions to walk, comma separated. ascent (+grad, first-order '
-                         'worst), descent (-grad, what grad_test.py walks), worst (the '
-                         'trust-region maximizer of the quadratic model at radius '
-                         '--t_max), corner (sign(grad): the worst box corner to first '
-                         'order), pga (projected gradient ascent on the surrogate inside '
-                         'the box: the worst design found, not just a direction), hess<k> '
-                         '(k-th Hessian eigenvector, most positive first), act<k> (k-th '
-                         'active-subspace direction), random (a control)')
-parser.add_argument('--t_max', type=float, default=1.0,
-                    help='Half-length of the walks, in normalized units (an L2 step)')
-parser.add_argument('--n_points', type=int, default=5,
-                    help='Points per walk (forced odd so the nominal design is one, and it '
-                         'is evaluated once for all the directions)')
-parser.add_argument('--n_repeats', type=int, default=1,
-                    help='Simulate each design this many times. The transport is '
-                         'stochastic, so the spread over repeats is its MC noise')
+                    help='directions to walk: ascent, descent, worst, corner, pga, random, '
+                         'hess<k>, act<k>')
+parser.add_argument('--t_max', type=float, default=1.0, help='walk half-length (L2, normalized)')
+parser.add_argument('--n_points', type=int, default=5, help='points per walk (made odd)')
+parser.add_argument('--n_repeats', type=int, default=1, help='simulator runs per design')
 parser.add_argument('--quad_tol', type=float, default=0.2,
-                    help='Relative gap at which the quadratic model is declared to have '
-                         'stopped describing the surrogate along a direction')
-parser.add_argument('--no_sim', dest='sim', action='store_false',
-                    help='Skip the simulator. The walks are still evaluated with the '
-                         'surrogate over the full muon sample')
+                    help='relative gap where the quadratic model counts as failed')
+parser.add_argument('--no_sim', dest='sim', action='store_false', help='skip the simulator')
 parser.add_argument('--no_walk', dest='walk', action='store_false',
-                    help='Skip the second pass entirely: the walks then come from the '
-                         'cached subsample only')
+                    help='walks from the cache only (no second pass)')
 parser.add_argument('--no_check', dest='check', action='store_false',
-                    help='Skip the autograd cross-check of the frozen-trunk derivatives')
-parser.add_argument('--n_mc', type=int, default=4096,
-                    help='Designs drawn uniformly in the tolerance box, for the reference '
-                         'distribution of H/H_0')
+                    help='skip the autograd cross-check')
+parser.add_argument('--n_mc', type=int, default=4096, help='random designs in the box')
 parser.add_argument('--pga_restarts', type=int, default=4)
 parser.add_argument('--pga_steps', type=int, default=200)
 parser.add_argument('--pga_lr', type=float, default=0.05)
-parser.add_argument('--top', type=int, default=15, help='Rows in the printed tables')
-parser.add_argument('--block', type=int, default=int(2e7), help='Muons held in memory')
-parser.add_argument('--chunk', type=int, default=2 ** 19,
-                    help='Muon chunk for the surrogate. The accumulators hold a few '
-                         'chunk x p temporaries, so this and p set the device memory')
+parser.add_argument('--top', type=int, default=15, help='rows in the printed tables')
+parser.add_argument('--block', type=int, default=int(2e7), help='muons held in memory')
+parser.add_argument('--chunk', type=int, default=2 ** 19, help='muon chunk on the device')
 parser.add_argument('--out_dir', default='outputs')
 parser.add_argument('--device', default='cuda')
 args = parser.parse_args()
-if args.n_cache < 1:
-    parser.error('--n_cache must be at least 1: the scans, the Monte Carlo and the ascent '
-                 'all run against the cached features')
-if args.n_folds < 1:
-    parser.error('--n_folds must be at least 1')
 
-# The p x p accumulators are formed by float32 matmuls and cast up per chunk; TF32 would
-# do them at 10 mantissa bits, which is not enough for a curvature that is a difference
-# of much larger terms.
+# The p x p accumulators are differences of large terms: TF32 is not precise enough.
 torch.backends.cuda.matmul.allow_tf32 = False
 
 DEVICE = torch.device(args.device)
 FIGS = os.path.join(args.out_dir, 'figs')
 os.makedirs(FIGS, exist_ok=True)
-COLS = ['px', 'py', 'pz', 'x', 'y', 'z', 'pdg', 'weight']
 GEN = args.muons == 'gen'
 K = args.n_folds
 NS = args.n_sigma
@@ -185,39 +92,34 @@ REPORT = []
 
 
 def say(line=''):
-    """Print and keep, so the whole analysis lands in one file at the end."""
+    """Print and keep for robustness_report.txt."""
     print(line)
     REPORT.append(line)
 
 
-# =============================================================================
-# Statistics: the jackknife over muon folds
-# =============================================================================
 def jack_se(loo):
-    """Jackknife standard error from leave-one-out replicates loo (K, ...).
-
-    Every quantity here is a smooth function of sums over muons, which is exactly the
-    case the delete-one jackknife covers. With one fold there is nothing to estimate.
-    """
+    """Jackknife standard error from leave-one-out replicates loo (K, ...)."""
     loo = np.asarray(loo, dtype=np.float64)
-    if loo.shape[0] < 2:
-        return np.zeros(loo.shape[1:])
     m = loo.mean(0)
     return np.sqrt((loo.shape[0] - 1) / loo.shape[0] * ((loo - m) ** 2).sum(0))
 
 
 def pm(value, se, fmt='.3f'):
-    """value +- se, or just the value when there are no folds to estimate it from."""
-    return f'{value:{fmt}}' if K < 2 else f'{value:{fmt}} +- {se:{fmt}}'
+    return f'{value:{fmt}} +- {se:{fmt}}'
 
 
 def resolved(value, se):
-    return K < 2 or abs(value) > NS * se
+    return abs(value) > NS * se
+
+
+def unit(v):
+    v = np.asarray(v, dtype=np.float64)
+    return v / np.linalg.norm(v)
 
 
 def angle_deg(a, b):
-    """Angle between two directions, sign-insensitive (eigenvectors have no sign)."""
-    c = abs(float(np.dot(a, b)) / max(np.linalg.norm(a) * np.linalg.norm(b), 1e-300))
+    """Sign-insensitive angle between two directions."""
+    c = abs(float(np.dot(a, b)) / (np.linalg.norm(a) * np.linalg.norm(b)))
     return float(np.degrees(np.arccos(min(1.0, c))))
 
 
@@ -230,7 +132,7 @@ for attr, val in (('PZ_MIN', args.pz_min), ('PT_MAX', args.pt_max)):
         say(f'kinematic envelope: {attr} = {val}')
 
 shield = ShipMuonShieldCuda(n_samples=1, uniform_fields=True)
-phi_0 = shield.initial_phi                                   # PHYSICAL
+phi_0 = shield.initial_phi                                   # physical
 model, cfg = load_surrogate(args.model, phi_0)
 model.eval().to(DEVICE)
 D = model.dim
@@ -238,25 +140,19 @@ labels = [f'M{m}:{shield.idx_mag[i].split("[")[0]}' for m, i in shield.params_id
 magnet = np.array([m for m, _ in shield.params_idx.tolist()])
 
 if GEN:
-    # Before any seeding: building the flow draws from the global RNG, so a lazy load
-    # inside the first block would shift every later re-draw of that same block.
-    shield._load_flow()
+    shield._load_flow()   # before any seeding: building the flow draws from the global RNG
 
 
 def read_muons(lo, hi):
-    """Muons [lo, hi) as (raw, weights); weights is None when there are none.
-
-    'data' reads the real file with the transverse origin reset, as _load_muons does, and
-    keeps its weight column -- those weights are far from uniform (O(0.1) to O(1e3)), so
-    dropping them would not give the physical rate. 'gen' draws from the flow, where one
-    sample is one muon and the weights are all 1; the block is seeded from its offset so
-    that both passes over the same offsets see the same muons.
-    """
+    """Muons [lo, hi) as (raw, weights). gen: seeded by lo so both passes see the same
+    muons, weights 1. data: transverse origin reset as in _load_muons, file weights."""
     if GEN:
         torch.manual_seed(args.seed + lo)
-        return shield.sample_gen(n_samples=hi - lo, temperature=args.temperature), None
+        x = shield.sample_gen(n_samples=hi - lo, temperature=args.temperature)
+        return x, torch.ones(x.shape[0])
     with h5py.File(shield.muons_file, 'r') as f:
-        x = np.stack([np.asarray(f[k][lo:hi], dtype=np.float32) for k in COLS], axis=1)
+        x = np.stack([np.asarray(f[k][lo:hi], dtype=np.float32)
+                      for k in ['px', 'py', 'pz', 'x', 'y', 'z', 'pdg', 'weight']], axis=1)
     x[:, 3], x[:, 4], x[:, 5] = 0.0, 0.0, -1.0
     x = torch.from_numpy(x)
     return x, x[:, 7]
@@ -277,7 +173,7 @@ say(f'model: {os.path.basename(args.model)} {cfg["model_type"]}, p = {cfg["p"]},
 say(f'statistics: {K} muon folds, resolved means > {NS:g} jackknife sigma')
 
 # =============================================================================
-# One pass over the muons: the frozen-trunk accumulators per fold, and the cache
+# One pass over the muons: accumulators per fold, and the feature cache
 # =============================================================================
 u_0 = torch.zeros(D, device=DEVICE)
 b_0 = model.branch_net(u_0.unsqueeze(0)).squeeze(0).detach()   # (p,)
@@ -285,13 +181,12 @@ P = b_0.numel()
 T_acc = torch.zeros(K, P, dtype=torch.float64, device=DEVICE)
 A_acc = torch.zeros(K, P, P, dtype=torch.float64, device=DEVICE)
 S_acc = torch.zeros(K, P, P, dtype=torch.float64, device=DEVICE)
-# n, sum w, H = sum wp, sum w^2 p(1-p), sum (wp)^2 -- the last one only to report how many
-# muons the hit sum actually rests on.
+# per fold: n, sum w, H = sum wp, sum w^2 p(1-p), sum (wp)^2
 stat = torch.zeros(K, 5, dtype=torch.float64, device=DEVICE)
 FOLD = [slice(k, None, K) for k in range(K)]
 cache_t, cache_w = [], []
 n_cached, seen = 0, 0
-stride = max(1, n // args.n_cache)                 # cache spread over the WHOLE sample
+stride = max(1, n // args.n_cache)                 # cache spread over the whole sample
 t0 = time.time()
 
 for lo in range(0, n, args.block):
@@ -299,26 +194,21 @@ for lo in range(0, n, args.block):
     with torch.no_grad():
         for c in range(0, raw.shape[0], args.chunk):
             xb = raw[c:c + args.chunk, :7].to(DEVICE)
+            wb = w[c:c + args.chunk].to(DEVICE)
             tb = model.trunk_net(model.normalize_muons(xb))              # (chunk, p)
             pr = torch.sigmoid(tb @ b_0 + model.bias)
             s = pr * (1 - pr)
-            wb = None if w is None else w[c:c + args.chunk].to(DEVICE)
-            ws = s if wb is None else s * wb
-            wq = s * s if wb is None else s * s * wb
+            ws, wq = s * wb, s * s * wb
             for k in range(K):
                 f = FOLD[k]
-                tk, prk, sk = tb[f], pr[f], s[f]
-                wk = None if wb is None else wb[f]
-                wp = (prk if wk is None else prk * wk).double()
+                tk, prk, wk = tb[f], pr[f], wb[f]
+                wp = (prk * wk).double()
                 stat[k, 0] += tk.shape[0]
-                stat[k, 1] += tk.shape[0] if wk is None else wk.double().sum()
+                stat[k, 1] += wk.double().sum()
                 stat[k, 2] += wp.sum()
-                stat[k, 3] += (sk if wk is None else sk * wk ** 2).double().sum()
+                stat[k, 3] += (s[f] * wk ** 2).double().sum()
                 stat[k, 4] += (wp ** 2).sum()
-                # float32 matmuls cast up per fold and chunk: a float64 copy of the muon
-                # features would be the largest array in the loop, and within one chunk
-                # the sums are far from stalling. The folds partition the chunk, so the
-                # split costs no extra arithmetic.
+                # float32 matmul per chunk, summed in float64
                 T_acc[k] += (ws[f] @ tk).double()
                 A_acc[k] += ((tk * (ws[f] * (1 - 2 * prk)).unsqueeze(1)).T @ tk).double()
                 S_acc[k] += ((tk * wq[f].unsqueeze(1)).T @ tk).double()
@@ -327,25 +217,20 @@ for lo in range(0, n, args.block):
                 if first < tb.shape[0]:
                     j = min(args.n_cache - n_cached, tb[first::stride].shape[0])
                     cache_t.append(tb[first::stride][:j].clone())
-                    if wb is not None:
-                        cache_w.append(wb[first::stride][:j].clone())
+                    cache_w.append(wb[first::stride][:j].clone())
                     n_cached += j
             seen += tb.shape[0]
     say(f'  derivatives: {min(lo + args.block, n):,}/{n:,} muons ({time.time() - t0:.0f}s)')
     del raw, w
 
-Tc = torch.cat(cache_t)                                # (n_cached, p) on DEVICE
-wc = torch.cat(cache_w) if cache_w else None
-fc = (torch.arange(n_cached, device=DEVICE) % K)       # the cache's own folds
+Tc = torch.cat(cache_t)                                # (n_cached, p)
+wc = torch.cat(cache_w)
+fc = torch.arange(n_cached, device=DEVICE) % K         # the cache's own folds
 del cache_t, cache_w
 stat_np = stat.cpu().numpy()
 n_mu, sumw, H0, var0, sq0 = stat_np.sum(0)
 
-if H0 <= 0:
-    raise SystemExit('the surrogate predicts no hits at all on this sample: every ratio '
-                     'below would be 0/0. Check --model and --muons.')
-
-# --- the design side, exactly, by autograd on the branch net alone -----------
+# The design side, by autograd on the branch net alone (no muons involved).
 J = torch.autograd.functional.jacobian(
     lambda u: model.branch_net(u.unsqueeze(0)).squeeze(0), u_0).detach()           # (p, D)
 Jd = J.double()
@@ -357,20 +242,19 @@ def derive(T, A, S, w_sum):
         lambda u: model.branch_net(u.unsqueeze(0)).squeeze(0) @ T.float(), u_0).detach()
     g = (Jd.T @ T).cpu().numpy()
     h = (Jd.T @ A @ Jd + Hb.double()).cpu().numpy()
-    a = ((Jd.T @ S @ Jd) / max(w_sum, 1e-30)).cpu().numpy()
+    a = ((Jd.T @ S @ Jd) / w_sum).cpu().numpy()
     return g, 0.5 * (h + h.T), 0.5 * (a + a.T)
 
 
-grad, hess, act = derive(T_acc.sum(0), A_acc.sum(0), S_acc.sum(0), sumw)
-# Leave-one-out replicates: the same functionals of the sample with one fold removed.
-LOO = [derive(T_acc.sum(0) - T_acc[k], A_acc.sum(0) - A_acc[k], S_acc.sum(0) - S_acc[k],
-              sumw - stat_np[k, 1]) for k in range(K)] if K > 1 else []
-H0_loo = np.array([H0 - stat_np[k, 2] for k in range(K)]) if K > 1 else np.zeros((0,))
-g_loo = np.array([l[0] for l in LOO]) if K > 1 else np.zeros((0, D))
-h_loo = np.array([l[1] for l in LOO]) if K > 1 else np.zeros((0, D, D))
-a_loo = np.array([l[2] for l in LOO]) if K > 1 else np.zeros((0, D, D))
+Tt, At, St = T_acc.sum(0), A_acc.sum(0), S_acc.sum(0)
+grad, hess, act = derive(Tt, At, St, sumw)
+# leave-one-fold-out replicates
+g_loo, h_loo, a_loo = (np.array(x) for x in zip(*[
+    derive(Tt - T_acc[k], At - A_acc[k], St - S_acc[k], sumw - stat_np[k, 1])
+    for k in range(K)]))
+H0_loo = H0 - stat_np[:, 2]
 
-n_eff = H0 ** 2 / max(sq0, 1e-300)     # Kish: how many muons the hit sum really rests on
+n_eff = H0 ** 2 / sq0     # Kish: how many muons the hit sum really rests on
 say('')
 say(f'H_0 = {pm(H0, jack_se(H0_loo), ".4g")} {"" if GEN else "weighted "}hits over '
     f'{int(n_mu):,} muons (total weight {sumw:,.1f})')
@@ -382,26 +266,22 @@ if n_eff < 100:
     say(f'  WARNING: the hit sum rests on ~{n_eff:.0f} muons. Every number below, and '
         f'every error bar on it,\n  is dominated by that handful; raise --n_muons before '
         f'reading anything as established.')
-if K > 1:
-    say(f'  error bars are jackknife over {K} muon folds -- the MUON-SAMPLING error only. '
-        f'They say nothing\n  about whether the surrogate itself is right, which is what '
-        f'the simulator walks are for. The\n  errors are themselves uncertain to about '
-        f'{1 / np.sqrt(2 * (K - 1)):.0%}.')
+say(f'  error bars are jackknife over {K} muon folds -- the MUON-SAMPLING error only. '
+    f'They say nothing\n  about whether the surrogate itself is right, which is what '
+    f'the simulator walks are for. The\n  errors are themselves uncertain to about '
+    f'{1 / np.sqrt(2 * (K - 1)):.0%}.')
 say(f'cached the trunk features of {n_cached:,} muons (stride {stride}, '
     f'{n_cached * P * 4 / 2 ** 20:.0f} MB)')
 say(f'the design enters only through the {P} branch features, so that is the most '
     f'directions this surrogate can tell apart')
 
-# --- cross-check the frozen-trunk identities against autograd ----------------
-if args.check:
+if args.check:   # the frozen-trunk identities against LCSONet.grad_phi / hess_phi
     xb, wb = read_muons(0, min(2 ** 15, n))
-    xd = xb[:, :7].to(DEVICE)
-    wd = None if wb is None else wb.to(DEVICE)
+    xd, wd = xb[:, :7].to(DEVICE), wb.to(DEVICE)
     with torch.no_grad():
         tb = model.trunk_net(model.normalize_muons(xd))
         pr = torch.sigmoid(tb @ b_0 + model.bias)
-        s = pr * (1 - pr)
-        sw = s if wd is None else s * wd
+        sw = pr * (1 - pr) * wd
         Tk, Ak = sw @ tb, (tb * (sw * (1 - 2 * pr)).unsqueeze(1)).T @ tb
     Hbk = torch.autograd.functional.hessian(
         lambda u: model.branch_net(u.unsqueeze(0)).squeeze(0) @ Tk, u_0).detach()
@@ -415,101 +295,79 @@ if args.check:
     del xb, wb, xd, wd
 
 # =============================================================================
-# Cheap surrogate evaluation against the cached features
+# Cheap surrogate evaluation on the cached features
 # =============================================================================
 CACHE_BUDGET = 2 ** 24            # elements held at once in the design x muon product
 
 
 @torch.no_grad()
 def cached_folds(U):
-    """Expected (weighted) hits of NORMALIZED designs U (m, D), per cache fold: (m, K).
-
-    The trunk features are already computed, so this is a matmul -- the whole point of
-    freezing the muon side. Splitting by fold costs one scatter-add and buys the same
-    jackknife on every cached quantity.
-    """
-    U = torch.as_tensor(U, dtype=torch.float32)
-    U = U.unsqueeze(0) if U.dim() == 1 else U
-    U = U.to(DEVICE)
+    """Expected weighted hits of normalized designs U (m, D), per cache fold: (m, K)."""
+    U = torch.as_tensor(U, dtype=torch.float32).to(DEVICE)
     out = torch.zeros(U.shape[0], K, dtype=torch.float64, device=DEVICE)
-    m_batch = max(1, min(U.shape[0], CACHE_BUDGET // max(1, n_cached)))
+    m_batch = max(1, min(U.shape[0], CACHE_BUDGET // n_cached))
     for i in range(0, U.shape[0], m_batch):
         b = model.branch_net(U[i:i + m_batch])                      # (m, p)
         step = max(1, CACHE_BUDGET // b.shape[0])
         for c in range(0, n_cached, step):
-            pr = torch.sigmoid(b @ Tc[c:c + step].T + model.bias)    # (m, chunk)
-            if wc is not None:
-                pr = pr * wc[c:c + step]
+            pr = torch.sigmoid(b @ Tc[c:c + step].T + model.bias) * wc[c:c + step]
             out[i:i + b.shape[0]].index_add_(1, fc[c:c + step], pr.double())
     return out.cpu().numpy()
 
 
 H0c_folds = cached_folds(np.zeros((1, D)))[0]                        # (K,)
 H0c = H0c_folds.sum()
-rate_c, rate_f = H0c / (float(wc.double().sum()) if wc is not None else n_cached), H0 / sumw
+rate_c, rate_f = H0c / float(wc.double().sum()), H0 / sumw
 say(f'the cache reproduces the nominal hit rate to {rate_c / rate_f - 1:+.1%} '
     f'({rate_c:.4e} against {rate_f:.4e})')
 
 
+def fold_ratio(f):
+    """H(u)/H(0) and its jackknife error from per-fold hits f (m, K). Taken fold by fold,
+    so the sampling error of H_0 cancels."""
+    loo = (f.sum(1, keepdims=True) - f) / (H0c - H0c_folds)[None, :]
+    return f.sum(1) / H0c, jack_se(loo.T)
+
+
 def cached_ratio(U):
-    """H(u)/H(0) over the cached muons, with its jackknife error: (mean, se), each (m,).
-
-    The ratio is taken fold by fold, so the numerator and the denominator move together
-    and the (large) sampling error of H_0 itself cancels out of it.
-    """
-    f = cached_folds(U)                                              # (m, K)
-    tot = f.sum(1) / H0c
-    if K < 2:
-        return tot, np.zeros_like(tot)
-    loo = (f.sum(1, keepdims=True) - f) / (H0c - H0c_folds)[None, :]  # (m, K)
-    return tot, jack_se(loo.T)
+    return fold_ratio(cached_folds(U))
 
 
-def hits_cached_grad(u, mask=None):
-    """The same sum, differentiable in u, for the projected-gradient search. `mask` is a
-    0/1 weight over the cached muons, which is how the ascent is kept to its own half."""
+def hits_cached_grad(u, mask):
+    """Differentiable cached hits of one design, restricted to the muons in `mask`."""
     b = model.branch_net(u.unsqueeze(0)).squeeze(0)
     acc = 0.0
     for c in range(0, n_cached, 2 ** 20):
         sl = slice(c, c + 2 ** 20)
-        pr = torch.sigmoid(Tc[sl] @ b + model.bias)
-        if wc is not None:
-            pr = pr * wc[sl]
-        acc = acc + (pr.sum() if mask is None else (pr * mask[sl]).sum())
+        pr = torch.sigmoid(Tc[sl] @ b + model.bias) * wc[sl]
+        acc = acc + (pr * mask[sl]).sum()
     return acc
+
 
 # =============================================================================
 # 1. Which parameters matter
 # =============================================================================
-# g_i is the change in hits for a full tolerance move of parameter i alone, to first
-# order; the one-at-a-time columns are the surrogate's exact answer to the same question,
-# so the gap between them is that parameter's own nonlinearity.
+# grad_i: first order for a full tolerance move of parameter i; oat: the exact answer.
 E = np.concatenate([np.eye(D), -np.eye(D)])
-oat, oat_se = cached_ratio(E)
+oat_fold = cached_folds(E)
+oat, oat_se = fold_ratio(oat_fold)
 oat_p, oat_p_se = oat[:D] - 1.0, oat_se[:D]
 oat_m, oat_m_se = oat[D:] - 1.0, oat_se[D:]
 lin = grad / H0
-lin_loo = (g_loo / H0_loo[:, None]) if K > 1 else np.zeros((0, D))
-lin_se = jack_se(lin_loo)
+lin_se = jack_se(g_loo / H0_loo[:, None])
 quad = 0.5 * np.diag(hess) / H0
-quad_se = jack_se(np.array([0.5 * np.diag(h_loo[k]) / H0_loo[k] for k in range(K)])
-                  if K > 1 else np.zeros((0, D)))
+quad_se = jack_se(np.array([0.5 * np.diag(h_loo[k]) / H0_loo[k] for k in range(K)]))
 worst_oat = np.where(oat_p >= oat_m, oat_p, oat_m)                  # the bad side
 worst_se = np.where(oat_p >= oat_m, oat_p_se, oat_m_se)
-rank_key = np.maximum(np.abs(oat_p), np.abs(oat_m))
-order = np.argsort(-rank_key)
+order = np.argsort(-np.maximum(np.abs(oat_p), np.abs(oat_m)))
 
-# Does the RANKING survive resampling? The values can be pinned tightly and their order
-# still be arbitrary, so the table is rebuilt in every replicate and each parameter's
-# best and worst rank across them is what gets reported.
+# The ranking per leave-one-out replicate: best and worst place of each parameter.
 TOPN = min(5, D)
-ranks = np.tile(np.argsort(np.argsort(-rank_key)), (max(K, 1), 1))
-if K > 1:
-    oat_fold = cached_folds(E)
-    for k in range(K):
-        loo = (oat_fold.sum(1) - oat_fold[:, k]) / (H0c - H0c_folds[k])
-        key = np.maximum(np.abs(loo[:D] - 1), np.abs(loo[D:] - 1))
-        ranks[k] = np.argsort(np.argsort(-key))
+ranks = np.zeros((K, D), dtype=int)
+for k in range(K):
+    loo = (oat_fold.sum(1) - oat_fold[:, k]) / (H0c - H0c_folds[k])
+    key = np.maximum(np.abs(loo[:D] - 1), np.abs(loo[D:] - 1))
+    ranks[k] = np.argsort(np.argsort(-key))
 rank_lo, rank_hi = ranks.min(0) + 1, ranks.max(0) + 1
 
 say('')
@@ -538,8 +396,7 @@ say('per magnet, share of the gradient norm:')
 for m in sorted(set(magnet.tolist())):
     sel = magnet == m
     share = np.linalg.norm(grad[sel]) / np.linalg.norm(grad)
-    share_loo = (np.array([np.linalg.norm(g_loo[k][sel]) / np.linalg.norm(g_loo[k])
-                           for k in range(K)]) if K > 1 else np.zeros((0,)))
+    share_loo = [np.linalg.norm(g_loo[k][sel]) / np.linalg.norm(g_loo[k]) for k in range(K)]
     say(f'  M{m}: {pm(share, jack_se(share_loo), ".3f")}  ({int(sel.sum())} parameters)')
 
 # =============================================================================
@@ -549,62 +406,49 @@ mu, Qh = np.linalg.eigh(hess)
 mu, Qh = mu[::-1].copy(), Qh[:, ::-1].copy()        # most positive (worst) first
 nu, Qa = np.linalg.eigh(act)
 nu, Qa = np.clip(nu[::-1], 0, None).copy(), Qa[:, ::-1].copy()
-mu_se = jack_se(np.array([np.linalg.eigvalsh(h_loo[k])[::-1] for k in range(K)])
-                if K > 1 else np.zeros((0, D)))
+mu_se = jack_se(np.array([np.linalg.eigvalsh(h_loo[k])[::-1] for k in range(K)]))
 g_norm = np.linalg.norm(grad)
-g_hat = grad / max(g_norm, 1e-30)
+g_hat = grad / g_norm
 curv_g = float(g_hat @ hess @ g_hat)
-gn_loo = np.array([np.linalg.norm(g_loo[k]) / H0_loo[k] for k in range(K)]) if K > 1 \
-    else np.zeros((0,))
-# Participation ratio: (sum nu)^2 / sum nu^2 is the number of directions that actually
-# carry the response, without having to pick a threshold on the spectrum.
-pr_act = float(nu.sum() ** 2 / max((nu ** 2).sum(), 1e-300))
-cum = np.cumsum(nu) / max(nu.sum(), 1e-30)
-proj = np.cumsum((g_hat @ Qa) ** 2)                 # how much of g the top-k span holds
+gn_loo = np.array([np.linalg.norm(g_loo[k]) / H0_loo[k] for k in range(K)])
+pr_act = float(nu.sum() ** 2 / (nu ** 2).sum())     # participation ratio
+cum = np.cumsum(nu) / nu.sum()
+proj = np.cumsum((g_hat @ Qa) ** 2)                 # share of g in the top-k span
 
 say('')
 say('=' * 79)
 say('2. CURVATURE AND ACTIVE DIRECTIONS')
 say('=' * 79)
 say(f'|grad|/H_0 = {pm(g_norm / H0, jack_se(gn_loo))} per normalized unit')
-curv_g_se = jack_se(np.array([g_hat @ h_loo[k] @ g_hat / H0_loo[k] for k in range(K)])
-                    if K > 1 else np.zeros((0,)))
+curv_g_se = jack_se(np.array([g_hat @ h_loo[k] @ g_hat / H0_loo[k] for k in range(K)]))
 say(f'Hessian: max eigenvalue {pm(mu[0] / H0, mu_se[0] / H0)} H_0, min '
     f'{pm(mu[-1] / H0, mu_se[-1] / H0)} H_0, curvature along the gradient '
     f'{pm(curv_g / H0, curv_g_se)} H_0')
 say(f'  a step of t = {args.t_max:g} along the gradient is worth '
     f'{args.t_max * g_norm / H0:+.3f} H_0 from the slope and '
     f'{0.5 * args.t_max ** 2 * curv_g / H0:+.3f} H_0 from the curvature, so second order '
-    f'is\n  {abs(0.5 * args.t_max * curv_g / max(g_norm, 1e-30)):.0%} of first order '
-    f'there')
+    f'is\n  {abs(0.5 * args.t_max * curv_g / g_norm):.0%} of first order there')
 n_mu_res = int(sum(resolved(mu[k], mu_se[k]) for k in range(D)))
 say(f'  {n_mu_res}/{D} Hessian eigenvalues are resolved at {NS:g} sigma')
 say(f'active subspace: participation ratio {pr_act:.1f} directions '
     f'(rank is at most p = {P}); {int(np.searchsorted(cum, 0.95) + 1)} of them carry 95% '
     f'of E[|dp/du|^2]')
-say(f'  the total gradient lies {proj[min(2, D - 1)]:.1%} inside the top '
-    f'{min(3, D)} active directions'
-    + (f', {proj[min(0, D - 1)]:.1%} in the first' if D else ''))
+say(f'  the total gradient lies {proj[2]:.1%} inside the top 3 active directions, '
+    f'{proj[0]:.1%} in the first')
+
 
 # =============================================================================
 # 3. The worst directions
 # =============================================================================
 def trust_region_max(g, B, radius):
-    """argmax of g.v + 0.5 v^T B v over ||v|| <= radius, exactly (Moré-Sorensen).
-
-    The maximizer on the ball satisfies (lam I - B) v = g with lam >= max eig(B), and
-    ||v(lam)|| falls monotonically in lam, so one bisection finds it. D = 43 here, so the
-    eigendecomposition this is written in terms of is free.
-
-    Returns (v, lam, kkt) with kkt the relative residual of that stationarity condition --
-    the check that the solve actually solved the problem it claims to.
-    """
+    """argmax of g.v + 0.5 v^T B v over ||v|| <= radius (More-Sorensen, by bisection on
+    lam in (lam I - B) v = g). Returns (v, lam, relative KKT residual)."""
     ev, Q = np.linalg.eigh(B)
     gh = Q.T @ g
     top = ev[-1]
 
     def resid(v, lam):
-        return float(np.linalg.norm(lam * v - B @ v - g) / max(np.linalg.norm(g), 1e-300))
+        return float(np.linalg.norm(lam * v - B @ v - g) / np.linalg.norm(g))
 
     if top < 0:                                  # concave: the free maximum may be inside
         v = -np.linalg.solve(B, g)
@@ -616,8 +460,7 @@ def trust_region_max(g, B, radius):
 
     lo = top + 1e-12 * max(1.0, abs(top))
     if np.linalg.norm(v_of(lo)) < radius:
-        # Hard case: g has no component on the top eigenvector, so no lam > top reaches
-        # the boundary. Solve in the rest of the space and step out along that vector.
+        # hard case: g has no component on the top eigenvector; step out along it
         keep = ev < top - 1e-12 * max(1.0, abs(top))
         v = Q[:, keep] @ (gh[keep] / (top - ev[keep]))
         v = v + np.sqrt(max(radius ** 2 - v @ v, 0.0)) * Q[:, -1] * np.sign(gh[-1] or 1.0)
@@ -633,27 +476,23 @@ def trust_region_max(g, B, radius):
 
 
 v_trs, lam_trs, kkt_trs = trust_region_max(grad, hess, args.t_max)
-# An independent check that it really is the maximizer: nothing sampled on the sphere of
-# the same radius should beat it under the same quadratic model.
+# check: no random point on the same sphere should beat it under the same model
 probe = np.random.default_rng(args.seed + 7).standard_normal((4000, D))
 probe *= args.t_max / np.linalg.norm(probe, axis=1, keepdims=True)
 q_probe = probe @ grad + 0.5 * np.einsum('ij,jk,ik->i', probe, hess, probe)
 q_trs = float(grad @ v_trs + 0.5 * v_trs @ hess @ v_trs)
 
-# --- the worst design in the whole box, by projected gradient ascent ---------
-# The quadratic model is only local; this maximizes the surrogate itself over the box the
-# tolerances actually define. It is fitted on half the cached folds and scored on the
-# other half, because an optimizer pointed at a subsample will otherwise find that
-# subsample's own fluctuations.
-half = max(1, K // 2)
-train_mask = (fc < half).to(Tc.dtype) if K > 1 else torch.ones_like(fc, dtype=Tc.dtype)
+# Worst design in the whole box: projected gradient ascent on the surrogate, fitted on
+# half the cache folds and scored on the other half (else it fits the subsample's noise).
+half = K // 2
+train_mask = (fc < half).to(Tc.dtype)
 torch.manual_seed(args.seed + 1)
 starts = [torch.zeros(D), torch.from_numpy(np.sign(grad)).float() * 0.5,
-          torch.from_numpy(v_trs / max(np.linalg.norm(v_trs), 1e-12)).float()]
+          torch.from_numpy(unit(v_trs)).float()]
 starts += [torch.rand(D) * 2 - 1 for _ in range(max(0, args.pga_restarts - len(starts)))]
-starts = starts[:max(1, args.pga_restarts)]
+starts = starts[:args.pga_restarts]
 best_h, best_u = -np.inf, torch.zeros(D)
-for j, u_init in enumerate(starts):
+for u_init in starts:
     u = u_init.clone().to(DEVICE).clamp(-1, 1).requires_grad_(True)
     opt = torch.optim.Adam([u], lr=args.pga_lr)
     for _ in range(args.pga_steps):
@@ -663,7 +502,7 @@ for j, u_init in enumerate(starts):
         here = (float(h), u.detach().clone())   # the value belongs to u BEFORE the step
         opt.step()
         with torch.no_grad():
-            u.clamp_(-1, 1)                     # project back onto the tolerance box
+            u.clamp_(-1, 1)                     # project back onto the box
         if here[0] > best_h:
             best_h, best_u = here
     with torch.no_grad():                       # and the point the last step landed on
@@ -672,33 +511,23 @@ for j, u_init in enumerate(starts):
         best_h, best_u = h_end, u.detach().clone()
 u_star = best_u.cpu()
 star_folds = cached_folds(u_star.numpy()[None])[0]
-star_in = star_folds[:half].sum() / max(H0c_folds[:half].sum(), 1e-30)
-star_out = (star_folds[half:].sum() / max(H0c_folds[half:].sum(), 1e-30) if K > 1
-            else star_in)
+star_in = star_folds[:half].sum() / H0c_folds[:half].sum()
+star_out = star_folds[half:].sum() / H0c_folds[half:].sum()
 q_star = float(1 + (grad @ u_star.numpy() + 0.5 * u_star.numpy() @ hess @ u_star.numpy())
                / H0)
 
-# --- assemble the directions ------------------------------------------------
-def unit(v):
-    v = np.asarray(v, dtype=np.float64)
-    return v / max(np.linalg.norm(v), 1e-30)
 
-
-def oriented(v, g=None):
+def oriented(v, g):
     """Eigenvectors have an arbitrary sign; point them the way that raises the hits."""
     v = unit(v)
-    return -v if (grad if g is None else g) @ v < 0 else v
+    return -v if g @ v < 0 else v
 
 
-rng = np.random.default_rng(args.seed + 3)
-V_RANDOM = unit(rng.standard_normal(D))
+V_RANDOM = unit(np.random.default_rng(args.seed + 3).standard_normal(D))
 
 
-def direction_of(name, g=None, h=None, a=None):
-    """The recipe for a direction, applicable to any replicate of the accumulators."""
-    g = grad if g is None else g
-    h = hess if h is None else h
-    a = act if a is None else a
+def direction_of(name, g, h, a):
+    """(unit vector, its own walk half-length or None, plot title) from one replicate."""
     if name == 'ascent':
         return unit(g), None, 'first-order worst: $+\\nabla H$'
     if name == 'descent':
@@ -709,57 +538,46 @@ def direction_of(name, g=None, h=None, a=None):
     if name == 'corner':
         return unit(np.sign(g)), None, 'worst box corner (first order)'
     if name == 'pga':
-        return (unit(u_star.numpy()), float(u_star.norm()),
-                'worst design in the box (ascent)')
+        return unit(u_star.numpy()), float(u_star.norm()), 'worst design in the box (ascent)'
     if name == 'random':
         return V_RANDOM, None, 'random direction (control)'
-    if name.startswith('hess') and name[4:].isdigit():
+    if name.startswith('hess'):
         k = int(name[4:]) - 1
-        ev, Q = np.linalg.eigh(h)
-        return oriented(Q[:, ::-1][:, k], g), None, f'Hessian eigenvector {k + 1}'
-    if name.startswith('act') and name[3:].isdigit():
+        return oriented(np.linalg.eigh(h)[1][:, ::-1][:, k], g), None, \
+            f'Hessian eigenvector {k + 1}'
+    if name.startswith('act'):
         k = int(name[3:]) - 1
-        ev, Q = np.linalg.eigh(a)
-        return oriented(Q[:, ::-1][:, k], g), None, f'active direction {k + 1}'
-    raise ValueError(f'unknown direction {name!r}: pick from ascent, descent, worst, '
-                     f'corner, pga, random, hess<k>, act<k>')
+        return oriented(np.linalg.eigh(a)[1][:, ::-1][:, k], g), None, \
+            f'active direction {k + 1}'
+    raise ValueError(f'unknown direction {name!r}')
 
 
 DIRS = []
-for name in [s.strip() for s in args.dirs.split(',') if s.strip()]:
-    v, t_star, title = direction_of(name)
-    d = {'name': name, 'v': v, 't_star': t_star, 'title': title}
-    # Stability: the same recipe applied to each replicate. A direction that swings by
-    # tens of degrees between folds is not a property of the design, it is noise.
-    if K > 1 and name != 'pga':          # pga is scored out-of-sample instead
-        d['angles'] = [angle_deg(v, direction_of(name, g_loo[k], h_loo[k], a_loo[k])[0])
-                       for k in range(K)]
-    else:
-        d['angles'] = []
-    DIRS.append(d)
+for name in args.dirs.split(','):
+    v, t_star, title = direction_of(name, grad, hess, act)
+    # drift: the same recipe on each leave-one-out replicate (pga is scored held-out instead)
+    angles = [] if name == 'pga' else [
+        angle_deg(v, direction_of(name, g_loo[k], h_loo[k], a_loo[k])[0]) for k in range(K)]
+    DIRS.append({'name': name, 'v': v, 't_star': t_star, 'title': title, 'angles': angles})
 
 n_pts = args.n_points + (args.n_points + 1) % 2              # odd -> t = 0 on the grid
 for d in DIRS:
     d['ts'] = np.linspace(-1, 1, n_pts) * (d['t_star'] or args.t_max)
     d['slope'] = float(grad @ d['v'])
     d['curv'] = float(d['v'] @ hess @ d['v'])
-    d['slope_se'] = jack_se(np.array([g_loo[k] @ d['v'] / H0_loo[k] for k in range(K)])
-                            if K > 1 else np.zeros((0,)))
-    d['curv_se'] = jack_se(np.array([d['v'] @ h_loo[k] @ d['v'] / H0_loo[k]
-                                     for k in range(K)]) if K > 1 else np.zeros((0,)))
-    # How far the quadratic model still describes the surrogate along this direction.
+    d['slope_se'] = jack_se([g_loo[k] @ d['v'] / H0_loo[k] for k in range(K)])
+    d['curv_se'] = jack_se([d['v'] @ h_loo[k] @ d['v'] / H0_loo[k] for k in range(K)])
+    # t_valid: how far the quadratic model stays within quad_tol of the surrogate
     tt = np.linspace(0, max(abs(d['ts'][0]), abs(d['ts'][-1])), 33)[1:]
-    grid = np.concatenate([np.outer(tt, d['v']), np.outer(-tt, d['v'])])
-    ex, _ = cached_ratio(np.clip(grid, -1, 1))
-    qd = 1 + (np.concatenate([tt, -tt]) * d['slope']
-              + 0.5 * np.concatenate([tt, -tt]) ** 2 * d['curv']) / H0
-    bad = np.abs(qd - ex) > args.quad_tol * np.maximum(np.abs(ex), 1e-30)
+    ex, _ = cached_ratio(np.clip(np.concatenate([np.outer(tt, d['v']),
+                                                 np.outer(-tt, d['v'])]), -1, 1))
+    t2 = np.concatenate([tt, -tt])
+    qd = 1 + (t2 * d['slope'] + 0.5 * t2 ** 2 * d['curv']) / H0
+    bad = np.abs(qd - ex) > args.quad_tol * np.abs(ex)
     bad = bad[:len(tt)] | bad[len(tt):]                      # fail on either side
     d['t_valid'] = float(tt[bad.argmax() - 1]) if bad.any() else float(tt[-1])
-    d['t_valid_capped'] = not bad.any()          # never failed inside the range tested
-    # Two evaluations: the far end of this direction's own walk, and t = --t_max, which
-    # is the same size of step as a single parameter moved to its tolerance -- the only
-    # one that can fairly be compared against the one-at-a-time table.
+    d['t_valid_capped'] = not bad.any()
+    # the far end of the walk, and t = t_max (comparable with the one-at-a-time table)
     r, se = cached_ratio(np.stack([np.clip(d['ts'][-1] * d['v'], -1, 1),
                                    np.clip(args.t_max * d['v'], -1, 1)]))
     d['end_cache'], d['end_cache_se'] = float(r[0]), float(se[0])
@@ -804,11 +622,11 @@ say(f'  the quadratic model would have said {q_star:.4g} there, which is why the
     f'to trust is the walk below, not the model')
 say('  its largest components: ' + ', '.join(
     f'{labels[k]} {u_star[k]:+.2f}' for k in torch.argsort(u_star.abs(), descending=True)[:6]))
-if K > 1 and star_out < 0.5 * star_in:
+if star_out < 0.5 * star_in:
     say('  WARNING: the held-out value is far below the fitted one -- the ascent is '
         'exploiting the cached\n  subsample. Raise --n_cache.')
 
-# --- reference distribution over the box ------------------------------------
+# reference: random designs uniform in the box
 gen_mc = torch.Generator().manual_seed(args.seed + 2)
 U_mc = (torch.rand(args.n_mc, D, generator=gen_mc) * 2 - 1).numpy()
 mc, _ = cached_ratio(U_mc)
@@ -822,8 +640,7 @@ say(f'  so a random tolerance excursion is {np.mean(mc > 1):.0%} likely to make 
 # =============================================================================
 # 4. Walk the directions: surrogate over the full sample, and the simulator
 # =============================================================================
-# Every walk passes through the nominal design, so it is index 0 and is evaluated once.
-U_list = [np.zeros(D)]
+U_list = [np.zeros(D)]          # the nominal design is index 0, shared by all walks
 for d in DIRS:
     d['idx'] = []
     for t in d['ts']:
@@ -839,7 +656,7 @@ if n_clip:
     say(f'note: {n_clip} components across {len(U_list)} designs fall outside the '
         f'+-delta box and are clamped to its faces, which bends those walks')
 PHI = model.denormalize_phi(torch.from_numpy(U_all).float().to(DEVICE)).cpu()
-n_des, R = len(U_list), max(1, args.n_repeats)
+n_des, R = len(U_list), args.n_repeats
 walk_cache, walk_cache_se = cached_ratio(U_all)
 
 pred = np.zeros((K, n_des))     # sum_x w p        expected hits, per fold
@@ -858,23 +675,19 @@ if args.walk:
         with torch.no_grad():
             for c in range(0, raw.shape[0], args.chunk):
                 xb = raw[c:c + args.chunk, :7].to(DEVICE)
+                wb = w[c:c + args.chunk].to(DEVICE)
                 pr = model.predict_proba(PHI_D, xb.unsqueeze(0))        # (n_des, chunk)
-                q = pr * (1 - pr)
-                if w is not None:
-                    wb = w[c:c + args.chunk].to(DEVICE)
-                    pr, q = pr * wb, q * wb ** 2
+                pr, q = pr * wb, pr * (1 - pr) * wb ** 2
                 for k in range(K):
                     pred[k] += pr[:, FOLD[k]].sum(1).double().cpu().numpy()
                 pvar += q.sum(1).double().cpu().numpy()
         if args.sim:
-            wd = None if w is None else w.double()
+            wd = w.double()
             for i in range(n_des):
                 for r in range(R):
                     hits = shield(PHI[i], raw).double()  # a new transport seed every call
-                    sim[r, i] += float(hits.sum() if wd is None else (hits * wd).sum())
-                    svar[r, i] += float(hits.sum() if wd is None
-                                        else (hits * wd ** 2).sum())
-            del wd
+                    sim[r, i] += float((hits * wd).sum())
+                    svar[r, i] += float((hits * wd ** 2).sum())
         say(f'  walk: {min(lo + args.block, n_sim):,}/{n_sim:,} muons '
             f'({time.time() - t0:.0f}s)')
         del raw, w
@@ -885,28 +698,26 @@ smean, smc = sim.mean(0), (sim.std(0, ddof=1) if R > 1 else np.zeros(n_des))
 scount = np.sqrt(svar).mean(0)
 serr = smc if R > 1 else scount
 if args.walk:
-    ratio = pred_tot / max(pred_tot[0], 1e-30)
-    ratio_se = jack_se(np.array([(pred_tot - pred[k]) / max(pred_tot[0] - pred[k][0], 1e-30)
-                                 for k in range(K)]) if K > 1 else np.zeros((0, n_des)))
+    ratio = pred_tot / pred_tot[0]
+    ratio_se = jack_se([(pred_tot - pred[k]) / (pred_tot[0] - pred[k][0]) for k in range(K)])
 else:
     ratio, ratio_se = walk_cache, walk_cache_se
+
+
+def sim_ratio(i):
+    """Simulator H(t)/H(0) and its error (only the counting term is independent: the two
+    ends share the muons)."""
+    if i == 0:
+        return 1.0, 0.0
+    sr = smean[i] / smean[0]
+    return sr, sr * np.sqrt((serr[i] / smean[i]) ** 2 + (serr[0] / smean[0]) ** 2)
+
 
 say('')
 say('=' * 79)
 say('4. THE WALKS' + ('   (surrogate and simulator on the same muons)' if args.sim
                       else '   (surrogate only)'))
 say('=' * 79)
-def sim_ratio(i):
-    """The simulator's H(t)/H(0) and its error. The nominal design is the denominator and
-    is the same number as the numerator at t = 0, so that point is exactly 1."""
-    if i == 0:
-        return 1.0, 0.0
-    sr = smean[i] / max(smean[0], 1e-30)
-    # The two ends share the muons, so only the counting / transport term is independent.
-    return sr, sr * np.sqrt((serr[i] / max(smean[i], 1e-30)) ** 2
-                            + (serr[0] / max(smean[0], 1e-30)) ** 2)
-
-
 if args.walk:
     say(f'nominal design over these {n_sim:,} muons: surrogate {pred_tot[0]:,.2f} hits'
         + (f', simulator {smean[0]:,.1f} +- {serr[0]:,.1f}' if args.sim else '')
@@ -923,7 +734,7 @@ for d in DIRS:
                 f'{pm(ratio[i], ratio_se[i], ".4g"):>19s}')
         if args.sim:
             sr, sr_se = sim_ratio(i)
-            z = ((ratio[i] - sr) / max(np.hypot(ratio_se[i], sr_se), 1e-30) if i else 0.0)
+            z = (ratio[i] - sr) / np.hypot(ratio_se[i], sr_se) if i else 0.0
             line += f' {pm(sr, sr_se, ".4g"):>19s} {z:+6.1f}'
             if j == len(d['ts']) - 1:
                 zs.append(abs(z))
@@ -952,8 +763,7 @@ say(f'1. Nominal: H_0 = {H0:,.1f} {"" if GEN else "weighted "}hits over {int(n_m
     f'muons (hit rate {H0 / sumw:.3e}), resting on ~{n_eff:,.0f} muons effectively.')
 say(f'2. Most sensitive single parameter: {labels[i_best]}. Moving it alone to its '
     f'{"+" if oat_p[i_best] >= oat_m[i_best] else "-"}{model.delta:.0%} tolerance changes '
-    f'the hits by {worst_oat[i_best]:+.1%}'
-    + (f' +- {worst_se[i_best]:.1%}' if K > 1 else '') + '.')
+    f'the hits by {worst_oat[i_best]:+.1%} +- {worst_se[i_best]:.1%}.')
 verdict = 'resolved' if resolved(worst_oat[i_best], worst_se[i_best]) else 'NOT resolved'
 say(f'   It is {verdict} at {NS:g} sigma, and over the {K} leave-one-out replicates it '
     f'never leaves rank {rank_lo[i_best]}-{rank_hi[i_best]}.')
@@ -961,11 +771,10 @@ listed = [labels[k] for k in order if resolved(worst_oat[k], worst_se[k])][:args
 say(f'   {n_res}/{D} parameters have a resolved one-at-a-time effect; the largest are '
     + ', '.join(listed) + (f' and {n_res - len(listed)} more.' if n_res > len(listed)
                            else '.'))
-i_w = int(np.argmax([d['at_tmax'] for d in DIRS]))
-dw = DIRS[i_w]
+dw = DIRS[int(np.argmax([d['at_tmax'] for d in DIRS]))]
 say(f'3. Worst direction at the same step size as that ({args.t_max:g} normalized unit): '
     f'{dw["name"]}, H/H_0 = {pm(dw["at_tmax"], dw["at_tmax_se"], ".4g")}, i.e. '
-    f'{abs(dw["at_tmax"] - 1) / max(abs(worst_oat[i_best]), 1e-30):.1f}x the worst single '
+    f'{abs(dw["at_tmax"] - 1) / abs(worst_oat[i_best]):.1f}x the worst single '
     f'parameter.')
 say(f'   Its drift over the folds is '
     + (f'{np.mean(dw["angles"]):.1f} degrees' if dw['angles'] else 'not estimated')
@@ -994,26 +803,24 @@ else:
 # =============================================================================
 # Figures
 # =============================================================================
-HITS = 'hits' if GEN else 'weighted hits'
-SRC = (f'generative muons, T = {args.temperature:g}' if GEN else 'real muons, weighted')
+SRC = f'generative muons, T = {args.temperature:g}' if GEN else 'real muons, weighted'
 
-# --- 1. per-parameter sensitivity -------------------------------------------
+# --- 1. per-parameter sensitivity
 fig, ax = plt.subplots(1, 2, figsize=(13, 9), constrained_layout=True, sharey=True)
 o = order[::-1]                                   # least sensitive at the bottom
 y = np.arange(D)
 res_mask = np.array([resolved(worst_oat[k], worst_se[k]) for k in o])
-ax[0].barh(y, lin[o], xerr=lin_se[o] if K > 1 else None, error_kw=dict(lw=0.8, ecolor='k'),
-           color=[(BAD if v > 0 else OK) if r else GREY
-                  for v, r in zip(lin[o], res_mask)])
+ax[0].barh(y, lin[o], xerr=lin_se[o], error_kw=dict(lw=0.8, ecolor='k'),
+           color=[(BAD if v > 0 else OK) if r else GREY for v, r in zip(lin[o], res_mask)])
 ax[0].set_yticks(y, [labels[k] for k in o], fontsize=7)
 ax[0].axvline(0, color='k', lw=0.8)
 ax[0].set_xlabel('$(\\partial H/\\partial u_i)\\,/\\,H_0$   (per full tolerance)')
 ax[0].set_title('First-order sensitivity')
 ax[1].hlines(y, oat_m[o], oat_p[o], color=GREY, lw=1)
-ax[1].errorbar(oat_p[o], y, xerr=oat_p_se[o] if K > 1 else None, fmt='o', ms=4, color=BAD,
-               lw=0.8, label='$u_i = +1$')
-ax[1].errorbar(oat_m[o], y, xerr=oat_m_se[o] if K > 1 else None, fmt='o', ms=4, color=OK,
-               lw=0.8, label='$u_i = -1$')
+ax[1].errorbar(oat_p[o], y, xerr=oat_p_se[o], fmt='o', ms=4, color=BAD, lw=0.8,
+               label='$u_i = +1$')
+ax[1].errorbar(oat_m[o], y, xerr=oat_m_se[o], fmt='o', ms=4, color=OK, lw=0.8,
+               label='$u_i = -1$')
 ax[1].axvline(0, color='k', lw=0.8)
 ax[1].set_xlabel('$H/H_0 - 1$')
 ax[1].set_title(f'Exact one-at-a-time, $\\pm${model.delta:.0%}')
@@ -1023,31 +830,29 @@ fig.suptitle(f'Parameter sensitivity of the hit count ({SRC}); grey = not resolv
 fig.savefig(os.path.join(FIGS, 'robustness_sensitivity.png'), dpi=150)
 plt.close(fig)
 
-# --- 2. spectra -------------------------------------------------------------
+# --- 2. spectra
 fig, ax = plt.subplots(1, 2, figsize=(11, 4.5), constrained_layout=True)
 ax[0].axhline(0, color='k', lw=0.8)
-ax[0].errorbar(np.arange(1, D + 1), mu / H0, yerr=mu_se / H0 if K > 1 else None,
-               fmt='o-', ms=4, color=OK, lw=1, capsize=2)
+ax[0].errorbar(np.arange(1, D + 1), mu / H0, yerr=mu_se / H0, fmt='o-', ms=4, color=OK,
+               lw=1, capsize=2)
 ax[0].set(xlabel='index (most positive first)', ylabel='eigenvalue $/H_0$',
           title='Hessian at the nominal design')
 ax[0].set_yscale('symlog', linthresh=max(1e-3, np.abs(mu / H0).max() * 1e-3))
-pos = nu > nu.max() * 1e-12 if nu.max() > 0 else np.zeros(D, bool)
+pos = nu > nu.max() * 1e-12
 ax[1].set(xlabel='index', ylabel='eigenvalue',
-          title=f'Active subspace ($\\partial p/\\partial u$), '
-                f'participation {pr_act:.1f}')
-if pos.any():
-    ax[1].semilogy(np.arange(1, pos.sum() + 1), nu[pos], 'o-', ms=4, color=OK)
-    tw = ax[1].twinx()
-    tw.plot(np.arange(1, pos.sum() + 1), cum[pos], 's--', ms=3, color=BAD)
-    tw.plot(np.arange(1, pos.sum() + 1), proj[pos], '^:', ms=3, color='0.3')
-    tw.set_ylabel('cumulative share (red) / of $\\nabla H$ (grey)', color=BAD)
-    tw.set_ylim(0, 1.02)
-    tw.axhline(0.95, color=BAD, lw=0.8, ls=':')
+          title=f'Active subspace ($\\partial p/\\partial u$), participation {pr_act:.1f}')
+ax[1].semilogy(np.arange(1, pos.sum() + 1), nu[pos], 'o-', ms=4, color=OK)
+tw = ax[1].twinx()
+tw.plot(np.arange(1, pos.sum() + 1), cum[pos], 's--', ms=3, color=BAD)
+tw.plot(np.arange(1, pos.sum() + 1), proj[pos], '^:', ms=3, color='0.3')
+tw.set_ylabel('cumulative share (red) / of $\\nabla H$ (grey)', color=BAD)
+tw.set_ylim(0, 1.02)
+tw.axhline(0.95, color=BAD, lw=0.8, ls=':')
 fig.suptitle('Curvature and active directions')
 fig.savefig(os.path.join(FIGS, 'robustness_spectra.png'), dpi=150)
 plt.close(fig)
 
-# --- 3. what the directions are made of -------------------------------------
+# --- 3. what the directions are made of
 M = np.stack([d['v'] for d in DIRS])
 fig, ax = plt.subplots(figsize=(max(9, D * 0.28), 1.4 + 0.55 * len(DIRS)),
                        constrained_layout=True)
@@ -1055,14 +860,14 @@ lim = np.abs(M).max()
 im = ax.imshow(M, cmap='RdBu_r', vmin=-lim, vmax=lim, aspect='auto')
 ax.set_xticks(np.arange(D), labels, rotation=90, fontsize=7)
 ax.set_yticks(np.arange(len(DIRS)),
-              [f'{d["name"]}' + (f' ({np.mean(d["angles"]):.0f}$^\\circ$)' if d['angles']
-                                 else '') for d in DIRS])
+              [d['name'] + (f' ({np.mean(d["angles"]):.0f}$^\\circ$)' if d['angles'] else '')
+               for d in DIRS])
 fig.colorbar(im, ax=ax, label='component (unit $\\ell_2$)')
 ax.set_title('Directions in parameter space (label: mean jackknife drift)')
 fig.savefig(os.path.join(FIGS, 'robustness_directions.png'), dpi=150)
 plt.close(fig)
 
-# --- 4. the walks -----------------------------------------------------------
+# --- 4. the walks
 nc = min(3, len(DIRS))
 nr = int(np.ceil(len(DIRS) / nc))
 fig, axes = plt.subplots(nr, nc, figsize=(4.6 * nc, 3.9 * nr), constrained_layout=True,
@@ -1078,16 +883,15 @@ for a, d in zip(axes.ravel(), DIRS):
            lw=1.5, label='quadratic model')
     a.plot(ts, walk_cache[idx], '-', color=OK, lw=1, alpha=0.6,
            label=f'surrogate ({n_cached:,} cached)')
-    a.errorbar(ts, ratio[idx], yerr=ratio_se[idx] if K > 1 else None, fmt='o-', color=OK,
-               ms=4, lw=2, capsize=2, label='surrogate (full sample)')
+    a.errorbar(ts, ratio[idx], yerr=ratio_se[idx], fmt='o-', color=OK, ms=4, lw=2,
+               capsize=2, label='surrogate (full sample)')
     if args.sim:
-        sr = smean[idx] / max(smean[0], 1e-30)
-        a.errorbar(ts, sr, yerr=serr[idx] / max(smean[0], 1e-30), fmt='s', ms=5,
-                   color=BAD, capsize=3, lw=1.5,
-                   label=f'simulator (mean of {R})' if R > 1 else 'simulator')
+        sr = smean[idx] / smean[0]
+        a.errorbar(ts, sr, yerr=serr[idx] / smean[0], fmt='s', ms=5, color=BAD, capsize=3,
+                   lw=1.5, label=f'simulator (mean of {R})' if R > 1 else 'simulator')
         if R > 1:
-            a.plot(np.repeat(ts[None], R, 0), sim[:, idx] / max(smean[0], 1e-30), '.',
-                   ms=3, color=BAD, alpha=0.35, zorder=0, label='_')
+            a.plot(np.repeat(ts[None], R, 0), sim[:, idx] / smean[0], '.', ms=3, color=BAD,
+                   alpha=0.35, zorder=0, label='_')
     a.axvline(0, color=GREY, lw=1, ls='--')
     a.axhline(1, color=GREY, lw=0.8, ls=':')
     if d['t_star'] is not None:
@@ -1095,8 +899,7 @@ for a, d in zip(axes.ravel(), DIRS):
     a.set_title(f'{d["name"]}: {d["title"]}', fontsize=10)
     a.set_xlabel('step $t$ along $v$ (normalized units)')
     a.set_ylabel('$H(t)\\,/\\,H_0$')
-    curves = [walk_cache[idx], ratio[idx]] + ([smean[idx] / max(smean[0], 1e-30)]
-                                              if args.sim else [])
+    curves = [walk_cache[idx], ratio[idx]] + ([smean[idx] / smean[0]] if args.sim else [])
     if all(np.all(c > 0) for c in curves):
         a.set_yscale('log')
         a.set_ylim(0.5 * min(c.min() for c in curves), 2 * max(c.max() for c in curves))
@@ -1106,7 +909,7 @@ fig.suptitle(f'Surrogate vs. simulator along the robustness directions ({SRC})')
 fig.savefig(os.path.join(FIGS, 'robustness_walks.png'), dpi=150)
 plt.close(fig)
 
-# --- 5. the box as a whole --------------------------------------------------
+# --- 5. the box as a whole
 fig, ax = plt.subplots(figsize=(7, 4.5), constrained_layout=True)
 edges = np.logspace(np.log10(max(mc.min(), 1e-8) * 0.9),
                     np.log10(max(mc.max(), star_out) * 1.2), 60)
@@ -1125,8 +928,6 @@ plt.close(fig)
 # Save
 # =============================================================================
 report_path = os.path.join(args.out_dir, 'robustness_report.txt')
-with open(report_path, 'w') as f:
-    f.write('\n'.join(REPORT) + '\n')
 np.savez(os.path.join(args.out_dir, 'robustness.npz'),
          labels=np.array(labels), phi_0=phi_0.numpy(), H_0=H0, var_0=var0, n_muons=n_mu,
          sum_weights=sumw, muons=args.muons, temperature=args.temperature,
@@ -1153,5 +954,5 @@ np.savez(os.path.join(args.out_dir, 'robustness.npz'),
 say('')
 say(f'saved {report_path}, {args.out_dir}/robustness.npz and '
     f'{FIGS}/robustness_{{sensitivity,spectra,directions,walks,mc}}.png')
-with open(report_path, 'w') as f:                  # rewrite, now including the last lines
+with open(report_path, 'w') as f:
     f.write('\n'.join(REPORT) + '\n')

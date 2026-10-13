@@ -2,14 +2,9 @@
 
     python3 train_generator.py
 
-One flow per class, so p(x, y) = p(y) p(x | y) with p(y) = 1/2. An adversary then moves
-the latent of the relevant flow, which moves x and leaves the label alone -- the semantics
-adversarial training assumes.
-
-Recorded during training: the training and held-out negative log-likelihood, and
-KL(P || p_theta) against the quadrature density. The last is the one that matters, and it
-is the one that reveals overfitting: the training loss falls throughout while the fitted
-density drifts away from the truth.
+One flow per class, p(x, y) = p(y) p(x | y), so a latent adversary moves x and keeps y.
+Records train/held-out NLL and KL(P || p_theta) against the quadrature density, and saves
+models/generator.pt and models/data.pt.
 """
 import os
 import sys
@@ -80,12 +75,9 @@ def train(problem, n_train=4000, epochs=1500, batch=512, lr=3e-3, seed=0, every=
 
 
 class Generator:
-    """The two class-conditional flows as one map of a standard normal.
+    """The two flows as one map of a 3-d standard normal: z[:, :2] -> x, sign(z[:, 2]) -> y.
 
-    Three latent coordinates: the first two are the input, the sign of the third picks the
-    class. Keeping the class inside the latent -- rather than drawing it separately -- is
-    what lets a single low-discrepancy sequence drive the whole generator, and it gives the
-    (latent_dim, model(z)) interface that the samplers elsewhere expect.
+    Gives the (latent_dim, model(z)) interface integration/ expects.
     """
 
     latent_dim = 3
@@ -158,7 +150,6 @@ def plot(problem, flows, hist, n=20000):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     problem = TwoMoons()
     flows, hist = train(problem)
     i = hist['epoch'].index(min(hist['epoch'], key=lambda e: abs(e - hist['stopped_at'])))

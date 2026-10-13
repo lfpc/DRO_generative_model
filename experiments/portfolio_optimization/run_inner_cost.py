@@ -1,10 +1,9 @@
-"""What does the inner loop cost, in true-loss evaluations? (portfolio)
+"""Cost of one inner solve in true-loss evaluations (portfolio).
 
     python3 run_inner_cost.py
 
-Same accounting as the two-moons version: one unit is one evaluation of the real objective
-on one sample. Reweighting needs the losses once, a data-space adversary needs them again
-at every ascent step, and a latent adversary reading a surrogate needs none.
+Also saves the nominal design and a local surrogate to models/ (used by integration/,
+inner_compare/ and outer/).
 """
 import os
 import sys
@@ -30,6 +29,8 @@ STYLE = {'KL-DRO': ('C2', 'o'), 'Wasserstein': ('C1', 'v'),
 
 
 class Adapter:
+    """The problem behind the interface optb.lcso's surrogate expects."""
+
     link = 'identity'
 
     def __init__(self, p):
@@ -45,11 +46,7 @@ class Adapter:
 
 
 def fit_surrogate(problem, phi, n_designs=60, n_samples=2000, delta=0.08, seed=0):
-    """Fit s(phi, x) near the incumbent. Returns (loss_fn, evaluations spent).
-
-    The design perturbations are small and projected back onto the simplex: the surrogate
-    only has to be right near the incumbent, which is the whole premise of a local model.
-    """
+    """Fit s(phi, x) on projected designs within delta of phi. Returns (loss_fn, evaluations)."""
     g = torch.Generator().manual_seed(seed)
     ad = Adapter(problem)
     designs = torch.stack([problem.project(phi + delta *
@@ -68,7 +65,7 @@ def fit_surrogate(problem, phi, n_designs=60, n_samples=2000, delta=0.08, seed=0
 
 
 def surrogate_loss_fn(model):
-    """The surrogate as a loss: (phi, x) -> per-sample loss."""
+    """The surrogate as a loss (phi, x) -> per-sample loss; .model holds the network."""
     loss_fn = lambda p, x: model(p, x)
     loss_fn.model = model
     return loss_fn
@@ -83,7 +80,6 @@ def load_surrogate(path, problem):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = Portfolio()
     x = problem.sample(20000, torch.Generator().manual_seed(0))
@@ -119,8 +115,8 @@ if __name__ == '__main__':
     fig, ax = plt.subplots(figsize=(6.0, 3.8), constrained_layout=True)
     for name, (c_, m) in STYLE.items():
         n, v = zip(*rows[name])
-        ax.plot([max(k, 0.5) for k in n], v, color=c_, marker=m, ms=6, mfc='none',
-                lw=1.7, label=name)
+        n = [max(k, 0.5) for k in n]          # 0 is not plottable on a log axis
+        ax.plot(n, v, color=c_, marker=m, ms=6, mfc='none', lw=1.7, label=name)
     ax.axhline(nom, color='.5', lw=1, ls=(0, (6, 3)))
     ax.text(.99, nom, 'nominal ', color='.5', fontsize=7, ha='right', va='bottom',
             transform=ax.get_yaxis_transform())

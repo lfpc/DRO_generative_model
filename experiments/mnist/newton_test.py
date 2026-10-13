@@ -1,29 +1,10 @@
-"""Does a low-rank Newton step on a Taylor local model beat SGD for training the classifier?
+"""Does a low-rank Newton step beat Adam/SGD for training the MNIST MLP (101,770 weights)?
 
     python3 newton_test.py
 
-The surrogate used everywhere else in this project is a Taylor model: a quadratic in the
-design whose Hessian is low rank. The question here is whether that model, stepped with
-Newton rather than gradient descent, is competitive with the optimiser people actually use
-to train a network -- on the 101,770 weights of the MNIST MLP.
-
-Three methods, all given the SAME budget in gradient evaluations, which is what either one
-actually spends:
-
-  Adam / SGD        the reference, exact stochastic gradients.
-  low-rank Newton   exact gradient plus a rank-r curvature model built from Hessian-vector
-                    products (which autograd gives exactly, at the cost of one extra
-                    backward pass each), stepped as (H_r + lambda I)^-1 g inside a trust
-                    region. This is the Taylor model with its curvature measured rather
-                    than fitted, which is the most favourable version of the idea: fitting
-                    it from sampled designs, as LCSO does, would need O(rank * D) designs
-                    and D here is 101,770.
-  L-BFGS            the standard quasi-Newton baseline, which also builds a low-rank
-                    inverse-Hessian model, so it says whether any gain is from curvature or
-                    from this particular way of estimating it.
-
-Accounting: one Hessian-vector product costs about one gradient evaluation, so a rank-r
-Newton step costs r+1 of them against SGD's 1. A fair comparison charges for that.
+All methods get the same budget in gradient evaluations; a Hessian-vector product counts
+as one, so a rank-r Newton step costs r+1 and an L-BFGS step 2. The Newton curvature is
+measured exactly by HVPs (the most favourable version of a Taylor local model).
 """
 import os
 import sys
@@ -48,11 +29,8 @@ def _grad(problem, phi, x, y, create_graph=False):
 
 
 def lanczos_hessian(problem, phi, x, y, rank, seed=0):
-    """Rank-r symmetric curvature model by Hessian-vector products.
-
-    Each product is one extra backward pass through the graph of the gradient, so the cost
-    is r+1 gradient evaluations. Returns (V, d) with H ~ V diag(d) V', V orthonormal.
-    """
+    """Rank-r curvature model from r Hessian-vector products on a random subspace.
+    Returns (V, d) with H ~ V diag(d) V', V orthonormal."""
     g = torch.Generator().manual_seed(seed)
     phi = phi.detach().requires_grad_(True)
     loss = problem.risk(phi, x, y)
@@ -67,12 +45,7 @@ def lanczos_hessian(problem, phi, x, y, rank, seed=0):
 
 
 def newton_step(gr, V, d, radius, damping=1e-2):
-    """(H_r + lambda I)^-1 g, capped at a trust radius.
-
-    Curvature is only known inside the sampled subspace, so the step uses it there and
-    falls back to a damped gradient step in the orthogonal complement -- which is what the
-    low-rank model actually licenses.
-    """
+    """(H_r + lambda I)^-1 g inside the subspace, g / lambda outside, capped at `radius`."""
     c = V.T @ gr
     d_eff = (d + damping).clamp_min(damping)
     step = V @ (c / d_eff) + (gr - V @ c) / (1.0 / damping)
@@ -131,15 +104,13 @@ def run(problem, method, budget, batch=256, seed=0, rank=2, lr=None, radius=5.0)
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = MNIST()
     budget = 6000
     print(f'design dimension {problem.design_dim:,};  budget {budget:,} gradient evaluations')
 
-    # every method at its own best setting from a sweep, so the comparison is not a
-    # comparison of tuning effort: SGD diverges outright at 0.2 and Newton is better at
-    # rank 2 than at rank 8, because what it buys in curvature it loses in steps taken
+    # each method at its best setting from a sweep (SGD diverges at lr 0.2; Newton rank 2
+    # beats rank 8, which buys curvature but loses steps)
     tuned = {'adam': dict(lr=1e-3), 'sgd': dict(lr=1e-2),
              'newton': dict(rank=2, radius=5.0), 'lbfgs': dict(radius=5.0)}
     runs = {}

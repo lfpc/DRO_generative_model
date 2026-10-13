@@ -1,33 +1,12 @@
-"""Is quasi-Monte Carlo objectively better here, and by how much?
+"""Is randomised QMC better than plain MC on the generator, and by how much?
+
+Reports, against the converged value: the equal-N efficiency gain (RMSE_MC / RMSE_QMC)^2
+with a bootstrap CI (= factor fewer loss evaluations), the convergence rate (slope of
+log RMSE vs log N; MC is -1/2), the coverage of nominal 95% t-intervals from 8
+randomisations, and the bias in standard errors.
 
     python3 quantify.py --problem two_moons
-
-The convergence figure shows tighter bands, which is suggestive and not a claim. Three
-numbers turn it into one, and all three are needed -- the first two can be manufactured by
-an estimator that is simply wrong, and the third is what rules that out.
-
-  efficiency gain   (RMSE_MC / RMSE_QMC)^2 at equal N. Because Monte-Carlo error falls as
-                    N^-1/2, squaring the error ratio converts it into the factor by which
-                    the sample would have to grow for plain MC to match: a gain of 30 means
-                    30x fewer loss evaluations for the same accuracy. Reported with a
-                    bootstrap interval over the randomisations, so "better" is a statement
-                    with an uncertainty attached rather than an eyeball judgement.
-
-  convergence rate  the slope of log RMSE against log N. Plain MC is pinned at -1/2 by the
-                    central limit theorem whatever the integrand; a scrambled digital net
-                    approaches -1 when the integrand is smooth enough. A slope
-                    significantly steeper than -1/2 is the asymptotic claim, and unlike the
-                    gain it does not depend on which N you happened to choose.
-
-  coverage          the fraction of nominal 95% intervals, built from the randomisations
-                    exactly as a practitioner would, that actually contain the truth. This
-                    is the trap: an estimator can be tighter AND biased, in which case the
-                    first two numbers look wonderful and every confidence interval it
-                    reports is a lie. Randomised QMC is unbiased by construction, so this
-                    should come out near 0.95 -- but it is a property to verify, not assume.
-
-The bias check at the end is the same concern stated directly: an estimator whose mean sits
-further from the truth than its own standard error can explain is not better at any rate.
+    python3 quantify.py --problem muon_shield --loss surrogate --sizes 1024 4096 16384
 """
 import argparse
 import importlib.util
@@ -36,6 +15,7 @@ import os
 import numpy as np
 import torch
 
+# quasi-MC.py has a hyphen in its name, so it is loaded by path
 q = importlib.util.spec_from_file_location(
     'q', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quasi-MC.py'))
 qmc = importlib.util.module_from_spec(q)
@@ -43,8 +23,8 @@ q.loader.exec_module(qmc)
 
 
 def replicates(sampler, sizes, reps, loss):
-    """est[i, r]: the estimate at sizes[i] from randomisation r, all independent."""
-    return np.array([[qmc.estimate(n, sampler, seed=100003 * r + n)[loss]
+    """est[i, r]: the estimate at sizes[i] from randomisation r. Only `loss` is evaluated."""
+    return np.array([[qmc.estimate(n, sampler, seed=100003 * r + n, losses=(loss,))[loss]
                       for r in range(reps)] for n in sizes])
 
 
@@ -58,18 +38,12 @@ def fit_rate(sizes, est, gold, lo):
     return np.polyfit(np.log(np.asarray(sizes)[m]), np.log(rmse(est, gold)[m]), 1)[0]
 
 
-# two-sided 0.975 Student-t quantiles, so the interval is the one a practitioner would
-# actually write down rather than a normal approximation that is too narrow at small k
+# Student-t 0.975 quantiles, keyed by k (k-1 degrees of freedom)
 T975 = {4: 3.1824, 6: 2.5706, 8: 2.3646, 12: 2.2010, 16: 2.1314, 24: 2.0687}
 
 
 def coverage(est, gold, k=8, draws=4000, seed=0):
-    """Empirical coverage of the nominal 95% interval a practitioner would report.
-
-    Built the honest way: k randomisations, their mean plus or minus t_{k-1,0.975} standard
-    errors. Anything much below 0.95 means the interval understates the error, which for a
-    biased estimator it always will once k is large enough to resolve the bias.
-    """
+    """Per size, how often mean +- t * se over k resampled randomisations contains gold."""
     rng = np.random.default_rng(seed)
     t = T975[k]
     out = []
@@ -82,18 +56,29 @@ def coverage(est, gold, k=8, draws=4000, seed=0):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser()
+    class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter,
+                       argparse.RawDescriptionHelpFormatter):
+        pass
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
     ap.add_argument('--problem', default='two_moons', choices=sorted(qmc.PROBLEMS))
-    ap.add_argument('--sizes', nargs='+', type=int, default=[256, 1024, 4096, 16384, 65536])
+    ap.add_argument('--sizes', nargs='+', type=int, default=None,
+                    help="default: problem's, else 256 1024 4096 16384 65536")
     ap.add_argument('--reps', type=int, default=48, help='independent randomisations')
-    ap.add_argument('--boot', type=int, default=4000)
+    ap.add_argument('--boot', type=int, default=4000, help='bootstrap resamples')
     ap.add_argument('--loss', default='true', choices=list(qmc.STYLE))
+    ap.add_argument('--gold_n', type=int, default=None,
+                    help="Sobol points per scrambling of the reference; default: problem's, "
+                         "else 2**19")
     a = ap.parse_args()
     torch.set_default_dtype(torch.float32)
 
-    models, data = qmc.setup(a.problem)
+    spec = qmc.PROBLEMS[a.problem]
+    a.sizes = a.sizes or spec.get('sizes', [256, 1024, 4096, 16384, 65536])
+    models, _ = qmc.setup(a.problem)
     model = qmc.Generator.load(os.path.join(models, 'generator.pt'))
-    gold = qmc.converged(model)[a.loss]
+    gold = qmc.converged(model, n=a.gold_n or spec.get('gold_n', 2 ** 19),
+                         losses=(a.loss,))[a.loss]
     print(f'{a.problem}: latent dim {model.latent_dim}, {a.reps} randomisations, '
           f'{a.loss} loss, converged value {gold:.6f}\n')
 

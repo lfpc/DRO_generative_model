@@ -1,39 +1,13 @@
 """Take one optimization step off the nominal design and check the gain with the simulator.
 
-Two steps are computed from the same derivatives, both aimed at MINIMIZING the expected
-number of hits:
-
-  steepest descent   p along -grad H
-  trust-region Newton  p from argmin over ||p|| <= Delta of  g.p + 0.5 p^T B p, solved
-                       exactly (More-Sorensen). B is indefinite here, so this is not
-                       Newton's method with a safeguard -- the negative-curvature
-                       directions are what the subproblem exploits.
-
---step decides how far to go along each:
-
-  armijo   backtrack t = t0, t0/2, t0/4, ... and accept the first step with a sufficient
-           decrease, H(u+p) <= H(u) + c1 g.p
-  trust    shrink the radius Delta = t0, t0/2, ... and accept the largest one whose actual
-           reduction is at least eta of the reduction the quadratic model predicted
-
---eval decides what "H(u+p)" means in those tests: the surrogate, or the simulator itself.
-Either way both are reported, so the run always says what the surrogate promised and what
-the simulator delivered.
-
-The trust region is the region the model was trained in. Designs are normalized so that
-the training box is |u_i| <= 1, and an L2 ball of radius 1 is the largest ball inside it,
-so t0 = 1 means "as far as the training data reaches, in any direction" and every step
-with ||p|| <= 1 is inside it by construction.
-
-The derivatives come from one sweep over the muons. The muon side of the DeepONet does not
-depend on the design, so with s = p(1-p) the accumulators
-
-    T = sum_x w_x s_x t_x,     A = sum_x w_x s_x (1 - 2 p_x) t_x t_x^T
-
-give grad = J^T T and hess = J^T A J + d2(b.T)/du2 exactly, with J = db/du and the branch
-Hessian taken by autograd on the branch net alone -- 43 inputs, no muons, so the Hessian
-costs nothing extra. A second sweep evaluates every candidate step, surrogate and
-simulator, on the same muons.
+Two steps from the same derivatives, both minimizing the expected hits H:
+  steepest descent     p along -grad H
+  trust-region Newton  p = argmin_{||p|| <= Delta} g.p + 0.5 p^T B p, solved exactly
+                       (More-Sorensen; B is indefinite here)
+--step picks how far: 'armijo' halves t until H(u+p) <= H(u) + c1 g.p; 'trust' halves the
+radius until the actual drop is >= eta of the predicted one. --eval picks whether H in those
+tests is the surrogate or the simulator; both are always reported. Designs are normalized so
+the training box is |u_i| <= 1, so t0 = 1 is the largest ball inside it.
 
     python optimization_test.py
     python optimization_test.py --step trust --eval simulator
@@ -43,7 +17,6 @@ import argparse
 import os
 import time
 
-import h5py
 import numpy as np
 import torch
 import matplotlib
@@ -51,6 +24,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from models import load_surrogate
+from muons_io import Muons, count_muons, evaluate_designs, param_labels
 from problems import ShipMuonShieldCuda
 
 
@@ -60,48 +34,36 @@ class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter,
 
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
-parser.add_argument('--model', default='outputs/lcso_model.pt')
+parser.add_argument('--model', default='outputs/lcso_model.pt', help='surrogate checkpoint')
 parser.add_argument('--muons', default='gen', choices=['gen', 'data'],
-                    help="'gen' samples the generative flow (unweighted); 'data' reads the "
-                         "real file, whose per-muon weights every sum then carries")
+                    help="gen: generative flow (unweighted); data: real file (weighted)")
 parser.add_argument('--temperature', type=float, default=1.0, help='gen: flow temperature')
-parser.add_argument('--seed', type=int, default=0)
-parser.add_argument('--n_muons', type=int, default=0,
-                    help='Muons for the derivatives and the steps alike (0 = as many as '
-                         'the muon file holds, for --muons gen too)')
-parser.add_argument('--step', default='armijo', choices=['armijo', 'trust'],
-                    help='armijo: backtrack until the decrease is sufficient. trust: '
-                         'shrink the radius until the model is trusted, i.e. the actual '
-                         'reduction reaches eta of the predicted one')
+parser.add_argument('--seed', type=int, default=0, help='random seed')
+parser.add_argument('--n_muons', type=int, default=0, help='0 = size of the muon file')
+parser.add_argument('--step', default='armijo', choices=['armijo', 'trust'], help='step rule')
 parser.add_argument('--eval', default='surrogate', choices=['surrogate', 'simulator'],
-                    help='What the step test measures H with. The other one is reported '
-                         'either way')
+                    help='what the step test measures H with')
 parser.add_argument('--t0', type=float, default=1.0,
-                    help='First step length / trust radius, in normalized units. 1 is the '
-                         'largest ball inside the training box')
-parser.add_argument('--n_back', type=int, default=6,
-                    help='Rungs in the backtracking ladder. They are all evaluated in one '
-                         'sweep, so this costs muon work but no extra passes')
-parser.add_argument('--n_repeats', type=int, default=1,
-                    help='Simulate each candidate this many times; the spread over repeats '
-                         'is the transport noise')
+                    help='first step length / trust radius, normalized units')
+parser.add_argument('--n_back', type=int, default=6, help='rungs in the backtracking ladder')
+parser.add_argument('--n_repeats', type=int, default=1, help='simulator runs per candidate')
 parser.add_argument('--no_sim', dest='sim', action='store_false',
-                    help='Skip the simulator entirely (forces --eval surrogate)')
-parser.add_argument('--block', type=int, default=int(2e7), help='Muons held in memory')
-parser.add_argument('--chunk', type=int, default=2 ** 19, help='Muon chunk for the surrogate')
-parser.add_argument('--out_dir', default='outputs')
-parser.add_argument('--device', default='cuda')
+                    help='skip the simulator (forces --eval surrogate)')
+parser.add_argument('--block', type=int, default=int(2e7), help='muons held in memory')
+parser.add_argument('--chunk', type=int, default=2 ** 19, help='muon chunk for the surrogate')
+parser.add_argument('--out_dir', default='outputs', help='output directory')
+parser.add_argument('--device', default='cuda', help='torch device')
 args = parser.parse_args()
 
 BETA, C1, ETA = 0.5, 1e-4, 0.25     # backtracking factor, Armijo constant, trust threshold
 if not args.sim:
     args.eval = 'surrogate'
-torch.backends.cuda.matmul.allow_tf32 = False       # see robustness.py
+# TF32 would form the p x p accumulators at 10 mantissa bits: too few for the curvature.
+torch.backends.cuda.matmul.allow_tf32 = False
 
 DEVICE = torch.device(args.device)
 FIGS = os.path.join(args.out_dir, 'figs')
 os.makedirs(FIGS, exist_ok=True)
-COLS = ['px', 'py', 'pz', 'x', 'y', 'z', 'pdg', 'weight']
 GEN = args.muons == 'gen'
 OK, BAD, GREY = '#0072B2', '#D55E00', '0.6'
 
@@ -110,44 +72,19 @@ phi_0 = shield.initial_phi
 model, cfg = load_surrogate(args.model, phi_0)
 model.eval().to(DEVICE)
 D = model.dim
-labels = [f'M{m}:{shield.idx_mag[i].split("[")[0]}' for m, i in shield.params_idx.tolist()]
-if GEN:
-    shield._load_flow()              # before any seeding; see grad_test.py
-
-
-def read_muons(lo, hi):
-    """Muons [lo, hi) as (raw, weights); weights is None when there are none.
-
-    Both sweeps call this with the same offsets, so they see the same muons: the file
-    slices are deterministic, and the generated blocks are seeded from their offset.
-    """
-    if GEN:
-        torch.manual_seed(args.seed + lo)
-        return shield.sample_gen(n_samples=hi - lo, temperature=args.temperature), None
-    with h5py.File(shield.muons_file, 'r') as f:
-        x = np.stack([np.asarray(f[k][lo:hi], dtype=np.float32) for k in COLS], axis=1)
-    x[:, 3], x[:, 4], x[:, 5] = 0.0, 0.0, -1.0
-    x = torch.from_numpy(x)
-    return x, x[:, 7]
-
-
-n_file = None
-if not GEN or args.n_muons <= 0:
-    with h5py.File(shield.muons_file, 'r') as f:
-        n_file = f['px'].shape[0]
-if GEN:
-    n = args.n_muons if args.n_muons > 0 else n_file
-    print(f'muons: {n:,} from the generative flow at temperature {args.temperature:g} '
-          f'(unweighted)')
-else:
-    n = n_file if args.n_muons <= 0 else min(args.n_muons, n_file)
-    print(f'muons: {n:,} of the {n_file:,} in {shield.muons_file} (weighted)')
+labels = param_labels(shield)
+muons = Muons(shield, args.muons, args.seed, args.temperature)
+n = count_muons(shield, args.n_muons, GEN)
+print(f'muons: {n:,} from {muons.describe()}')
 print(f'model: {os.path.basename(args.model)} {cfg["model_type"]}, p = {cfg["p"]}, D = {D}')
 print(f'step rule: {args.step}, tested on the {args.eval}, from t0 = {args.t0:g}')
 
 # =============================================================================
 # Sweep 1: the derivatives at the nominal design
 # =============================================================================
+# The trunk t_x does not depend on the design, so with s = p(1-p) the accumulators
+#   T = sum_x w s t_x,   A = sum_x w s (1 - 2p) t_x t_x^T
+# give grad = J^T T and hess = J^T A J + d2(b.T)/du2, with J = db/du of the branch net.
 u_0 = torch.zeros(D, device=DEVICE)
 b_0 = model.branch_net(u_0.unsqueeze(0)).squeeze(0).detach()
 P = b_0.numel()
@@ -156,7 +93,8 @@ A_acc = torch.zeros(P, P, dtype=torch.float64, device=DEVICE)
 H_0, var_0, sumw = 0.0, 0.0, 0.0
 t0 = time.time()
 for lo in range(0, n, args.block):
-    raw, w_mu = read_muons(lo, min(lo + args.block, n))
+    hi = min(lo + args.block, n)
+    raw, w_mu = muons.read(lo, hi)
     with torch.no_grad():
         for c in range(0, raw.shape[0], args.chunk):
             xb = raw[c:c + args.chunk, :7].to(DEVICE)
@@ -170,7 +108,7 @@ for lo in range(0, n, args.block):
             sumw += float(xb.shape[0] if wb is None else wb.double().sum())
             T_acc += (ws @ t).double()
             A_acc += ((t * (ws * (1 - 2 * pr)).unsqueeze(1)).T @ t).double()
-    print(f'  sweep 1: {min(lo + args.block, n):,}/{n:,} muons ({time.time() - t0:.0f}s)')
+    print(f'  sweep 1: {hi:,}/{n:,} muons ({time.time() - t0:.0f}s)')
     del raw, w_mu
 
 J = torch.autograd.functional.jacobian(
@@ -181,8 +119,6 @@ Jd = J.double()
 g = (Jd.T @ T_acc).cpu().numpy()                          # dH/du
 B = (Jd.T @ A_acc @ Jd + Hb.double()).cpu().numpy()
 B = 0.5 * (B + B.T)
-if H_0 <= 0:
-    raise SystemExit('the surrogate predicts no hits at the nominal design')
 
 ev = np.linalg.eigvalsh(B)
 g_hat = g / max(np.linalg.norm(g), 1e-300)
@@ -199,12 +135,8 @@ print('  the steepest-descent direction is led by: ' + ', '.join(
 # The candidate steps
 # =============================================================================
 def trs_min(gv, Bm, delta):
-    """argmin of g.p + 0.5 p^T B p over ||p|| <= delta, exactly (More-Sorensen).
-
-    The solution satisfies (B + lam I) p = -g with lam >= max(0, -min eig B), and
-    ||p(lam)|| falls monotonically in lam, so one bisection finds it. D = 43, so the
-    eigendecomposition this is written in terms of is free.
-    """
+    """argmin of g.p + 0.5 p^T B p over ||p|| <= delta (More-Sorensen): (B + lam I) p = -g
+    with lam >= max(0, -min eig B), and ||p(lam)|| is monotone in lam, so bisect on lam."""
     e, Q = np.linalg.eigh(Bm)
     gh = Q.T @ gv
     if e[0] > 0:                                  # convex: the free minimum may be inside
@@ -238,17 +170,16 @@ def model_drop(p):
     return float(-(g @ p + 0.5 * p @ B @ p))
 
 
-radii = args.t0 * BETA ** np.arange(max(1, args.n_back))    # longest first: backtracking
+radii = args.t0 * BETA ** np.arange(args.n_back)    # longest first: backtracking
 sd = [(-r * g_hat, r, 'descent') for r in radii]
 tr = []
 for r in radii:
-    p, lam, kind = trs_min(g, B, r)
+    p, _, kind = trs_min(g, B, r)
     tr.append((p, r, kind))
 METHODS = [{'name': 'steepest descent', 'short': 'grad', 'rungs': sd},
            {'name': 'trust-region Newton', 'short': 'newton', 'rungs': tr}]
 
-# Every candidate of every method goes into one batch, so the whole line search is a
-# single sweep over the muons.
+# All candidates of both methods go into one batch: a single sweep over the muons.
 U_list = [np.zeros(D)]
 for m in METHODS:
     m['idx'] = []
@@ -261,7 +192,7 @@ if not inside.all():
     print(f'note: {int((~inside).sum())} candidate steps leave the training box; they are '
           f'kept as they are and flagged in the table')
 PHI = model.denormalize_phi(torch.from_numpy(U_all).float().to(DEVICE)).cpu()
-n_des, R = len(U_list), max(1, args.n_repeats)
+n_des, R = len(U_list), args.n_repeats
 print(f'\nsweep 2: {n_des} designs ({len(METHODS)} methods x {len(radii)} rungs, plus the '
       f'nominal) over {n:,} muons' + (f' x {R} repeats' if args.sim else ' (surrogate '
       f'only)'))
@@ -269,43 +200,15 @@ print(f'\nsweep 2: {n_des} designs ({len(METHODS)} methods x {len(radii)} rungs,
 # =============================================================================
 # Sweep 2: evaluate every candidate, surrogate and simulator, on the same muons
 # =============================================================================
-pred = np.zeros(n_des)
-pvar = np.zeros(n_des)
-sim = np.zeros((R, n_des))
-svar = np.zeros((R, n_des))
-PHI_D = PHI.to(DEVICE)
-t0 = time.time()
-for lo in range(0, n, args.block):
-    raw, w_mu = read_muons(lo, min(lo + args.block, n))
-    with torch.no_grad():
-        for c in range(0, raw.shape[0], args.chunk):
-            xb = raw[c:c + args.chunk, :7].to(DEVICE)
-            pr = model.predict_proba(PHI_D, xb.unsqueeze(0))
-            q = pr * (1 - pr)
-            if w_mu is not None:
-                wb = w_mu[c:c + args.chunk].to(DEVICE)
-                pr, q = pr * wb, q * wb ** 2
-            pred += pr.sum(1).double().cpu().numpy()
-            pvar += q.sum(1).double().cpu().numpy()
-    if args.sim:
-        wd = None if w_mu is None else w_mu.double()
-        for i in range(n_des):
-            for r in range(R):
-                hits = shield(PHI[i], raw).double()   # a new transport seed every call
-                sim[r, i] += float(hits.sum() if wd is None else (hits * wd).sum())
-                svar[r, i] += float(hits.sum() if wd is None else (hits * wd ** 2).sum())
-        del wd
-    print(f'  sweep 2: {min(lo + args.block, n):,}/{n:,} muons ({time.time() - t0:.0f}s)')
-    del raw, w_mu
-
+pred, pvar, sim, svar, _ = evaluate_designs(model, shield, muons, PHI, n, args.block,
+                                            args.chunk, R, args.sim, DEVICE)
 pstd = np.sqrt(pvar)
 smean = sim.mean(0)
 serr = sim.std(0, ddof=1) if R > 1 else np.sqrt(svar).mean(0)
 H_sur, H_sim = pred, smean
 H_ref = H_sim if args.eval == 'simulator' else H_sur      # what the step test believes
 
-# The smallest step is a free check on the derivatives: its measured drop should match
-# what the model predicts, to the accuracy of the third-order term.
+# Derivative check: the shortest step's drop should match the quadratic model.
 p_small = METHODS[0]['rungs'][-1][0]
 i_small = METHODS[0]['idx'][-1]
 print(f'\ncheck: the shortest descent step, ||p|| = {np.linalg.norm(p_small):.3g}, drops '

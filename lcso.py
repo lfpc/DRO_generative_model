@@ -1,10 +1,10 @@
-"""Train an LCSO surrogate on simulated designs, save it, and plot predicted vs. true hits.
+"""Train the LCSO surrogate of the muon shield on a fixed set of simulated designs (GPU).
 
-Simulates (or reloads) training and test designs, fits the surrogate, writes the
-checkpoint, and produces the loss curve and the two scatter plots.
+Simulates n_phi_train designs around the nominal one (plus test designs at temperature 1),
+trains, saves outputs/lcso_model.pt (or lcso_model_taylor.pt), and plots predicted vs. true hits.
 
     python lcso.py --muons temp --n_phi_train 256 --n_phi_test 30 --pz_min 2.8
-    python lcso.py --load_data                      # reuse the stored designs
+    python lcso.py --model_type taylor --load_data     # reuse outputs/{training,test}_data.h5
 """
 import argparse
 import os
@@ -20,12 +20,15 @@ from models import build_surrogate, save_surrogate
 from problems import ShipMuonShieldCuda
 from trainer import train_hits_classifier
 
-parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--model_type', default='deeponet', choices=['deeponet', 'taylor'],
-                    help="'taylor' is the per-muon quadratic, with closed-form derivatives")
-parser.add_argument('--rank', type=int, default=8, help='taylor: shared curvature directions')
+class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+    pass
+
+
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
+parser.add_argument('--model_type', default='deeponet', choices=['deeponet', 'taylor'])
+parser.add_argument('--rank', type=int, default=8, help='taylor: curvature directions')
 parser.add_argument('--muons', default='temp', choices=['data', 'uniform', 'temp', 'mixed'],
-                    help='Muon distribution for the training designs')
+                    help='training muons (temp = flow at temperature 1.5)')
 parser.add_argument('--n_phi_train', type=int, default=256)
 parser.add_argument('--n_phi_test', type=int, default=30)
 parser.add_argument('--n_muons_train', type=int, default=int(5e6))
@@ -34,15 +37,10 @@ parser.add_argument('--epochs', type=int, default=100)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--hidden_dim', type=int, default=128)
 parser.add_argument('--p', type=int, default=64, help='latent dim in deeponet')
-parser.add_argument('--pz_min', type=float, default=None,
-                    help='Reject sampled muons below this p_z (GeV). The tempered flow '
-                         'reaches ~0.7 while the real sample stops near 2.8; muons below '
-                         'that are outside the envelope the transport kernel handles and '
-                         'surface as a CUDA illegal memory access')
-parser.add_argument('--pt_max', type=float, default=None,
-                    help='Reject sampled muons above this p_t (default 14; real sample ~5.1)')
-parser.add_argument('--load_data', action='store_true',
-                    help='Reuse the stored designs instead of simulating new ones')
+# below p_z ~ 2.8 GeV (the edge of the real sample) the CUDA kernel can crash
+parser.add_argument('--pz_min', type=float, default=1.0, help='flow muons: min p_z [GeV]')
+parser.add_argument('--pt_max', type=float, default=14.0, help='flow muons: max p_t [GeV]')
+parser.add_argument('--load_data', action='store_true', help='reuse the stored designs')
 parser.add_argument('--out_dir', default='outputs')
 parser.add_argument('--device', default='cuda')
 args = parser.parse_args()
@@ -55,18 +53,14 @@ TEST_H5 = os.path.join(args.out_dir, 'test_data.h5')
 MODEL = os.path.join(args.out_dir,
                      'lcso_model.pt' if args.model_type == 'deeponet' else 'lcso_model_taylor.pt')
 
-for attr, val in (('PZ_MIN', args.pz_min), ('PT_MAX', args.pt_max)):
-    if val is not None:
-        setattr(ShipMuonShieldCuda, attr, float(val))
-        print(f'kinematic envelope: {attr} = {val}')
+ShipMuonShieldCuda.PZ_MIN = args.pz_min
+ShipMuonShieldCuda.PT_MAX = args.pt_max
 
-# uniform_fields=True disables the field-map simulation. The class default is False
-# (field map), which is slower and different physics; every other script here runs
-# uniform, so the training data must too.
+# uniform fields, as in every other script (the class default is the field map)
 shield = ShipMuonShieldCuda(n_samples=args.n_muons_train, uniform_fields=True)
 phi_0 = shield.initial_phi
-model = build_surrogate(args.model_type, phi_dim=phi_0.shape[-1], x_dim=7, phi_0=phi_0, hidden = args.hidden_dim, p = args.p,
-                        rank=args.rank).to(DEVICE)
+model = build_surrogate(args.model_type, phi_dim=phi_0.shape[-1], x_dim=7, phi_0=phi_0,
+                        hidden=args.hidden_dim, p=args.p, rank=args.rank).to(DEVICE)
 print(f'{type(model).__name__}: {sum(q.numel() for q in model.parameters()):,} params')
 
 
@@ -85,8 +79,8 @@ def sample_muons(n, temperature=None):
 
 
 def simulate_designs(path, n_phi, n_muons, temperature=None, tag=''):
-    """Simulate n_phi designs (plus the nominal one) into an HDF5 store.
-    phis are PHYSICAL and muons RAW -- what the model takes."""
+    """Simulate the nominal design plus n_phi box samples into an HDF5 store
+    (phis PHYSICAL, muons RAW: what the model takes)."""
     phis = model.denormalize_phi(
         torch.cat([torch.zeros(1, model.dim), model.sample_phi(n_phi)]).to(DEVICE)).cpu()
     with h5py.File(path, 'w') as f:
@@ -114,21 +108,16 @@ with h5py.File(TRAIN_H5, 'r') as f:
     hits = torch.from_numpy(f['hits'][:])
 print(f'training set: {tuple(muons.shape)}, hit rate {hits.float().mean():.3e}')
 
-# The model normalizes internally, so the muons stay raw; only the statistics are needed.
-# Reduced over the strided view with a float64 accumulator and NO copy: muons[..., :6]
-# cannot be reshaped without materializing it, and .reshape(-1, 6).double() on a 36 GB
-# array allocates ~90 GB, which is enough to push the muons themselves out of RAM -- and
-# the training loop random-gathers over all of them every step. float64 also matters on
-# its own: in float32 a sum over ~1e9 values stalls and the statistics come out wrong.
-sub = muons.numpy()[..., :6]                      # .numpy() on a CPU tensor is zero-copy
+# Muon statistics, stored in the model. float64 accumulator (a float32 sum over ~1e9 values
+# stalls) on a zero-copy view (a copy of the ~36 GB array does not fit in RAM).
+sub = muons.numpy()[..., :6]
 model.set_muon_norm(sub.mean(axis=(0, 1), dtype=np.float64),
                     sub.std(axis=(0, 1), dtype=np.float64) + 1e-12)
 del sub
 
 # --- train ------------------------------------------------------------------
-losses, _ = train_hits_classifier(model, phis_train, muons, hits, epochs=args.epochs,
-                                  lr=args.lr, batch_size=2 ** 22, device=DEVICE,
-                                  scheduler='cosine')
+losses = train_hits_classifier(model, phis_train, muons, hits, epochs=args.epochs,
+                               lr=args.lr, batch_size=2 ** 22, device=DEVICE)
 save_surrogate(model, MODEL)
 print(f'saved {MODEL}  (final train loss {losses[-1]:.6g})')
 

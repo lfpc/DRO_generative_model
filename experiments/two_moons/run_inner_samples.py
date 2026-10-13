@@ -2,14 +2,8 @@
 
     python3 run_inner_samples.py
 
-The three radii are in different units, so comparing the sets at "the same radius" compares
-nothing. Instead each adversary is calibrated by bisection to inflict the SAME worst-case
-risk, and then we look at the distribution it used to do it. That is the question a
-certificate answers: to believe a worst-case number you have to believe the inputs behind
-it, so the honest comparison holds the number fixed and inspects the inputs.
-
-KL-DRO moves no points -- it reweights the ones observed -- so its panel shows the sample
-with marker area proportional to weight.
+Each method is bisected to the same worst-case risk, then we plot the samples it used.
+KL-DRO only reweights, so its panel shows the observed points with area proportional to weight.
 """
 import os
 import sys
@@ -30,7 +24,7 @@ TARGET = 0.35                    # worst-case risk every method is calibrated to
 
 
 def calibrate(fn, target, lo, hi, iters=12):
-    """Smallest radius reaching `target`, by bisection. Damage increases with radius."""
+    """Smallest radius reaching `target`, by geometric bisection."""
     for _ in range(iters):
         mid = (lo * hi) ** 0.5
         if fn(mid)[0] < target:
@@ -51,7 +45,6 @@ def boundary(problem, phi, ax):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = TwoMoons(kind='poly', degree=5)
     x, y = problem.sample(20000, torch.Generator().manual_seed(0))
@@ -82,9 +75,9 @@ if __name__ == '__main__':
         ax = axes[0, j]
         for s, c in ((1.0, 'C0'), (-1.0, 'C1')):
             m = ya == s
-            size = 3.0 if wt is None else 4000 * wt[m]
-            ax.scatter(xa[m, 0][:6000], xa[m, 1][:6000], s=(size if wt is None
-                       else size[:6000]), alpha=.35, c=c, linewidths=0)
+            size = 3.0 if wt is None else 4000 * wt[m][:6000]
+            ax.scatter(xa[m, 0][:6000], xa[m, 1][:6000], s=size, alpha=.35, c=c,
+                       linewidths=0)
         boundary(problem, phi, ax)
         ax.set_title(f'{name}  {r}\nrisk {v:.3f},  log-density {lp:.2f}', fontsize=10)
 

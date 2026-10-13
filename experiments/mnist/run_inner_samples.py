@@ -1,21 +1,10 @@
-"""What does each adversary think MNIST looks like, at equal damage?
+"""What does each adversary think MNIST looks like, at equal worst-case risk?
 
     python3 run_inner_samples.py
 
-Every method is bisected to the SAME worst-case risk, so the comparison is about the shape
-of the distribution each one reaches and not about radii, which are not commensurable
-across ambiguity sets. The point of doing this on images rather than on the synthetic
-benchmarks is that the answer can be looked at directly: an adversarial score decodes to a
-picture, and a picture either is a handwritten digit or it is not.
-
-What to expect, and what would refute the method. A transport ball moves each point in
-whatever direction the loss rises fastest, which in a 64-dimensional feature space is almost
-never the direction along which digits actually vary; its scores should decode to corrupted
-digits. A KL ball over the sample cannot move anything at all -- it can only up-weight
-images that are already hard, so it is confined to the training set by construction. The
-latent ball can reach unseen images but every one of them is a push-forward of the fitted
-flow, so it should decode to digits that are harder but still digits. If the latent scores
-come out looking like noise, the manifold argument is wrong and this figure says so.
+Needs models/ from train_generator.py. Each method is bisected to the same worst-case
+risk; the top row shows images it used (decoded back to pixels), the bottom row the
+per-sample cross-entropy. KL-DRO can only reweight, so it shows the heaviest images.
 """
 import os
 import sys
@@ -40,6 +29,7 @@ NCOL = 6                         # sample images shown per digit
 
 
 def calibrate(fn, target, lo, hi, iters=10):
+    """Smallest radius reaching `target`, by geometric bisection."""
     for _ in range(iters):
         mid = (lo * hi) ** 0.5
         if fn(mid)[0] < target:
@@ -50,8 +40,7 @@ def calibrate(fn, target, lo, hi, iters=10):
 
 
 def grid(problem, x, y, w=None, seed=0):
-    """NCOL images per digit, as one array. With weights, the heaviest images -- which is
-    all a reweighting adversary can offer, since it never creates a point."""
+    """NCOL images per digit as one array: random ones, or the heaviest if weights are given."""
     g = torch.Generator().manual_seed(seed)
     rows = []
     for c in CLASSES:
@@ -65,7 +54,6 @@ def grid(problem, x, y, w=None, seed=0):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = MNIST()
     phi = torch.load(os.path.join(MODELS, 'design.pt'), weights_only=False)
@@ -79,16 +67,16 @@ if __name__ == '__main__':
 
     r_kl, (v_kl, wt) = calibrate(lambda r: inner.kl_dro(problem, phi, x, y, r),
                                  TARGET, 1e-3, 20.0)
-    r_w, (v_w, x_w) = calibrate(lambda e: inner.wasserstein_dro(problem, phi, x, y, e, steps=100),
-                                TARGET, 1e-3, 20.0)
-    r_l, (v_l, x_l, y_l) = calibrate(lambda r: inner.latent_dro(problem, flows, phi, r, family='affine', n=8000, steps=200),
-                                     TARGET, 1e-3, 20.0)
+    r_w, (v_w, x_w) = calibrate(
+        lambda e: inner.wasserstein_dro(problem, phi, x, y, e, steps=100), TARGET, 1e-3, 20.0)
+    r_l, (v_l, x_l, y_l) = calibrate(
+        lambda r: inner.latent_dro(problem, flows, phi, r, family='affine', n=8000, steps=200),
+        TARGET, 1e-3, 20.0)
 
-    panels = [('nominal', x, y, None, nom, f'{r_kl:.3g}'),
+    panels = [('nominal', x, y, None, nom, ''),
               ('KL-DRO', x, y, wt, v_kl, f'$\\rho$={r_kl:.3g}'),
               ('Wasserstein', x_w, y, None, v_w, f'$\\epsilon$={r_w:.3g}'),
               ('Latent-DRO', x_l, y_l, None, v_l, f'$\\rho$={r_l:.3g}')]
-    panels[0] = ('nominal', x, y, None, nom, '')
 
     fig, axes = plt.subplots(2, 4, figsize=(16.5, 9.2),
                              gridspec_kw={'height_ratios': [3, 1]},

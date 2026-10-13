@@ -1,4 +1,11 @@
+"""Inner loop for MNIST: three ambiguity sets against a fixed classifier.
 
+  KL-DRO        reweights the observed sample, KL(w || 1/n) <= rho.
+  Wasserstein   moves the inputs x (labels fixed), (1/n) sum ||delta_i||^2 <= eps^2.
+  Latent-DRO    perturbs the latent of each digit's flow, KL <= rho per digit.
+
+Each returns (worst-case risk, the distribution that achieved it).
+"""
 import os
 import sys
 
@@ -7,15 +14,13 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dro.baselines import kl_weights                              # noqa: E402
 from dro.transforms import TRANSFORMS, project_to_ball            # noqa: E402
-
-from problem import CLASSES                                    # noqa: E402
+from problem import CLASSES                                       # noqa: E402
 
 
 def nominal(problem, phi, x, y):
     return float(problem.risk(phi, x, y))
 
 
-# ---------------------------------------------------------------------------
 def kl_dro(problem, phi, x, y, rho, loss_fn=None):
     """Reweight the sample. Returns (worst risk, weights)."""
     l = (loss_fn or problem.loss)(phi, x, y).detach()
@@ -23,14 +28,10 @@ def kl_dro(problem, phi, x, y, rho, loss_fn=None):
     return float((w * l).sum()), w
 
 
-# ---------------------------------------------------------------------------
 def wasserstein_dro(problem, phi, x, y, eps, steps=200, lr=0.05, loss_fn=None):
     """Move the points under a shared W_2 budget. Returns (worst risk, moved points).
 
-    Ascent on the perturbations followed by a projection that rescales them all to the
-    budget -- the budget is on the AVERAGE squared displacement, not per point, so the
-    adversary is free to spend it unevenly, which is what makes it a Wasserstein ball
-    rather than a box around every sample.
+    The budget is on the AVERAGE squared displacement, so it can be spent unevenly.
     """
     d = torch.zeros_like(x, requires_grad=True)
     for _ in range(steps):
@@ -45,14 +46,11 @@ def wasserstein_dro(problem, phi, x, y, eps, steps=200, lr=0.05, loss_fn=None):
     return float(problem.risk(phi, xa, y)), xa
 
 
-# ---------------------------------------------------------------------------
 def latent_dro(problem, flows, phi, rho, family='shift', n=20000, steps=300, lr=0.05,
                seed=0, loss_fn=None):
-    """Shake the generator's latent. Returns (worst risk, samples, labels).
+    """Shake the generator's latent, one transform per class. Returns (worst risk, x, y).
 
-    One transform per class, since the generator is class-conditional. The labels are
-    balanced, so the divergence of the joint is the average of the two class divergences
-    and each class gets the same budget.
+    Each class gets n // 10 samples and the same budget rho.
     """
     g = torch.Generator().manual_seed(seed)
     tf = {s: TRANSFORMS[family](flows[s].dim) for s in CLASSES}
@@ -80,37 +78,22 @@ def latent_dro(problem, flows, phi, rho, family='shift', n=20000, steps=300, lr=
         return float(problem.risk(phi, xa, ya)), xa, ya
 
 
-# ---------------------------------------------------------------------------
 def plausibility(judge, x, y=None):
-    """Mean log-density of the adversarial points under the HELD-OUT judge flow.
+    """Mean log-density under the held-out judge flow (MNIST has no true density).
 
-    Elsewhere in this suite this is the exact density of the true model. MNIST has none, so
-    the judge is a flow fitted to the 10,000 test images -- data neither the classifier nor
-    the class-conditional generator ever saw. It answers the same question, less sharply:
-    the judge and the generator are the same model class, so a shift the judge cannot see is
-    not thereby proven plausible.
-
-    The common axis the three radii do not provide. A reweighting radius measures a
-    divergence between weightings of one sample, a transport radius measures a distance in
-    input units, and a latent radius measures a data-space divergence; they are not
-    comparable. What is comparable is whether the points the adversary certifies against
-    are points the world can produce.
+    The judge is fitted on the test images, which neither classifier nor generator saw. It
+    is the same model class as the generator, so this is weaker than an exact density.
     """
     with torch.no_grad():
         return float(judge.log_prob(x).mean())
 
-class Counter:
-    """Counts true-loss evaluations, in (design, sample) pairs.
 
-    The unit is one call of the real objective on one sample -- what a simulator charges
-    for. The inner loops differ enormously in this: reweighting needs the losses once,
-    a data-space adversary needs them again at every ascent step, and a latent adversary
-    reading a surrogate needs none at all.
-    """
+class Counter:
+    """Wraps problem.loss and counts true-loss evaluations, in (design, sample) pairs."""
 
     def __init__(self, problem):
         self.problem, self.n = problem, 0
 
-    def loss(self, phi, x, *a):
+    def loss(self, phi, x, y):
         self.n += x.shape[0]
-        return self.problem.loss(phi, x, *a)
+        return self.problem.loss(phi, x, y)

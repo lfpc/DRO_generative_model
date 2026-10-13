@@ -3,25 +3,13 @@
     min_{q >= 0, tau}  E[C(q, d)] + rho * CVaR_alpha(C(q, d)),
     C(q, d) = sum_i  b_i (d_i - q_i)_+ + h_i (q_i - d_i)_+
 
-the multi-item newsvendor that the DRO literature uses whenever the point is a demand
-distribution that a moment-based ambiguity set cannot see: demands are strongly correlated
-and multimodal, with spatially separated clusters of probability mass (Hanasusanto, Kuhn,
-Wallace & Zymler, "Distributionally robust multi-item newsvendor problems with multimodal
-demand distributions", Math. Prog. 2015).
+As in Hanasusanto, Kuhn, Wallace & Zymler (Math. Prog. 2015). The per-item cost is
+separable; only the CVaR term makes the joint demand distribution matter.
 
-Random variable: demand d in R^n_items, a mixture of well-separated correlated Gaussians --
-one cluster per market regime. Exact density, so KL against the generator is available.
-
-Decision variable: the order quantities q in R^n_+ together with the CVaR level tau, so
-design_dim = n_items + 1, in Rockafellar-Uryasev form exactly as in the portfolio.
-
-Why this problem earns its place next to the portfolio. The per-item cost is separable, so
-under a plain expectation the optimum depends only on the marginals and the joint structure
-is decoration. The CVaR term is what makes the joint matter: it looks at the upper tail of
-the TOTAL cost, which is where the clusters differ. And the gap between clusters is empty
-under the true law but wide open to a transport ball around the empirical sample -- an
-adversary with a Wasserstein budget will happily place demand in a regime that never
-occurs, while one confined to the generator's latent cannot leave the clusters.
+Random variable: demand d in R^8, a mixture of well-separated correlated Gaussians (one per
+market regime). Exact density.
+Decision variable: order quantities q >= 0 and the CVaR level tau (Rockafellar-Uryasev),
+design_dim = n_items + 1.
 """
 import torch
 
@@ -34,8 +22,7 @@ class Newsvendor:
         self.input_dim, self.design_dim = n_items, n_items + 1
         g = torch.Generator().manual_seed(seed)
         i = torch.arange(n_items, dtype=dtype)
-        # one cluster per regime, separated along a different direction each time, plus a
-        # shared correlation so items move together within a regime
+        # one cluster per regime, plus a shared low-rank correlation within a regime
         self.centres = 7.0 + 3.0 * torch.stack(
             [torch.sin(0.7 * i + 2.1 * k) + 1.4 * k for k in range(n_modes)])
         self.log_w = torch.log(torch.full((n_modes,), 1.0 / n_modes, dtype=dtype))
@@ -54,7 +41,6 @@ class Newsvendor:
         return self.centres[k] + e @ L.T
 
     def true_log_prob(self, x):
-        """Exact: a log-sum-exp over the mixture components."""
         return torch.logsumexp(self._mix().log_prob(x.unsqueeze(1)) + self.log_w, dim=1)
 
     def cost(self, q, x):
@@ -79,11 +65,7 @@ class Newsvendor:
         return torch.cat([self.centres.mean(0), torch.zeros(1, dtype=self.dtype)])
 
     def solve(self, x, steps=3000, lr=0.05):
-        """Nominal optimum on a sample, by projected gradient descent.
-
-        Plain SGD rather than Adam: the projection onto q >= 0 fights Adam's per-coordinate
-        scaling in exactly the way documented for the portfolio's simplex projection.
-        """
+        """Nominal optimum on a sample, by projected momentum SGD."""
         phi = self.init_design().requires_grad_(True)
         opt = torch.optim.SGD([phi], lr=lr, momentum=0.9)
         for _ in range(steps):

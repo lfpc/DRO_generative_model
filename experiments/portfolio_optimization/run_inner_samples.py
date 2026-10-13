@@ -2,10 +2,8 @@
 
     python3 run_inner_samples.py
 
-Every method is calibrated by bisection to the SAME worst-case risk, then we look at the
-returns it used. The loss sees the ten assets only through r = w'xi and penalises the lower
-tail of r, so the return distribution is the object to inspect -- a ten-dimensional scatter
-would hide exactly what matters.
+Each method is bisected to the same worst-case risk, then we plot the distribution of the
+portfolio return r = w'xi it used (the loss sees xi only through r).
 """
 import os
 import sys
@@ -27,6 +25,7 @@ TARGET = -0.55                   # worst-case risk every method is calibrated to
 
 
 def calibrate(fn, target, lo, hi, iters=12):
+    """Smallest radius reaching `target`, by geometric bisection."""
     for _ in range(iters):
         mid = (lo * hi) ** 0.5
         if fn(mid)[0] < target:
@@ -37,7 +36,6 @@ def calibrate(fn, target, lo, hi, iters=12):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = Portfolio()
     x = problem.sample(20000, torch.Generator().manual_seed(0))

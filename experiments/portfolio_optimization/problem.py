@@ -1,15 +1,10 @@
-"""Mean-risk portfolio selection: the standard numerical benchmark of the DRO literature
-(Delage & Ye 2010; Mohajerin Esfahani & Kuhn 2018, Sec. 7.2).
+"""Mean-CVaR portfolio selection (Mohajerin Esfahani & Kuhn 2018, Sec. 7.2).
 
-    min_w  E[-w'xi] + rho * CVaR_alpha(-w'xi),      w in the simplex
+    min_{w in simplex, tau}  E[-w'xi] + rho * (tau + E[(-w'xi - tau)_+] / alpha)
 
-Returns follow a one-factor model, xi_i = psi + zeta_i, with psi a systematic factor shared
-by every asset and zeta_i idiosyncratic. Higher-index assets pay more and carry more risk,
-so the optimal portfolio is a real trade-off rather than a corner.
-
-CVaR is written in Rockafellar-Uryasev form, CVaR_alpha(L) = min_tau tau + E[(L-tau)_+]/alpha,
-so the objective becomes the expectation of a per-sample loss over the decision (w, tau) and
-stays convex in it.
+CVaR in Rockafellar-Uryasev form, so the objective is an expectation of a per-sample loss
+and convex in (w, tau). Returns follow a one-factor model xi_i = psi + zeta_i; higher-index
+assets pay more and are riskier.
 """
 import torch
 
@@ -30,7 +25,7 @@ class Portfolio:
         self.n_assets, self.rho, self.alpha, self.dtype = n_assets, rho, alpha, dtype
         self.input_dim, self.design_dim = n_assets, n_assets + 1
         i = torch.arange(1, n_assets + 1, dtype=dtype)
-        self.sys_sd = 0.02                  # systematic factor
+        self.sys_sd = 0.02                          # systematic factor
         self.mu, self.sd = i * 0.03, i * 0.025      # idiosyncratic mean and spread
 
     def sample(self, n, generator=None):

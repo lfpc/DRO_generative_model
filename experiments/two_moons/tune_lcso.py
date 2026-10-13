@@ -1,13 +1,11 @@
 """Tune LCSO on two moons, one knob group at a time.
 
-    python3 tune_lcso.py stage1      surrogate x step
-    python3 tune_lcso.py stage2      designs per fit x samples per design
-    python3 tune_lcso.py stage3      surrogate capacity and fit length
+    python3 tune_lcso.py stage1 [kind] [par]     surrogate x step
+    python3 tune_lcso.py stage2 [kind] [par]     designs per fit x samples per design
+    python3 tune_lcso.py stage3 [kind] [par]     surrogate capacity and fit length
 
-Staged rather than a full grid: the knobs are not independent, but a full cross of them is
-hundreds of runs, and the first stage settles which surrogate is even in contention. Every
-run gets the same sample budget and is scored by the true risk of the design it returns,
-against Adam on the exact gradient as the reference.
+kind is 'poly' (default) or 'nn', par its degree / hidden width (default 3). Every run gets
+the same sample budget and is scored by the true risk of the design it returns.
 """
 import itertools
 import os
@@ -75,7 +73,6 @@ def stage3(problem, sur='taylor', step='tr-newton', n_designs=None, n_samples=20
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     stage = sys.argv[1] if len(sys.argv) > 1 else 'stage1'
     kind = sys.argv[2] if len(sys.argv) > 2 else 'poly'
     par = int(sys.argv[3]) if len(sys.argv) > 3 else 3

@@ -1,6 +1,7 @@
-from math import sqrt, log, exp
+"""LCSO surrogates of the muon shield: p(hit | phi, x) for a design phi and a muon x."""
 import torch
 from scipy.stats import qmc
+
 
 def _mlp(in_dim, hidden, out_dim, activation):
     act = {'relu': torch.nn.ReLU, 'gelu': torch.nn.GELU, 'silu': torch.nn.SiLU}[activation]
@@ -19,8 +20,6 @@ class LCSONet(torch.nn.Module):
     def __init__(self, hidden: int = 128, p: int = 128, phi_dim: int = 43, x_dim: int = 7,
                  sampling: str = 'sobol', delta: float = 0.1, phi_0: torch.Tensor = None):
         super().__init__()
-        if phi_0 is None:
-            raise ValueError('phi_0 is required: it fixes the +-delta box for phi')
         self.hp = {'hidden': hidden, 'p': p}
         self.dim, self.x_dim, self.p = phi_dim, x_dim, p
         self.sampling, self.delta = sampling, delta
@@ -71,10 +70,8 @@ class LCSONet(torch.nn.Module):
             u = torch.rand(n_samples, self.dim, generator=gen) * 2 - 1
         elif s == 'lhs':
             u = qmc.LatinHypercube(d=self.dim, seed=seed).random(n_samples) * 2 - 1
-        elif s == 'sobol':
-            u = qmc.Sobol(d=self.dim, scramble=True, seed=seed).random(n_samples) * 2 - 1
         else:
-            raise ValueError(f'unknown sampling method: {self.sampling}')
+            u = qmc.Sobol(d=self.dim, scramble=True, seed=seed).random(n_samples) * 2 - 1
         return torch.as_tensor(u, dtype=torch.float32)
 
     # ---- evaluation --------------------------------------------------------
@@ -280,14 +277,9 @@ class TaylorLCSONet(LCSONet):
 # --------------------------------------------------------------------------- #
 # build / save / load
 # --------------------------------------------------------------------------- #
-SURROGATES = {'deeponet': LCSONet, 'taylor': TaylorLCSONet}
-
-
 def build_surrogate(model_type='deeponet', phi_dim=43, x_dim=7, phi_0=None, hidden=128,
                     p=128, sampling='sobol', delta=0.1, **taylor_kw):
     """`taylor_kw` (rank, use_residual) is ignored for 'deeponet'."""
-    if model_type not in SURROGATES:
-        raise ValueError(f'unknown model_type {model_type!r}; pick one of {list(SURROGATES)}')
     common = dict(hidden=hidden, p=p, phi_dim=phi_dim, x_dim=x_dim,
                   sampling=sampling, delta=delta, phi_0=phi_0)
     return (LCSONet(**common) if model_type == 'deeponet'
@@ -304,42 +296,14 @@ def save_surrogate(model, path):
 def load_surrogate(path, phi_0, map_location='cpu', delta=None):
     """Rebuild a surrogate saved by save_surrogate. Returns (model, config)."""
     obj = torch.load(path, map_location=map_location, weights_only=False)
-    if not (isinstance(obj, dict) and 'state_dict' in obj and 'config' in obj):
-        raise RuntimeError(f'{path} is not a self-describing checkpoint; retrain with the '
-                           f'current lcso.py.')
     cfg = dict(obj['config'])
     if delta is not None:
         cfg['delta'] = delta
     model = build_surrogate(phi_0=phi_0, **cfg)
+    # the phi box comes from phi_0, not the file (older checkpoints do not store it)
     sd = {**model.state_dict(), **obj['state_dict']}
-    if 'muon_mean' in obj:              # written when the statistics were plain attributes
+    if 'muon_mean' in obj:      # older checkpoints keep the muon statistics outside the state_dict
         sd['muon_mean'] = torch.as_tensor(obj['muon_mean'], dtype=torch.float32).view(-1)
         sd['muon_std'] = torch.as_tensor(obj['muon_std'], dtype=torch.float32).view(-1)
-    elif 'muon_mean' not in obj['state_dict']:
-        raise RuntimeError(f'{path} carries no muon normalization, so it cannot be '
-                           f'evaluated. Retrain with the current lcso.py.')
     model.load_state_dict(sd)
     return model, cfg
-
-
-# --------------------------------------------------------------------------- #
-# Gaussian process (gp.py)
-# --------------------------------------------------------------------------- #
-def GaussianProcess(train_X, train_Y, bounds=None):
-    from botorch.models import SingleTaskGP
-    from botorch.models.transforms.input import Normalize
-    from botorch.models.transforms.outcome import Standardize
-    from gpytorch.kernels import MaternKernel, ScaleKernel
-    from gpytorch.means import ConstantMean
-    from gpytorch.priors import LogNormalPrior
-
-    d = train_X.shape[-1]
-    loc = sqrt(2.0) + 0.5 * log(d)
-    base = MaternKernel(nu=2.5, ard_num_dims=d,
-                        lengthscale_prior=LogNormalPrior(loc, sqrt(3.0)))
-    base.lengthscale = exp(loc)
-    covar = ScaleKernel(base, outputscale_prior=LogNormalPrior(0.0, 1.0))
-    covar.outputscale = 1.0
-    return SingleTaskGP(train_X=train_X, train_Y=train_Y, mean_module=ConstantMean(),
-                        covar_module=covar, input_transform=Normalize(d=d, bounds=bounds),
-                        outcome_transform=Standardize(m=1)).to(torch.float64)

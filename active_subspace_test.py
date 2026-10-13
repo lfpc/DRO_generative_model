@@ -1,48 +1,8 @@
-"""Find the active subspace of the surrogate, then walk its directions with the simulator.
+"""Active subspace of the surrogate's log hits, then walk its top directions with the simulator.
 
-The active subspace of a response f(u) is the eigen-decomposition of
-
-    C = E_u [ grad f(u) grad f(u)^T ],
-
-averaged over designs u drawn from the tolerance box. Its leading eigenvectors are the
-directions along which f actually moves; the rest of the 43-dimensional design space is
-inactive, and the eigenvalue gap says how many directions are really needed. Here f is
-log H, the log of the expected hit count, so a direction is "active" when it changes the
-hits by a large FACTOR rather than by a large absolute number -- the hits span decades
-across the box, and without the log the estimate is dominated by whichever designs happen
-to leak most.
-
-Nothing about that is a statement about the shield until the simulator agrees, so every
-direction the method returns is then walked exactly as grad_test.py walks the gradient:
-the surrogate's prediction with its Bernoulli spread against the simulator on the same
-muons, at the same designs.
-
-Both halves run on the SAME full muon sample -- --n_muons 0 means every muon the file
-holds, and with --muons gen it draws that many from the flow. What makes the subspace
-affordable at that size is the structure of the DeepONet: with s = p(1-p),
-
-    grad H(u) = J(u)^T T(u),   J = db/du,   T(u) = sum_x w_x s_x(u) t_x
-
-and T is the only muon-dependent piece. It is a p-vector per design, so ONE sweep over the
-muons accumulates it for every design at once, and the gradients then come from a single
-backward through the branch net -- no muon work per design and no subsampling. The script
-makes two sweeps: one for the subspace, one for the walks it selects.
-
-Two more things come out of the same sweep:
-
-  activity scores    a_i = sum_k nu_k W_ik^2, the standard per-parameter importance of the
-                     method: how much of the response the parameter carries once the
-                     directions are taken into account, which is not the same ranking as
-                     moving it on its own
-  sufficient summary H against the first active variable y = w_1.u. If the cloud collapses
-                     onto a curve, the response really is a function of that one direction
-
-The eigenvalues and the subspace itself are bootstrapped over the sampled designs, so the
-report says how many directions survive resampling rather than asserting a number.
-
-Designs are box samples scaled by a random factor in [0, 1], which spreads their radii
-from the nominal design out to the box face; sampling uniformly in the box instead would
-put every one of them at ||u|| ~ sqrt(D/3) = 3.8, far outside the range the walks cover.
+C = E_u[grad log H grad log H^T] over designs u in the training box; its leading
+eigenvectors are walked like grad_test.py walks the gradient, surrogate vs. simulator on the
+same muons. Eigenvalues and subspaces are bootstrapped over the designs.
 
     python active_subspace_test.py --no_sim
     python active_subspace_test.py --k 3 --n_points 5
@@ -52,7 +12,6 @@ import argparse
 import os
 import time
 
-import h5py
 import numpy as np
 import torch
 import matplotlib
@@ -60,6 +19,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from models import load_surrogate
+from muons_io import Muons, count_muons, evaluate_designs, param_labels
 from problems import ShipMuonShieldCuda
 
 
@@ -69,43 +29,29 @@ class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter,
 
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
-parser.add_argument('--model', default='outputs/lcso_model.pt')
+parser.add_argument('--model', default='outputs/lcso_model.pt', help='surrogate checkpoint')
 parser.add_argument('--muons', default='gen', choices=['gen', 'data'],
-                    help="'gen' samples the generative flow (unweighted); 'data' reads the "
-                         "real file, whose per-muon weights every sum then carries")
+                    help="gen: generative flow (unweighted); data: real file (weighted)")
 parser.add_argument('--temperature', type=float, default=1.0, help='gen: flow temperature')
-parser.add_argument('--seed', type=int, default=0)
-parser.add_argument('--n_muons', type=int, default=0,
-                    help='Muons for the whole analysis -- the subspace and the walks both. '
-                         '0 means as many as the muon file holds, for --muons gen too')
+parser.add_argument('--seed', type=int, default=0, help='random seed')
+parser.add_argument('--n_muons', type=int, default=0, help='0 = size of the muon file')
 parser.add_argument('--n_designs', type=int, default=256,
-                    help='Designs the gradients are averaged over: the Monte Carlo sample '
-                         'of the active-subspace estimator. The top-k subspace needs '
-                         'O(k log D) of them, so a few hundred is plenty; they all ride '
-                         'along in one sweep, but each costs a dot product per muon')
-parser.add_argument('--k', type=int, default=3, help='Active directions to walk')
-parser.add_argument('--t_max', type=float, default=1.0,
-                    help='Half-length of the walks, in normalized units')
-parser.add_argument('--n_points', type=int, default=5,
-                    help='Points per walk (forced odd so the nominal design is one, and it '
-                         'is evaluated once for all the directions)')
-parser.add_argument('--n_repeats', type=int, default=1,
-                    help='Simulate each design this many times; the spread over repeats is '
-                         'the transport noise')
-parser.add_argument('--no_sim', dest='sim', action='store_false',
-                    help='Skip the simulator. The walks are still evaluated with the '
-                         'surrogate over the full muon sample')
-parser.add_argument('--block', type=int, default=int(2e7), help='Muons held in memory')
-parser.add_argument('--chunk', type=int, default=2 ** 19, help='Muon chunk for the surrogate')
-parser.add_argument('--out_dir', default='outputs')
-parser.add_argument('--device', default='cuda')
+                    help='designs the gradient outer product is averaged over')
+parser.add_argument('--k', type=int, default=3, help='active directions to walk')
+parser.add_argument('--t_max', type=float, default=1.0, help='walk half-length, normalized')
+parser.add_argument('--n_points', type=int, default=5, help='points per walk (made odd)')
+parser.add_argument('--n_repeats', type=int, default=1, help='simulator runs per design')
+parser.add_argument('--no_sim', dest='sim', action='store_false', help='surrogate only')
+parser.add_argument('--block', type=int, default=int(2e7), help='muons held in memory')
+parser.add_argument('--chunk', type=int, default=2 ** 19, help='muon chunk for the surrogate')
+parser.add_argument('--out_dir', default='outputs', help='output directory')
+parser.add_argument('--device', default='cuda', help='torch device')
 args = parser.parse_args()
 
 N_BOOT = 200
 DEVICE = torch.device(args.device)
 FIGS = os.path.join(args.out_dir, 'figs')
 os.makedirs(FIGS, exist_ok=True)
-COLS = ['px', 'py', 'pz', 'x', 'y', 'z', 'pdg', 'weight']
 GEN = args.muons == 'gen'
 OK, BAD, GREY = '#0072B2', '#D55E00', '0.6'
 
@@ -116,38 +62,10 @@ model.eval().to(DEVICE)
 for q in model.parameters():
     q.requires_grad_(False)          # only the designs carry gradients here
 D = model.dim
-labels = [f'M{m}:{shield.idx_mag[i].split("[")[0]}' for m, i in shield.params_idx.tolist()]
-if GEN:
-    shield._load_flow()              # before any seeding; see grad_test.py
-
-
-def read_muons(lo, hi):
-    """Muons [lo, hi) as (raw, weights); weights is None when there are none.
-
-    Both sweeps call this with the same offsets, so they see the same muons: the file
-    slices are deterministic, and the generated blocks are seeded from their offset.
-    """
-    if GEN:
-        torch.manual_seed(args.seed + lo)
-        return shield.sample_gen(n_samples=hi - lo, temperature=args.temperature), None
-    with h5py.File(shield.muons_file, 'r') as f:
-        x = np.stack([np.asarray(f[k][lo:hi], dtype=np.float32) for k in COLS], axis=1)
-    x[:, 3], x[:, 4], x[:, 5] = 0.0, 0.0, -1.0
-    x = torch.from_numpy(x)
-    return x, x[:, 7]
-
-
-n_file = None
-if not GEN or args.n_muons <= 0:            # the only reason to touch the file
-    with h5py.File(shield.muons_file, 'r') as f:
-        n_file = f['px'].shape[0]
-if GEN:
-    n = args.n_muons if args.n_muons > 0 else n_file
-    print(f'muons: {n:,} from the generative flow at temperature {args.temperature:g} '
-          f'(unweighted)')
-else:
-    n = n_file if args.n_muons <= 0 else min(args.n_muons, n_file)
-    print(f'muons: {n:,} of the {n_file:,} in {shield.muons_file} (weighted)')
+labels = param_labels(shield)
+muons = Muons(shield, args.muons, args.seed, args.temperature)
+n = count_muons(shield, args.n_muons, GEN)
+print(f'muons: {n:,} from {muons.describe()}')
 print(f'model: {os.path.basename(args.model)} {cfg["model_type"]}, p = {cfg["p"]}, D = {D}')
 
 # =============================================================================
@@ -156,8 +74,8 @@ print(f'model: {os.path.basename(args.model)} {cfg["model_type"]}, p = {cfg["p"]
 # Row 0 is the nominal design; the rest is the Monte Carlo sample the subspace averages
 # over. The trunk is evaluated once per muon chunk and shared by every design.
 torch.manual_seed(args.seed + 1)
-U = torch.cat([torch.zeros(1, D),
-               model.sample_phi(args.n_designs) * torch.rand(args.n_designs, 1)])
+U_box = model.sample_phi(args.n_designs, seed=args.seed + 1)
+U = torch.cat([torch.zeros(1, D), U_box * torch.rand(args.n_designs, 1)])
 MD = U.shape[0]
 with torch.no_grad():
     B = model.branch_net(U.to(DEVICE))                                # (MD, p)
@@ -168,7 +86,8 @@ DES = max(1, 2 ** 24 // args.chunk)          # designs held against one muon chu
 print(f'sweep 1: {MD} designs x {n:,} muons = {MD * n:.3g} design-muon evaluations')
 t0 = time.time()
 for lo in range(0, n, args.block):
-    raw, w_mu = read_muons(lo, min(lo + args.block, n))
+    hi = min(lo + args.block, n)
+    raw, w_mu = muons.read(lo, hi)
     with torch.no_grad():
         for c in range(0, raw.shape[0], args.chunk):
             xb = raw[c:c + args.chunk, :7].to(DEVICE)
@@ -181,7 +100,7 @@ for lo in range(0, n, args.block):
                     pr, sw = pr * wb, sw * wb
                 H_acc[j:j + DES] += pr.double().sum(1)
                 T_acc[j:j + DES] += (sw @ t).double()
-    print(f'  sweep 1: {min(lo + args.block, n):,}/{n:,} muons ({time.time() - t0:.0f}s)')
+    print(f'  sweep 1: {hi:,}/{n:,} muons ({time.time() - t0:.0f}s)')
     del raw, w_mu
 
 # grad_j = J(u_j)^T T_j = d/du [b(u).T_j] with T_j frozen, and the rows are independent,
@@ -193,11 +112,8 @@ H_all = H_acc.cpu().numpy()
 H_0, g_0 = H_all[0], G_all[0]
 U_mc, H_mc, G_mc = U[1:].numpy(), H_all[1:], G_all[1:]
 print(f'nominal design: {H_0:,.2f} {"" if GEN else "weighted "}hits')
-if H_0 <= 0:
-    raise SystemExit('the surrogate predicts no hits at the nominal design')
 
-# Free consistency check on the gradient: the nearest design's rise, by difference,
-# against what the gradient at the nominal design predicts along the same direction.
+# Gradient check: finite difference to the nearest design vs. the nominal gradient.
 j = int(np.argmin(np.linalg.norm(U_mc, axis=1)))
 r = float(np.linalg.norm(U_mc[j]))
 print(f'  check: the nearest design sits at ||u|| = {r:.3f}, where the difference gives a '
@@ -215,8 +131,8 @@ print(f'\nsubspace from {len(G)} design gradients; ||u|| from '
       f'{np.linalg.norm(U_mc, axis=1).min():.2f} to '
       f'{np.linalg.norm(U_mc, axis=1).max():.2f}')
 
-# Bootstrap over the designs: eigenvalues, and the distance between the true k-dimensional
-# subspace and the resampled one, which is what says how many directions are resolved.
+# Bootstrap over the designs: eigenvalue CIs, and the distance between the k-dim subspace
+# and its resampled version (how many directions are actually resolved).
 rng = np.random.default_rng(args.seed + 2)
 K_MAX = min(6, D)
 nu_boot = np.zeros((N_BOOT, D))
@@ -258,9 +174,8 @@ print(f'\nalignment with the gradient at the nominal design: '
 # =============================================================================
 # The directions to walk
 # =============================================================================
-# Eigenvectors have no sign; point each one the way that raises the hits, so +t is the
-# bad direction in every panel.
-K = max(1, min(args.k, D))
+# Sign each eigenvector so that +t raises the hits.
+K = min(args.k, D)
 dirs = []
 for k in range(K):
     w = W[:, k].copy()
@@ -284,7 +199,7 @@ for w in dirs:
     idx_of.append(row)
 U_all = np.clip(np.stack(U_list), -1, 1)
 PHI = model.denormalize_phi(torch.from_numpy(U_all).float().to(DEVICE)).cpu()
-n_des, R = len(U_list), max(1, args.n_repeats)
+n_des, R = len(U_list), args.n_repeats
 
 print(f'\nsweep 2: {K} directions, {n_des} designs over {n:,} muons'
       + (f' x {R} repeats' if args.sim else ' (surrogate only)'))
@@ -295,35 +210,8 @@ for k, w in enumerate(dirs):
 # =============================================================================
 # Sweep 2: walk them with the surrogate and the simulator, on the same muons
 # =============================================================================
-pred = np.zeros(n_des)          # sum_x w p         expected hits
-pvar = np.zeros(n_des)          # sum_x w^2 p(1-p)  spread of one simulator draw
-sim = np.zeros((R, n_des))      # sum_x w hit       simulated hits, per repeat
-svar = np.zeros((R, n_des))     # sum_x w^2 hit     its counting error
-PHI_D = PHI.to(DEVICE)
-t0 = time.time()
-for lo in range(0, n, args.block):
-    raw, w_mu = read_muons(lo, min(lo + args.block, n))
-    with torch.no_grad():
-        for c in range(0, raw.shape[0], args.chunk):
-            xb = raw[c:c + args.chunk, :7].to(DEVICE)
-            pr = model.predict_proba(PHI_D, xb.unsqueeze(0))          # (n_des, chunk)
-            q = pr * (1 - pr)
-            if w_mu is not None:
-                wb = w_mu[c:c + args.chunk].to(DEVICE)
-                pr, q = pr * wb, q * wb ** 2
-            pred += pr.sum(1).double().cpu().numpy()
-            pvar += q.sum(1).double().cpu().numpy()
-    if args.sim:
-        wd = None if w_mu is None else w_mu.double()
-        for i in range(n_des):
-            for rr in range(R):
-                hits = shield(PHI[i], raw).double()   # a new transport seed every call
-                sim[rr, i] += float(hits.sum() if wd is None else (hits * wd).sum())
-                svar[rr, i] += float(hits.sum() if wd is None else (hits * wd ** 2).sum())
-        del wd
-    print(f'  sweep 2: {min(lo + args.block, n):,}/{n:,} muons ({time.time() - t0:.0f}s)')
-    del raw, w_mu
-
+pred, pvar, sim, svar, _ = evaluate_designs(model, shield, muons, PHI, n, args.block,
+                                            args.chunk, R, args.sim, DEVICE)
 pstd = np.sqrt(pvar)
 smean = sim.mean(0)
 serr = sim.std(0, ddof=1) if R > 1 else np.sqrt(svar).mean(0)
@@ -390,7 +278,7 @@ plt.close(fig)
 M = np.stack(dirs)
 fig, ax = plt.subplots(2, 1, figsize=(max(9, D * 0.28), 3.2 + 0.5 * K),
                        constrained_layout=True,
-                       gridspec_kw={'height_ratios': [1, max(1, K) / 2]})
+                       gridspec_kw={'height_ratios': [1, K / 2]})
 o = np.argsort(-act)
 ax[0].bar(np.arange(D), act[o] / max(act.sum(), 1e-300), color=OK)
 ax[0].set_xticks(np.arange(D), [labels[i] for i in o], rotation=90, fontsize=7)

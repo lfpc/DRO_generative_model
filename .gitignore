@@ -8,6 +8,7 @@ outputs/
 # binaries that churn on every run.
 experiments/**/figs/
 experiments/**/results/
+experiments/**/logs/
 *.json
 *.pt
 *.h5

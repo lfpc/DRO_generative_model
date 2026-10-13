@@ -1,19 +1,10 @@
-"""Fit a class-conditional flow to the MNIST features and validate what it learned.
+"""Fit one flow per digit to the MNIST features, plus a held-out judge flow.
 
     python3 train_generator.py
 
-One flow per digit, so p(x, y) = p(y) p(x | y): an adversary then moves the latent of the
-relevant digit's flow, which changes how a three is written and leaves it a three. That is
-the semantics adversarial training assumes, and with ten classes it is the only sensible
-factorisation -- a single unconditional flow would let the adversary quietly turn the label
-distribution instead of the images.
-
-Validation is where real data costs us something. Everywhere else in this suite the
-generator is scored against an exact density; MNIST has none. Two substitutes are recorded:
-held-out negative log-likelihood, which detects overfitting, and a SECOND unconditional flow
-fitted on the 10,000 test images -- data neither the classifier nor the class-conditional
-flows ever see -- which serves as the plausibility judge later on. That judge is a weaker
-instrument than an exact density and is labelled as such wherever it is used.
+p(x, y) = p(y) p(x | y), so a latent adversary changes how a digit is written, not its
+label. The judge is an unconditional flow on the TEST images, used as the plausibility
+measure (MNIST has no true density). Saves models/generator.pt, judge.pt and design.pt.
 """
 import os
 import sys
@@ -32,6 +23,7 @@ MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 
 
 def _fit_one(x, dim, epochs, batch, lr, seed, every, patience, val_frac=0.15):
+    """One flow, early-stopped on a held-out `val_frac` split. Returns (flow, history)."""
     g = torch.Generator().manual_seed(seed)
     n_val = int(val_frac * x.shape[0])
     perm = torch.randperm(x.shape[0], generator=g)
@@ -46,10 +38,7 @@ def _fit_one(x, dim, epochs, batch, lr, seed, every, patience, val_frac=0.15):
         loss = -flow.log_prob(xt[idx]).mean()
         opt.zero_grad()
         loss.backward()
-        # A coupling flow on 784 pixels is not stable at the learning rate the low-
-        # dimensional benchmarks use: without this clip one digit in ten diverges early and
-        # early stopping then preserves a barely-trained checkpoint, which is invisible in
-        # the training curve and obvious in the held-out likelihood.
+        # without the clip about one digit in ten diverges early
         torch.nn.utils.clip_grad_norm_(flow.parameters(), 20.0)
         opt.step()
         sched.step()
@@ -72,12 +61,8 @@ def _fit_one(x, dim, epochs, batch, lr, seed, every, patience, val_frac=0.15):
 def train(problem, epochs=2500, batch=256, lr=4e-4, seed=0, every=25, patience=12):
     """A flow per digit, each early-stopped on its own held-out likelihood.
 
-    Small flows -- six couplings of width 64, under a million parameters. A wider one
-    (eight couplings of width 256, 5.4M parameters) fits 784 pixels of a single digit from
-    fewer than five thousand images by memorising them: the training loss falls while the
-    held-out negative log-likelihood climbs past 10^5, and early stopping then preserves a
-    barely-trained checkpoint. The capacity, not the learning rate or the preprocessing, is
-    what decides this.
+    Keep the flows small: wide ones memorise the ~6k images per digit and the held-out NLL
+    blows up.
     """
     flows, hist = {}, {}
     for c in CLASSES:
@@ -90,13 +75,7 @@ def train(problem, epochs=2500, batch=256, lr=4e-4, seed=0, every=25, patience=1
 
 
 def train_judge(problem, epochs=4000, batch=256, lr=4e-4, seed=99, every=25, patience=16):
-    """The plausibility judge: one unconditional flow on the TEST features.
-
-    Held out from everything else, so "how plausible is this adversarial score" is answered
-    by a model that never saw the data the adversary was built from. It stands in for the
-    exact density the synthetic benchmarks have, and it is a weaker instrument: the judge
-    and the defendant are the same model class.
-    """
+    """The plausibility judge: one unconditional flow on the TEST features."""
     flow, h = _fit_one(problem.test_features, problem.input_dim, epochs, batch, lr, seed,
                        every, patience)
     print(f'  judge: kept epoch {h["stopped_at"]}, held-out NLL {h["best"]:.2f}')
@@ -145,8 +124,7 @@ def plot(problem, flows, hist, judge_hist):
     ax.set(xlabel='digit', ylabel='held-out NLL', title='fit quality by digit',
            xticks=CLASSES)
 
-    # pixel marginals: the two most variable pixels and the two least, the latter being
-    # the near-degenerate background where an off-manifold adversary does its work
+    # pixel marginals: the two most variable pixels and two near-constant background ones
     xr = problem.features
     xf = torch.cat([flows[c].sample(2000, torch.Generator().manual_seed(c)) for c in CLASSES])
     sd = xr.std(0)
@@ -160,7 +138,7 @@ def plot(problem, flows, hist, judge_hist):
                 ls='--')
         ax.set(title=f'pixel {k} (sd {float(sd[k]):.2f})', yticks=[])
 
-    # what the generator actually produces, as images: one row per digit, side by side
+    # real vs generated images, one row per digit
     for col, (lab, src) in enumerate((('real', None), ('flow', flows))):
         ax = fig.add_subplot(gs[1:, 3 * col:3 * col + 3])
         tiles = []
@@ -170,8 +148,7 @@ def plot(problem, flows, hist, judge_hist):
             tiles.append(problem.to_image(x).reshape(-1, 28, 28))
         grid = torch.cat([torch.cat(list(t), 1) for t in tiles], 0)
         ax.imshow(grid.clamp(0, 1).numpy(), cmap='gray_r')
-        ax.set(title=f'{lab} digits (784 pixels)',
-               xticks=[], yticks=[])
+        ax.set(title=f'{lab} digits (784 pixels)', xticks=[], yticks=[])
 
     os.makedirs(OUT, exist_ok=True)
     fig.savefig(os.path.join(OUT, 'generator.png'), dpi=140)
@@ -179,7 +156,6 @@ def plot(problem, flows, hist, judge_hist):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     problem = MNIST()
     flows, hist = train(problem)
     judge, judge_hist = train_judge(problem)

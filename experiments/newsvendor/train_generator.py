@@ -1,14 +1,11 @@
-"""Fit a normalizing flow to the input distribution and validate what it learned.
+"""Fit a normalizing flow to the input distribution and check it against the true density.
 
     python3 train_generator.py
 
-Three numbers are recorded, because the training loss alone does not say whether the
-generator is usable: the held-out loss says whether it is overfitting, KL(P || p_theta)
-says how far the fitted density sits from the truth -- the quantity the DRO layer cares
-about, since the ambiguity radii are of the same order -- and the per-variable marginals at
-the end make sure an error in one of the 8 cannot hide in an average.
-
-The demand clusters are well separated, so an overfitted flow does not blur -- it invents mass in the gaps between regimes, which is precisely the failure the ambiguity set is supposed to rule out.
+Records train/held-out NLL and KL(P || p_theta) on a fixed true sample, early-stops on the
+held-out NLL, plots the marginals, and saves models/generator.pt and models/data.pt.
+The demand clusters are well separated: an overfitted flow invents mass in the gaps
+between regimes.
 """
 import os
 import sys
@@ -20,7 +17,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dro.flows import Flow, load_flow                              # noqa: E402
-from problem import Newsvendor                                  # noqa: E402
+from problem import Newsvendor                                     # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
 MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
@@ -28,13 +25,7 @@ MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 
 def train(problem, n_train=60000, epochs=4000, batch=512, lr=3e-3, seed=0, every=10,
           patience=25):
-    """Fit the flow, early-stopped on held-out likelihood.
-
-    The sample size matters more than the capacity here: at 6,000 training points this
-    flow stops at a KL several times worse than at 60,000, while widening or deepening
-    it at the smaller sample makes matters worse rather than better. The radii the DRO
-    layer uses are of the same order as that KL, so the difference is not cosmetic.
-    """
+    """Fit the flow, early-stopped on held-out likelihood. Returns (flow, history)."""
     g = torch.Generator().manual_seed(seed)
     x = problem.sample(n_train, g)
     x_val = problem.sample(n_train // 4, g)
@@ -45,7 +36,7 @@ def train(problem, n_train=60000, epochs=4000, batch=512, lr=3e-3, seed=0, every
     opt = torch.optim.Adam(flow.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
     hist = {'epoch': [], 'train': [], 'val': [], 'kl': []}
-    best = (float('inf'), 0, None)
+    best = (float('inf'), 0, None)              # (val loss, epoch, state_dict)
 
     for ep in range(epochs):
         idx = torch.randperm(n_train, generator=g)[:batch]
@@ -66,15 +57,14 @@ def train(problem, n_train=60000, epochs=4000, batch=512, lr=3e-3, seed=0, every
                                   for k, v in flow.state_dict().items()})
             elif ep - best[1] >= patience * every:
                 break
-    if best[2] is not None:
-        flow.load_state_dict(best[2])
+    flow.load_state_dict(best[2])
     hist['stopped_at'] = best[1]
     flow.eval()
     return flow, hist
 
 
 class Generator:
-    """The fitted flow behind the (latent_dim, model(z)) interface the samplers expect."""
+    """The fitted flow as x = G(z), with latent_dim; saves/loads the flow checkpoint."""
 
     def __init__(self, flow):
         self.flow, self.latent_dim = flow, flow.dim
@@ -109,8 +99,7 @@ def plot(problem, flow, hist, n=50000):
     axes[0, 1].set(xlabel='epoch', ylabel=r'$\mathrm{KL}(P\,\|\,p_\theta)$',
                    title=f'KL to the true model (kept {hist["kl"][i]:.4f})')
 
-    # a pair plot of the two most variable coordinates says whether the joint is right,
-    # which the marginals below cannot
+    # pair plot of the two most variable coordinates, to check the joint
     v = xr.var(0)
     a, b = int(v.argmax()), int(v.argsort()[-2])
     for ax, (xx, lab) in zip(axes[0, 2:4], ((xr, 'true'), (xf, 'flow'))):
@@ -135,7 +124,6 @@ def plot(problem, flow, hist, n=50000):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     problem = Newsvendor()
     flow, hist = train(problem)
     i = hist['epoch'].index(min(hist['epoch'], key=lambda e: abs(e - hist['stopped_at'])))

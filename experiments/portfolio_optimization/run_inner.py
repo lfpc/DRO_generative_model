@@ -2,10 +2,8 @@
 
     python3 run_inner.py
 
-Left: worst-case risk against each method's own radius -- honest, but the three radii are
-in different units. Right: the same risk against the mean log-density of the returns the
-adversary certifies against, which is comparable and is the question that matters -- a
-worst case is only worth defending against if the returns behind it can occur.
+Left: worst-case risk vs each method's own radius (units differ across methods).
+Right: the same risk vs the mean true log-density of the adversarial returns.
 """
 import json
 import os
@@ -69,7 +67,6 @@ def plot(nom, lp_nom, rows):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     problem = Portfolio()
     x = problem.sample(20000, torch.Generator().manual_seed(0))
     phi = problem.solve(x)

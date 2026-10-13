@@ -1,14 +1,8 @@
-"""Optimize the mean-CVaR portfolio through an LCSO surrogate.
+"""Optimize the mean-CVaR portfolio through an LCSO surrogate, against exact-gradient SGD.
 
     python3 train_lcso.py
 
-The decision is (w, tau): the weights on the simplex, and the CVaR level of the
-Rockafellar-Uryasev form. Both move together, and both are recovered from per-sample
-losses alone -- the surrogate never sees the analytic gradient, which is available here
-only to score the result.
-
-Feasibility is a simplex, not a box, so designs are projected rather than clamped; LCSO
-asks the problem what feasible means.
+The design is (w, tau): weights on the simplex (projected, not clamped) and the CVaR level.
 """
 import os
 import sys
@@ -30,7 +24,7 @@ class PortfolioForLCSO:
 
     link = 'identity'
 
-    def __init__(self, n_assets=10, n_eval=200000, tau_range=0.6, seed=0):
+    def __init__(self, n_assets=10, n_eval=200000, tau_range=0.6):
         self.p = Portfolio(n_assets=n_assets)
         self.dim = n_assets + 1                      # weights, then tau
         self.tau_range = tau_range
@@ -47,7 +41,8 @@ class PortfolioForLCSO:
     def objective(self, phi, x):
         return self.loss(phi, x).mean(dim=-1)
 
-    def true_objective(self, phi, n=None):
+    def true_objective(self, phi):
+        """Risk on a fixed large evaluation sample; float for one design, tensor for a batch."""
         with torch.no_grad():
             out = self.objective(phi, self._eval)
         return float(out) if out.dim() == 0 else out
@@ -61,7 +56,7 @@ class PortfolioForLCSO:
         return self.p.init_design()
 
     def project(self, phi):
-        """Weights onto the simplex, tau into its range -- what feasibility means here."""
+        """Weights onto the simplex, tau into its range."""
         w = self.p.project(phi)[:-1]
         tau = phi[-1].clamp(-self.tau_range, self.tau_range)
         return torch.cat([w, tau.reshape(1)])
@@ -70,18 +65,9 @@ class PortfolioForLCSO:
 def exact_gradient_descent(problem, budget_samples, n_samples=20000, lr=0.005, seed=0):
     """Reference: momentum SGD on the true loss, projected onto the same feasible set.
 
-    SGD, not Adam, and this is not a detail. Adam's update is sign-like, so when the
-    gradient coordinates share a sign the step is a near-uniform translation -- exactly
-    what projection onto a simplex annihilates, leaving the iterate near where it started.
-    Here that costs 30%: Adam lands between -0.98 and -1.03 depending on its learning rate
-    and never leaves the neighbourhood of equal weights, while SGD reaches -1.352 from
-    every learning rate tried and drops the four lowest-return assets to zero. The same
-    trap is documented in dro/method.py::make_optimizer.
-
-    The step size has to be set against the gradient noise, not copied from the clean
-    case: momentum SGD at lr 0.2 converges from every start when the gradient is taken on
-    100k samples, and diverges outright (risk +9.8) on the 2k batches a budget-matched run
-    can afford. At 20k samples and lr 0.005 it reaches -1.352, matching the clean solve.
+    Not Adam: its sign-like step is a near-uniform shift, which the simplex projection
+    undoes, so it stalls near equal weights (-1.0 vs SGD's -1.352). lr 0.005 at 20k samples
+    per step; larger lr or smaller batches diverge.
     """
     g = torch.Generator().manual_seed(seed)
     phi = problem.init_design().requires_grad_(True)
@@ -100,8 +86,7 @@ def exact_gradient_descent(problem, budget_samples, n_samples=20000, lr=0.005, s
 
 
 def portfolio_panel(problem, phi, ax, title, ref=None):
-    """The portfolio itself. What matters here is which assets get the weight, so the
-    natural analogue of a decision boundary is the allocation next to the reference."""
+    """Bar chart of the weights, with the reference allocation as ticks."""
     n = problem.p.n_assets
     idx = torch.arange(1, n + 1)
     ax.bar(idx, phi[:n], color='C0', width=.62, label='this design')
@@ -113,16 +98,12 @@ def portfolio_panel(problem, phi, ax, title, ref=None):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = PortfolioForLCSO()
     budget = 2_000_000
     print(f'design dimension {problem.dim} (weights + tau);  budget {budget:,} samples')
 
-    # Settled by a sweep over designs per fit, samples per design, fit length and rank.
-    # The trust-region step is what benefits from the normalised-coordinate fix: the tau
-    # gradient is 60x a weight gradient, so a step of fixed length in raw coordinates goes
-    # almost entirely into tau.
+    # settled by a sweep over designs per fit, samples per design, fit length and rank
     cfg = dict(n_samples=800, min_per_design=100, n_designs=4 * problem.dim,
                surrogate='taylor', step='tr-newton', sampler='sobol', epochs=40, rank=8)
 

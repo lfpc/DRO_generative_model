@@ -2,14 +2,9 @@
 
     python3 train_lcso.py
 
-The decision is the field of each of the sixteen sections, design_dim = 16. Field buys
-deflection and costs weight, and the particles that are hardest to deflect are the
-fast tail of the spectrum -- so the objective is driven by a part of the input
-distribution the sample barely populates.
-
-The surrogate never sees an analytic gradient: it is fitted to per-sample losses alone, and
-the exact gradient is computed only to score the result. Feasibility is whatever the problem
-says it is -- LCSO projects rather than clamps.
+Design: field of each section, design_dim = 16.
+Compares LCSO (resample and nominal schemes) against budget-matched exact-gradient SGD;
+the surrogate sees only per-sample losses, the exact gradient is only the reference.
 """
 import os
 import sys
@@ -20,8 +15,8 @@ import matplotlib.pyplot as plt
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from optb.lcso import Budget, lcso                                # noqa: E402
-from problem import BeamShield                                       # noqa: E402
+from optb.lcso import Budget, lcso                                 # noqa: E402
+from problem import BeamShield                                     # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
 
@@ -47,7 +42,8 @@ class ForLCSO:
     def objective(self, phi, x):
         return self.loss(phi, x).mean(dim=-1)
 
-    def true_objective(self, phi, n=None):
+    def true_objective(self, phi):
+        """Risk on a fixed large evaluation sample; float for one design, tensor for a batch."""
         with torch.no_grad():
             out = self.objective(phi, self._eval)
         return float(out) if out.dim() == 0 else out
@@ -63,13 +59,9 @@ class ForLCSO:
 
 
 def exact_gradient_descent(problem, budget_samples, n_samples=20000, lr=0.01, seed=0):
-    """Reference: momentum SGD on the true loss, projected onto the same feasible set.
+    """Reference: projected momentum SGD on the true loss, fresh batch each step.
 
-    SGD rather than Adam, for the reason documented in the portfolio's version of this
-    script: Adam's sign-like update is a near-uniform translation when the gradient
-    coordinates share a sign, which a projection annihilates. The step size is set against
-    the gradient noise on the batch a budget-matched run can afford, not copied from the
-    clean solve.
+    SGD, not Adam: Adam's sign-like step is a near-uniform shift that the projection undoes.
     """
     g = torch.Generator().manual_seed(seed)
     phi = problem.init_design().requires_grad_(True)
@@ -88,7 +80,6 @@ def exact_gradient_descent(problem, budget_samples, n_samples=20000, lr=0.01, se
 
 
 def design_panel(problem, phi, ax, title, ref=None):
-    """The decision itself, next to the reference -- the analogue of a decision boundary."""
     n = problem.p.n_sec
     z = torch.arange(1, n + 1) * problem.p.sec_len
     ax.step(z, phi, where='mid', color='C0', lw=1.8, label='this design')
@@ -101,7 +92,6 @@ def design_panel(problem, phi, ax, title, ref=None):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = ForLCSO()
     budget = 2_000_000

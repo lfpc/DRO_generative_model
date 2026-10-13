@@ -1,29 +1,14 @@
-"""Magnetic shield design: sweep a heavy-tailed particle flux away from a detector.
+"""Magnetic shield toy: sweep a heavy-tailed particle flux away from a detector.
 
     min_B  weight(B) + lambda * P( |y_det(B, x)| < R )
 
-A deliberately small stand-in for the muon-shield problem this project targets, with the
-same shape and none of the simulation cost: a sequence of magnet sections, each with its
-own field, must bend incoming particles clear of a detector, and field costs weight. A
-particle of momentum p picks up a transverse kick 0.3 B L / p in each section (the standard
-p_T = 0.3 B L relation, GeV/T/m), so the fast tail of the spectrum is what sets the design
--- exactly the reason the real problem needs a generative model of the momentum rather than
-a moment bound.
+A small stand-in for the muon shield: sixteen magnet sections, each with its own field,
+bend particles clear of a detector, and field costs weight. Each section gives a kick
+0.3 B L / p (GeV, T, m), so the fast tail of the momentum spectrum sets the design.
 
-Random variable: x = (p, p_t, y0, theta0) in R^4, the entry momentum, its transverse
-component, and the entry offset and angle. (log p, log p_t) are jointly normal and strongly
-correlated, so p and p_t themselves are lognormal: skewed, positively supported and heavy
-tailed, which is where this problem differs from every other benchmark here. The density is
-exact by change of variables, so KL against the generator stays measurable.
-
-Decision variable: the field of each of the sixteen sections, design_dim = 16, boxed by what
-a magnet can hold.
-
-Why this problem earns its place. The loss depends on the momentum through 1/p, so the cost
-is dominated by a tail the empirical sample barely populates -- the case where the choice
-between a reweighting of observed particles, a transport ball around them, and a shift of a
-fitted spectrum is not a matter of taste. The real application also fits its flow over
-exactly these coordinates.
+Random variable: x = (p, p_t, y0, theta0) in R^4; (log p, log p_t) jointly normal, so p and
+p_t are lognormal. Exact density by change of variables.
+Decision variable: field of each section, design_dim = 16, boxed by |B| <= b_max.
 """
 import math
 
@@ -37,8 +22,7 @@ class BeamShield:
         self.lam, self.smooth, self.b_max, self.dtype = lam, smooth, b_max, dtype
         self.input_dim, self.design_dim = 4, n_sec
         self.weight0 = n_sec * sec_len                    # weight of a uniform 1 T shield
-        # (log p, log p_t, y0, theta0): a 30 GeV median spectrum whose transverse component
-        # grows with it, entering near the axis
+        # (log p, log p_t, y0, theta0): 30 GeV median spectrum, entering near the axis
         self.mean = torch.tensor([math.log(30.0), math.log(0.5), 0.0, 0.0], dtype=dtype)
         sd = torch.tensor([0.80, 0.55, 0.05, 0.004], dtype=dtype)
         corr = torch.eye(4, dtype=dtype)
@@ -47,25 +31,18 @@ class BeamShield:
         self.cov = corr * sd.unsqueeze(0) * sd.unsqueeze(1)
         self._log = torch.distributions.MultivariateNormal(self.mean, self.cov)
 
-    # -- the data ---------------------------------------------------------
     def sample(self, n, generator=None):
         e = torch.randn(n, 4, generator=generator, dtype=self.dtype)
         z = self.mean + e @ torch.linalg.cholesky(self.cov).T
         return torch.cat([z[:, :2].exp(), z[:, 2:]], 1)
 
     def true_log_prob(self, x):
-        """Exact: normal in the log coordinates, minus the change-of-variables Jacobian."""
+        """Normal in the log coordinates, minus the change-of-variables Jacobian."""
         z = torch.cat([x[:, :2].clamp_min(1e-12).log(), x[:, 2:]], 1)
         return self._log.log_prob(z) - z[:, :2].sum(1)
 
-    # -- the shield -------------------------------------------------------
     def trajectory(self, phi, x):
-        """Transverse position at the detector plane, shape (n,).
-
-        Paraxial tracking through the sections and then a drift. Everything is smooth in
-        both the field and the momentum, which is what lets a surrogate be fitted in the
-        design and an adversary take gradients in the input.
-        """
+        """Transverse position at the detector plane, shape (n,): paraxial tracking + drift."""
         p = x[:, 0].clamp_min(0.5)
         y, th = x[:, 2], x[:, 3] + x[:, 1] / p
         for j in range(self.n_sec):
@@ -74,16 +51,13 @@ class BeamShield:
         return y + th * self.drift
 
     def loss(self, phi, x):
-        """Per-sample cost: stored field energy plus a smoothed detector hit."""
+        """Per-sample cost: stored field energy plus a sigmoid-smoothed detector hit."""
         weight = (phi ** 2).sum() * self.sec_len / self.weight0
         y = self.trajectory(phi, x)
         return weight + self.lam * torch.sigmoid((self.radius - y.abs()) / self.smooth)
 
     def risk(self, phi, x):
         return self.loss(phi, x).mean()
-
-    def hit_rate(self, phi, x):
-        return float((self.trajectory(phi, x).abs() < self.radius).to(self.dtype).mean())
 
     def project(self, phi):
         return phi.clamp(-self.b_max, self.b_max)
@@ -92,6 +66,7 @@ class BeamShield:
         return torch.full((self.n_sec,), 0.3, dtype=self.dtype)
 
     def solve(self, x, steps=3000, lr=0.01):
+        """Nominal optimum on a sample, by projected momentum SGD."""
         phi = self.init_design().requires_grad_(True)
         opt = torch.optim.SGD([phi], lr=lr, momentum=0.9)
         for _ in range(steps):

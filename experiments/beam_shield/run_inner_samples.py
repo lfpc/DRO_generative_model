@@ -1,15 +1,11 @@
-"""What does each adversary think the inputs look like, at equal damage?
+"""What does each adversary think the inputs look like, at equal worst-case risk?
 
     python3 run_inner_samples.py
 
-Every method is calibrated by bisection to the SAME worst-case risk, so the comparison is
-about the shape of the distribution each one reaches rather than about radii, which are not
-commensurable across ambiguity sets. The cost reaches the four entry coordinates only through where the particle lands, and
-it is charged whenever that is inside the detector aperture, so the landing position
-is the scalar to look at.
-
-The generator is loaded, not refitted: this script compares adversaries, and refitting the
-flow inside it would put a second source of variation into that comparison.
+Each method is calibrated by bisection on its radius to the same worst-case risk TARGET,
+then the nominal and adversarial distributions of one scalar are compared: here |y| at the
+detector, through which the four entry coordinates reach the loss (a hit where < radius).
+Needs models/design.pt (run_inner_cost.py) and models/generator.pt (train_generator.py).
 """
 import os
 import sys
@@ -23,16 +19,17 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import inner                                                       # noqa: E402
-from problem import BeamShield                                        # noqa: E402
+from problem import BeamShield                                     # noqa: E402
 from train_generator import Generator                              # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
 MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-TARGET = 6.10              # worst-case risk every method is calibrated to reach
+TARGET = 6.10                 # worst-case risk every method is calibrated to reach
 TAIL = 'lower'                # which tail of the projection carries the damage
 
 
 def calibrate(fn, target, lo, hi, iters=10):
+    """Geometric bisection for the radius at which fn(radius)[0] reaches target."""
     for _ in range(iters):
         mid = (lo * hi) ** 0.5
         if fn(mid)[0] < target:
@@ -43,12 +40,11 @@ def calibrate(fn, target, lo, hi, iters=10):
 
 
 def project(problem, phi, x):
-    """Transverse position at the detector -- the scalar the loss actually responds to."""
+    """Transverse position at the detector -- the scalar the loss responds to."""
     return (problem.trajectory(phi, torch.as_tensor(x)).abs()).detach().numpy()
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = BeamShield()
     x = problem.sample(20000, torch.Generator().manual_seed(0))
@@ -95,7 +91,7 @@ if __name__ == '__main__':
                xlabel='$|y|$ at the detector (m)', yticks=[])
         ax.legend(fontsize=7)
 
-        ax = axes[1, j]                    # where the damage comes from: the loaded tail
+        ax = axes[1, j]                    # quantiles of the damaging tail
         ax.plot(q, np.quantile(s_real, q), color='C7', lw=2.0, label='nominal')
         if ww is None:
             ax.plot(q, np.quantile(sa, q), color='C0', lw=1.6, ls='--', label='adversarial')

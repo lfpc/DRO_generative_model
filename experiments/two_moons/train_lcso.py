@@ -1,18 +1,9 @@
-"""Train the classifier through an LCSO surrogate instead of the true loss.
+"""Train the two-moons classifier through an LCSO surrogate, against exact-gradient Adam.
 
     python3 train_lcso.py
 
-Two moons is a testbed here, not an application: the logistic loss is analytic and
-differentiable, so the exact gradient is available and LCSO can be scored against it. The
-surrogate never sees that gradient. It sees only what a simulator would return -- per-sample
-losses at designs someone chose to evaluate -- and has to recover a descent direction from
-them.
-
-One iteration: draw classifier weights around the incumbent, evaluate the true loss on a
-fresh batch at each, fit a branch-trunk surrogate to the result, step on the surrogate, and
-accept or reject on the ratio of actual to predicted improvement. The budget is counted in
-simulated samples, so `resample` (many designs, few samples each) and `nominal` (few
-designs, many samples) are charged the same.
+LCSO only sees per-sample losses at the designs it evaluates; the budget is counted in
+simulated samples, so `resample` and `nominal` are charged the same.
 """
 import os
 import sys
@@ -32,10 +23,7 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
 class MoonsForLCSO:
     """TwoMoons behind the interface optb.lcso expects.
 
-    The label travels with the input as a third coordinate, so the surrogate's trunk sees
-    (x1, x2, y) and the design side stays the classifier weights alone. Design bounds are
-    a box around the initialisation -- the trust region of a weight space has no natural
-    scale otherwise.
+    A sample is (x1, x2, y). The design box is init +- `box`.
     """
 
     link = 'identity'
@@ -60,7 +48,8 @@ class MoonsForLCSO:
     def objective(self, phi, xy):
         return self.loss(phi, xy).mean(dim=-1)
 
-    def true_objective(self, phi, n=None):
+    def true_objective(self, phi):
+        """Risk on a fixed large evaluation sample; float for one design, tensor for a batch."""
         with torch.no_grad():
             out = self.objective(phi, self._eval)
         return float(out) if out.dim() == 0 else out
@@ -76,16 +65,8 @@ class MoonsForLCSO:
         return torch.minimum(torch.maximum(phi, lo), hi)
 
 
-def exact_gradient_descent(problem, budget_samples, n_samples=2000, lr=0.05, seed=0,
-                           project=True):
-    """Reference: Adam on the true loss, charged the same way LCSO is.
-
-    `project` keeps the reference inside the same design box LCSO is confined to. Without
-    it the comparison is not between two optimizers but between two feasible sets: the
-    logistic loss on separable data is minimized by scaling the weights up without bound,
-    so an unconstrained reference walks to ||theta|| = 21 with coordinates of 12 against a
-    box half-width of 3, and reaches a risk no box-constrained method can attain.
-    """
+def exact_gradient_descent(problem, budget_samples, n_samples=2000, lr=0.05, seed=0):
+    """Reference: Adam on the true loss, projected onto the same design box as LCSO."""
     g = torch.Generator().manual_seed(seed)
     phi = problem.init_design().requires_grad_(True)
     opt = torch.optim.Adam([phi], lr=lr)
@@ -95,9 +76,8 @@ def exact_gradient_descent(problem, budget_samples, n_samples=2000, lr=0.05, see
         opt.zero_grad()
         problem.objective(phi, xy).backward()
         opt.step()
-        if project:
-            with torch.no_grad():
-                phi.copy_(problem.project(phi.detach()))
+        with torch.no_grad():
+            phi.copy_(problem.project(phi.detach()))
         spent += n_samples
         trace.append((spent, problem.true_objective(phi.detach())))
     return phi.detach(), trace
@@ -119,21 +99,13 @@ def boundary(problem, phi, ax, title):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
-    problem = MoonsForLCSO()          # polynomial features: the design enters the score
-    budget = 2_000_000                # linearly, which is what a branch-trunk surrogate
+    problem = MoonsForLCSO()
+    budget = 2_000_000
     print(f'design dimension {problem.dim};  budget {budget:,} samples')
 
-    # Settings that matter, and why.
-    #  * `n_samples` sets how many LCSO steps the budget buys. At 20000 per design with 4D
-    #    designs a round costs ~100k samples and the whole budget is 19 steps, against a
-    #    thousand for the reference; at 100 per design it buys ~240.
-    #  * 4D designs per fit is the interior optimum: 2D starves the gradient (the measured
-    #    cosine against the true gradient collapses below ~2D), 8D buys a better direction
-    #    but too few steps to use it.
-    #  * the branch network beats the low-rank quadratic here, as it does on the binary
-    #    problems in optb/ -- the design dependence is not well captured by a fixed rank.
+    # from tune_lcso.py: 4D designs per fit (2D starves the gradient, 8D leaves too few
+    # steps), small per-design samples to buy more steps, and the mlp beats taylor here
     cfg = dict(n_samples=800, min_per_design=100, n_designs=4 * problem.dim,
                surrogate='mlp', step='gradient', sampler='sobol', epochs=40)
 
@@ -167,24 +139,3 @@ if __name__ == '__main__':
     fig.savefig(os.path.join(OUT, 'lcso.png'), dpi=150)
     print(f'  wrote {OUT}/lcso.png')
 
-
-class MoonsScoreTarget(MoonsForLCSO):
-    """Same problem, but the surrogate models the SCORE instead of the loss.
-
-    The score theta' phi(x) is linear in the design, which <b(theta), t(x)> represents
-    exactly; the logistic loss is a nonlinear warp of it that the surrogate would otherwise
-    have to learn, and whose curvature varies over the design box. Here the warp is applied
-    afterwards, in closed form, so the fit only has to get the easy part right.
-    """
-
-    def loss(self, phi, xy):                      # what the simulator reports per sample
-        x = xy[:, :2]
-        if phi.dim() == 1:
-            return self.m.logits(phi, x)
-        return torch.stack([self.m.logits(p, x) for p in phi])
-
-    def transform(self, score, xy):               # known function, applied to the fit
-        return torch.nn.functional.softplus(-xy[:, 2] * score)
-
-    def objective(self, phi, xy):
-        return self.transform(self.loss(phi, xy), xy).mean(dim=-1)

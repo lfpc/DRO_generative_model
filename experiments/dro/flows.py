@@ -1,9 +1,7 @@
-"""Normalizing flow generator G_theta: R^d -> R^d with base N(0, I).
+"""Normalizing flow generator G_theta: R^d -> R^d with base N(0, I) (RealNVP-style).
 
-The flow is the paper's G_theta. What the method needs from it is exactly two things:
-a differentiable sampling path z -> x (for the pathwise gradient of the inner problem)
-and invertibility (so Proposition 1 applies and the latent divergence equals the data
-divergence).
+forward is latent -> data (the differentiable sampling path the inner problem uses),
+inverse is data -> latent (for the likelihood).
 """
 import torch
 import torch.nn as nn
@@ -43,7 +41,7 @@ class AffineCoupling(nn.Module):
 
 
 class ActNorm(nn.Module):
-    """Per-dimension affine layer, data-initialized on the first forward pass."""
+    """Per-dimension affine layer, data-initialised on the first inverse pass in training."""
 
     def __init__(self, dim):
         super().__init__()
@@ -67,31 +65,19 @@ class ActNorm(nn.Module):
 
 
 class Flow(nn.Module):
-    """RealNVP-style flow. forward: latent -> data. inverse: data -> latent."""
+    """RealNVP-style flow. forward: latent -> data. inverse: data -> latent.
+
+    split='random' conditions each coupling on a random half of the coordinates instead of
+    alternating ones; interleave_actnorm puts an ActNorm after every coupling. Both help in
+    high dimension (MNIST). scale_cap bounds each coupling's log-scale: a loose cap lets a
+    deep flow fit the density well but sample far outside the data, so check sample ranges.
+    """
 
     def __init__(self, dim, n_layers=6, hidden=64, seed=0, split='alternating',
                  interleave_actnorm=False, scale_cap=2.0):
-        """split='random' draws a fresh half of the coordinates to condition on at every
-        coupling instead of taking every other one, and interleave_actnorm puts a
-        normalisation before each coupling rather than one at the end. Both are free and
-        both matter once the dimension is large: on 784 MNIST pixels they take the held-out
-        negative log-likelihood from 512 to 486, and with twice the depth to 460. Neither
-        changes anything in two or ten dimensions, so the defaults are the old behaviour and
-        existing checkpoints load unchanged.
-
-        `scale_cap` bounds each coupling's log-scale, and it matters for a reason that held-
-        out likelihood alone will not reveal. The sampling direction multiplies by exp(s) at
-        every layer while the density direction divides by it, so a deep flow can fit a
-        density well and still generate points far outside the data. On these 784 pixels the
-        real range is about +-4; at the old cap of 2.0 a twelve-layer flow samples out to 67,
-        at 0.25 to 16.6 -- and the tighter cap also fits BETTER, 448 against 468. Anything
-        that uses the sampling path, which is everything the inner problem does, should
-        check the range of its samples and not only its likelihood.
-        """
         super().__init__()
         torch.manual_seed(seed)
         self.dim, self.split, self.scale_cap = dim, split, scale_cap
-        self.interleave_actnorm = interleave_actnorm
         g = torch.Generator().manual_seed(seed)
         layers, norms = [], []
         for i in range(n_layers):
@@ -100,8 +86,6 @@ class Flow(nn.Module):
                 mask[torch.randperm(dim, generator=g)[:dim // 2]] = 1.0
             else:
                 mask[i % 2::2] = 1.0
-            if dim == 1:            # coupling needs >= 2 dims; fall back to actnorm only
-                mask = torch.ones(dim)
             layers.append(AffineCoupling(dim, hidden, mask, scale_cap=scale_cap))
             norms.append(ActNorm(dim))
         self.couplings = nn.ModuleList(layers)
@@ -109,7 +93,7 @@ class Flow(nn.Module):
         self.actnorm = ActNorm(dim)
 
     def forward(self, z):
-        """Latent -> data. Differentiable sampling path used by the inner problem."""
+        """Latent -> data, with log|det|."""
         logdet = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
         for i, c in enumerate(self.couplings):
             z, ld = c(z)
@@ -144,92 +128,15 @@ class Flow(nn.Module):
 
     @torch.no_grad()
     def sample(self, n, generator=None, temperature=1.0):
-        """Data generation only -- detached on purpose. The differentiable sampling path
-        the inner problem needs is `flow(T_eta(z))`, called explicitly."""
+        """Detached samples. The differentiable path is flow(T(z))."""
         z = torch.randn(n, self.dim, generator=generator,
                         dtype=self.actnorm.shift.dtype, device=self.actnorm.shift.device)
         return self.forward(z * temperature)[0]
 
 
-def fit_flow(x, dim=None, n_layers=6, hidden=64, epochs=600, lr=3e-3, batch=2048,
-             seed=0, verbose=False, val_frac=0.2, patience=40, eval_every=10):
-    """Maximum-likelihood fit of the generator, early-stopped on a held-out split.
-
-    Early stopping is not a refinement here, it is load-bearing. Trained to convergence on
-    2000 samples these flows overfit catastrophically rather than gracefully: on P1 the
-    median held-out log-density falls from 7.55 (the true model gives 7.59) at 100 epochs
-    to -0.39 at 1000, and the fraction of held-out points the model puts below -50 goes
-    from 0% to 36%. A generator with holes like that is the wrong object to anchor an
-    ambiguity set to -- the adversary is free to move mass into a region the generator
-    thinks is ordinary and the true model says is impossible -- and nothing downstream of
-    it can recover. The training NLL falls monotonically throughout, so the only way to
-    see this is to hold data out.
-
-    Set val_frac=0 to disable and train for the full schedule.
-    """
-    dim = dim or x.shape[1]
-    flow = Flow(dim, n_layers=n_layers, hidden=hidden, seed=seed).to(x.dtype)
-    opt = torch.optim.Adam(flow.parameters(), lr=lr)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
-    g = torch.Generator().manual_seed(seed)
-
-    n_val = int(round(val_frac * x.shape[0])) if val_frac else 0
-    if n_val:
-        perm = torch.randperm(x.shape[0], generator=torch.Generator().manual_seed(seed))
-        x_val, x_tr = x[perm[:n_val]], x[perm[n_val:]]
-    else:
-        x_val, x_tr = None, x
-    n = x_tr.shape[0]
-
-    flow.train()
-    with torch.no_grad():                      # trigger actnorm data init
-        flow.inverse(x_tr[:min(n, 4096)])
-    best = (float('inf'), 0, None)
-    for ep in range(epochs):
-        idx = torch.randperm(n, generator=g)[:batch]
-        loss = -flow.log_prob(x_tr[idx]).mean()
-        opt.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(flow.parameters(), 10.0)
-        opt.step()
-        sched.step()
-        if x_val is not None and (ep % eval_every == 0 or ep == epochs - 1):
-            with torch.no_grad():
-                v = float(-flow.log_prob(x_val).mean())
-            if v < best[0] - 1e-4:
-                best = (v, ep, {k: t.detach().clone()
-                                for k, t in flow.state_dict().items()})
-            elif ep - best[1] >= patience:
-                break
-        if verbose and (ep % max(1, epochs // 6) == 0 or ep == epochs - 1):
-            print(f'    flow epoch {ep:4d}  nll {loss.item():+.4f}')
-    if best[2] is not None:
-        flow.load_state_dict(best[2])
-        if verbose:
-            print(f'    early stop: best val nll {best[0]:+.4f} at epoch {best[1]}')
-    flow.eval()
-    return flow
-
-
 def load_flow(ckpt, key='flow'):
-    """Rebuild a saved flow from its own recorded shape.
-
-    Callers used to hardcode `Flow(dim, n_layers=6, hidden=64)` next to every
-    `load_state_dict`, which silently rots the moment the fitting code changes width or
-    depth: the load raises, and a study script that redirects stderr to a log file loses
-    the whole stage while the surrounding shell still reports success. Read the shape from
-    the checkpoint instead.
-    """
-    sd = ckpt[key] if isinstance(ckpt, dict) and key in ckpt else ckpt
-    cfg = ckpt.get(key + '_config') if isinstance(ckpt, dict) else None
-    if cfg is None:                                   # infer it from the tensor shapes
-        n_layers = 1 + max(int(k.split('.')[1]) for k in sd if k.startswith('couplings.'))
-        w = sd['couplings.0.net.0.weight']
-        cfg = dict(dim=w.shape[1], n_layers=n_layers, hidden=w.shape[0])
-    flow = Flow(cfg['dim'], n_layers=cfg['n_layers'], hidden=cfg['hidden'], seed=0,
-                split=cfg.get('split', 'alternating'),
-                interleave_actnorm=cfg.get('interleave_actnorm', False),
-                scale_cap=cfg.get('scale_cap', 2.0))
-    flow.load_state_dict(sd)
+    """Rebuild a saved flow from ckpt[key] and its ckpt[key + '_config']."""
+    flow = Flow(**ckpt[key + '_config'])
+    flow.load_state_dict(ckpt[key])
     flow.eval()
     return flow

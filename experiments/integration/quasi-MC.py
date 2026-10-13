@@ -1,9 +1,20 @@
+"""Integration rules for the nominal risk at a fixed design: plain MC (data or generator),
+scrambled Sobol QMC, tensor Gauss-Hermite and Smolyak sparse grids through the generator.
+Each is scored on the true loss and the surrogate, against its own converged value.
+
+    python3 quasi-MC.py --problem two_moons
+    python3 quasi-MC.py --problem muon_shield --sizes 1024 4096 16384
+
+Writes figs/integration_loss_<problem>.png.
+"""
 import argparse
 import os
 import sys
 from importlib import import_module
 from math import comb
 
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -15,21 +26,14 @@ PROBLEMS = {
     'two_moons': dict(cls='TwoMoons', kwargs=dict(kind='poly', degree=5),
                       pack=lambda s: torch.cat([s[0], s[1].unsqueeze(1)], 1),
                       apply=lambda f, phi, x: f(phi, x[:, :2], x[:, 2]),
-                      # the third latent is read as a class, so every 1-D rule must be even:
-                      # an odd one puts a node exactly on the z=0 boundary and hands its
-                      # whole weight -- 2/3 of the mass, for a 3-point rule -- to one class
+                      # the third latent is read as a class: 1-D rules must have an even
+                      # node count, or a node sits on z=0 and its weight goes to one class
                       grow=lambda i: 2 * i, rot=2),
     'portfolio_optimization': dict(cls='Portfolio', kwargs={},
                                    pack=lambda s: s,
                                    apply=lambda f, phi, x: f(phi, x),
-                                   # no discrete coordinate here, so the rule may start from
-                                   # a single node and grow 1, 3, 5, ... -- which is the only
-                                   # thing that makes a sparse grid affordable in 10-D
+                                   # no discrete latent: rules grow 1, 3, 5, ... nodes
                                    grow=lambda i: 2 * i - 1, rot=None),
-    # the three below share the plain shape: one tensor of points, loss(phi, x), a latent
-    # with no discrete coordinate, so every rule may start from a single node and rotate
-    # freely. They differ in what makes them hard -- multimodality, a near-degenerate
-    # covariance, and a heavy tail respectively -- and in latent dimension, 8, 12 and 4.
     'newsvendor': dict(cls='Newsvendor', kwargs={}, pack=lambda s: s,
                        apply=lambda f, phi, x: f(phi, x),
                        grow=lambda i: 2 * i - 1, rot=None),
@@ -39,20 +43,24 @@ PROBLEMS = {
     'beam_shield': dict(cls='BeamShield', kwargs={}, pack=lambda s: s,
                         apply=lambda f, phi, x: f(phi, x),
                         grow=lambda i: 2 * i - 1, rot=None),
+    # six flow latents plus two symmetry coordinates (azimuth, sign of dphi -- a sign, so
+    # even rules only); only the flow's six are rotated. Rare hits: log axis; the sparse
+    # grid's negative weights swamp the signal, so it is off. Reference: 8 x 2**24 muons.
+    'muon_shield': dict(cls='MuonShield', kwargs={},
+                        pack=lambda s: torch.cat([s[0], s[1].unsqueeze(1)], 1),
+                        apply=lambda f, phi, x: f(phi, x[:, :6], x[:, 6]),
+                        grow=lambda i: 2 * i, rot=6, gold_n=2 ** 24, logy=True,
+                        sparse=False, sizes=[4 ** k for k in range(5, 14)]),
 }
 
 
-def setup(name, models=None):
-    """Load one problem's already-trained models; nothing is fitted here.
-
-    Both problem folders define problem.py, train_generator.py and run_inner_cost.py, so
-    only the chosen folder is ever put on the path -- importing both would resolve those
-    names to whichever came first.
-    """
+def setup(name):
+    """Load one problem's trained models (sets the module globals below). Returns the
+    models folder and the packed nominal data. Only that problem folder goes on the path."""
     global PROBLEM, PHI, SURROGATE, APPLY, GROW, ROT, Generator
     spec = PROBLEMS[name]
     sys.path[:0] = [ROOT, os.path.join(ROOT, name)]
-    models = models or os.path.join(ROOT, name, 'models')
+    models = os.path.join(ROOT, name, 'models')
     PROBLEM = getattr(import_module('problem'), spec['cls'])(**spec['kwargs'])
     Generator = import_module('train_generator').Generator
     PHI = torch.load(os.path.join(models, 'design.pt'), weights_only=False)
@@ -64,39 +72,24 @@ def setup(name, models=None):
 
 
 def true_loss(x):
-    """The simulator. Per-sample loss, shape (n,)."""
+    """Per-sample true loss at PHI, shape (n,)."""
     return APPLY(PROBLEM.loss, PHI, x)
 
 
 def surrogate_loss(x):
-    """The surrogate. Per-sample loss, shape (n,)."""
+    """Per-sample surrogate loss at PHI, shape (n,)."""
     return APPLY(SURROGATE, PHI, x)
 
 
 def sobol_normal(n, d, seed=0):
-    """n Sobol points in R^d pushed to a standard normal by the inverse CDF.
-
-    Scrambled, so each seed is an independent randomisation and a spread over seeds is a
-    genuine error bar -- the "randomised" in RQMC. Drawn in float64 and mapped with ndtri
-    rather than float32 and erfinv(2u-1): float32 resolves u near 1 to about 6e-8, which
-    truncates the far tail. It is worth ~1e-6 on the estimate here, an order of magnitude
-    under the QMC error, but it costs nothing.
-
-    Sobol's balance holds for blocks of 2**m, which is why the default sizes are powers of
-    two; drawing from index 0 makes this identical to draw_base2(m).
-    """
+    """n scrambled Sobol points (one randomisation per seed) mapped to N(0, I_d).
+    Drawn in float64 so the inverse CDF does not truncate the tails."""
     eng = torch.quasirandom.SobolEngine(dimension=d, scramble=True, seed=seed)
     return torch.special.ndtri(eng.draw(n, dtype=torch.float64)).to(torch.get_default_dtype())
 
-def gauss_hermite(m, d):
-    """Tensor-product Gauss-Hermite for E_{z~N(0,I_d)}[f(z)]: m**d nodes and their weights.
 
-    This is the same integral the samplers below estimate, with the Gaussian density written
-    out as an explicit weight instead of being absorbed into where the points are drawn.
-    Exact whenever f is a polynomial of degree < 2m in each coordinate, so it converges at a
-    rate no random rule can touch -- but only while f stays smooth, and only while m**d is
-    affordable, which is the whole trade-off being tested here.
-    """
+def gauss_hermite(m, d):
+    """Tensor-product Gauss-Hermite rule for E_{z~N(0,I_d)}: m**d nodes and weights."""
     x, w = np.polynomial.hermite_e.hermegauss(m)          # probabilists': weight exp(-x^2/2)
     x = torch.as_tensor(x, dtype=torch.get_default_dtype())
     w = torch.as_tensor(w / w.sum(), dtype=torch.get_default_dtype())
@@ -116,15 +109,8 @@ def _indices(d, total):
 
 
 def smolyak_hermite(q, d, grow):
-    """Sparse-grid Gauss-Hermite: Smolyak's combination of 1-D rules of level |k| <= q.
-
-    A full tensor product needs m**d nodes, which past a handful of dimensions leaves one
-    affordable rule and no way to refine it. The sparse grid keeps only the low-order mixed
-    terms -- enough to stay exact on the same total-degree polynomials -- and grows like
-    2**q instead of m**d. The price is weights that go negative: sum|w| reaches 265 in 3-D
-    and 445 in 10-D over the levels used here, against exactly 1 for every tensor rule, and
-    that factor multiplies whatever roughness the integrand has.
-    """
+    """Smolyak sparse grid of 1-D Gauss-Hermite rules (grow(i) nodes at level i), |k| <= q.
+    Duplicate nodes are merged. Weights can be negative (sum|w| of a few hundred)."""
     dt = torch.get_default_dtype()
     one = {}
     for m in {grow(i) for i in range(1, q - d + 2)}:
@@ -144,9 +130,7 @@ def smolyak_hermite(q, d, grow):
             torch.zeros(len(u), dtype=dt).index_add_(0, inv, w))
 
 
-# integration rule (where its points come from). The rule is the thing being compared;
-# the sampler in brackets says whether those points are drawn from the data file or pushed
-# through the generative model, which is what separates sampling error from model bias.
+# rule (where its points come from): data file or generator
 MC_DATA = 'Monte Carlo (data)'
 MC_MODEL = 'Monte Carlo (model)'
 QMC = 'Quasi-MC (model)'
@@ -154,12 +138,6 @@ TENSOR = 'Gauss-Hermite grid (model)'
 SPARSE = 'Smolyak sparse grid (model)'
 
 COLOR = {MC_DATA: 'C0', MC_MODEL: 'C2', QMC: 'C1', TENSOR: 'C3', SPARSE: 'C4'}
-
-
-def sampler_of(method):
-    """'data' or 'model' -- the bracketed half of a method name, which fixes what it
-    converges to."""
-    return method[method.index('(') + 1:-1]
 STYLE = {'true': '-', 'surrogate': '--'}    # which loss evaluated it
 
 
@@ -188,17 +166,11 @@ def random_rotation(d, k, generator):
 
 
 def quadrature_from_model(model, rule, generator=None, rot=None):
-    """Quadrature nodes pushed through the model, carrying their Gaussian weights.
+    """Quadrature nodes pushed through the model, with their weights.
 
-    A fixed rule returns the same number every time, so on its own it reports no
-    uncertainty at all. N(0,I) is rotation-invariant, so f(Qz) integrates to the same
-    value for any orthogonal Q: rotating the nodes gives a different valid rule for the
-    same integral, and the spread over random Q is an honest error bar. Unlike a scrambled
-    Sobol set it is not unbiased -- each rotated rule keeps its own deterministic error and
-    averaging does not cancel them -- so read the band as how much the answer depends on an
-    arbitrary choice of axes, which for a rule that has resolved the integrand is nearly
-    nothing. Only the first `rot` coordinates turn, so a latent read as a discrete class
-    keeps its axis and its exact half-and-half split.
+    The nodes are randomly rotated (N(0,I) is rotation-invariant), so repeats of a fixed
+    rule give a spread: how much the answer depends on the choice of axes. Not unbiased.
+    Only the first `rot` coordinates turn, so a discrete latent keeps its axis.
     """
     z, w = rule
     if generator is not None:
@@ -207,12 +179,8 @@ def quadrature_from_model(model, rule, generator=None, rot=None):
 
 
 def rules(d, cap, grow=None):
-    """Every affordable rule of one kind, keyed by what it costs in loss evaluations.
-
-    grow=None gives the full tensor product, over even node counts only -- see the note on
-    the discrete latent coordinate in PROBLEMS. Otherwise a Smolyak sparse grid built from
-    1-D rules of grow(1), grow(2), ... nodes.
-    """
+    """Every rule with at most `cap` nodes, keyed by node count. grow=None: tensor
+    Gauss-Hermite with even node counts; otherwise Smolyak sparse grids."""
     out = {}
     for i in range(1, 100):
         if grow is None:
@@ -228,61 +196,61 @@ def rules(d, cap, grow=None):
 
 
 @torch.no_grad()
-def estimate(n, sampler, seed=42):
-    """Draw n points once and evaluate BOTH losses on them.
+def estimate(n, sampler, seed=42, losses=tuple(STYLE)):
+    """Draw n points once and average each loss in `losses` on them (paired draw).
 
-    Sharing the draw is not just tidier: it makes the true-vs-surrogate comparison paired,
-    so the sampling noise common to both cancels in their difference and what is left is
-    the surrogate's own error. Drawing separately would bury a small bias under Monte-Carlo
-    noise of the same size.
-
-    A sampler returns (points, weights); weights None means every point counts 1/n, which is
-    what a draw from the measure already buys you. A quadrature rule carries them explicitly.
+    A sampler returns (points, weights); weights None means equal weights 1/n.
+    losses=('surrogate',) never calls the simulator.
     """
     g = torch.Generator().manual_seed(seed)
     x, w = sampler(n, generator=g)
     mean = (lambda v: v.mean() if w is None else (v * w).sum())
-    return {'true': mean(true_loss(x)).item(),
-            'surrogate': mean(surrogate_loss(x)).item()}
+    fns = {'true': true_loss, 'surrogate': surrogate_loss}
+    return {k: mean(fns[k](x)).item() for k in losses}
 
 
 @torch.no_grad()
-def converged(model, k=8, n=2 ** 19):
-    """The value the model-side rules converge to: k independent Sobol scramblings.
-
-    A long plain-MC run is not good enough here. Its own error, sigma/sqrt(n), is ~1e-4 at
-    n = 2e6 -- the same size as the quadrature error we are trying to resolve, so it would
-    manufacture a floor that is really just the reference wobbling. Averaging scrambles
-    instead gets to ~1e-6 and also reports its own uncertainty.
-    """
+def converged(model, k=8, n=2 ** 19, losses=tuple(STYLE)):
+    """Reference value for the model-side rules: mean of k Sobol scramblings of n points
+    (far more accurate than plain MC of the same size)."""
     e = [estimate(n, lambda j, generator=None: sample_from_model(model, j, generator, qmc=True),
-                  seed=s) for s in range(k)]
-    return {loss: float(np.mean([x[loss] for x in e])) for loss in STYLE}
+                  seed=s, losses=losses) for s in range(k)]
+    return {loss: float(np.mean([x[loss] for x in e])) for loss in losses}
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--problem', default='two_moons', choices=sorted(PROBLEMS),
-                    help='which experiment folder to take the trained models from')
-    ap.add_argument('--models', default=None, help='override the checkpoint folder')
-    ap.add_argument('--sizes', nargs='+', type=int,
-                    default=[16, 64, 256, 1024, 4096, 16384, 65536])
-    ap.add_argument('--repeats', type=int, default=10,
-                    help='independent draws per N: the curves are their mean, the band their sd')
+    class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter,
+                       argparse.RawDescriptionHelpFormatter):
+        pass
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
+    ap.add_argument('--problem', default='two_moons', choices=sorted(PROBLEMS))
+    ap.add_argument('--sizes', nargs='+', type=int, default=None,
+                    help="loss evaluations per estimate; default: problem's, else 16 64 ... 65536")
+    ap.add_argument('--gold_n', type=int, default=None,
+                    help="Sobol points per scrambling of the reference; default: problem's, "
+                         "else 2**19")
+    ap.add_argument('--logy', action=argparse.BooleanOptionalAction, default=None,
+                    help="log y axis; default: problem's, else off")
+    ap.add_argument('--sparse', action=argparse.BooleanOptionalAction, default=None,
+                    help="include the Smolyak sparse grid; default: problem's, else on")
+    ap.add_argument('--repeats', type=int, default=10, help='independent draws per size')
     a = ap.parse_args()
     torch.set_default_dtype(torch.float32)
 
-    models, data = setup(a.problem, a.models)
+    spec = PROBLEMS[a.problem]
+    a.sizes = a.sizes or spec.get('sizes', [16, 64, 256, 1024, 4096, 16384, 65536])
+    logy = a.logy if a.logy is not None else spec.get('logy', False)
+    use_sparse = a.sparse if a.sparse is not None else spec.get('sparse', True)
+    models, data = setup(a.problem)
     model = Generator.load(os.path.join(models, 'generator.pt'))
     d = model.latent_dim
-    # m nodes per latent dimension cost m**d evaluations. Capping that at the largest MC
-    # budget keeps every rule on the figure priced the same -- and in more than a handful of
-    # dimensions it is what leaves the quadrature with almost no affordable rule at all.
+    # quadrature rules are capped at the largest MC budget, so all are priced the same
     full = rules(d, max(a.sizes))
-    sparse = rules(d, max(a.sizes), grow=GROW)
+    sparse = rules(d, max(a.sizes), grow=GROW) if use_sparse else {}
     print(f'{a.problem}: latent dim {d}, design dim {PHI.numel()}, '
           f'nominal sample {tuple(data.shape)}')
-    for lab, r in (('tensor', full), ('sparse', sparse)):
+    for lab, r in [('tensor', full)] + ([('sparse', sparse)] if use_sparse else []):
         print(f'  {lab} rules within the {max(a.sizes):,}-evaluation cap: '
               + (', '.join(f'{n:,}' for n in r) or 'none'))
 
@@ -291,31 +259,30 @@ if __name__ == '__main__':
         MC_MODEL: (a.sizes, lambda k, generator=None: sample_from_model(model, k, generator)),
         QMC:      (a.sizes, lambda k, generator=None: sample_from_model(model, k, generator,
                                                                         qmc=True)),
-        # a quadrature rule costs whatever its node count is, so its x-axis is not a.sizes
+        # a quadrature rule costs its node count
         TENSOR:   (list(full), lambda k, generator=None: quadrature_from_model(
                        model, full[k], generator, ROT)),
         SPARSE:   (list(sparse), lambda k, generator=None: quadrature_from_model(
                        model, sparse[k], generator, ROT)),
     }
+    # drop rules with no size (nothing under the cap, or the sparse grid switched off)
+    samplers = {k: v for k, v in samplers.items() if v[0]}
 
-    # every estimator is measured against the value its own sample converges to: the whole
-    # data file for the data side, a long QMC run for the model side. Comparing the model's
-    # rules against the data's number would mix the generator's bias into their error.
+    # references: the whole data file for the data side, long QMC for the model side
     with torch.no_grad():
         gold = {'data': {k: v.item() for k, v in
                          zip(STYLE, (true_loss(data).mean(), surrogate_loss(data).mean()))}}
-    gold['model'] = converged(model)
+    gold['model'] = converged(model, n=a.gold_n or spec.get('gold_n', 2 ** 19))
     print(f'converged values:  data {gold["data"]["true"]:.5f} (true) '
           f'{gold["data"]["surrogate"]:.5f} (surrogate)   '
           f'model {gold["model"]["true"]:.5f} / {gold["model"]["surrogate"]:.5f}')
 
     out = {}
     for src, (sizes, sampler) in samplers.items():
-        v = np.array([[estimate(n, sampler, seed=1000 * r + n)[loss]
-                        for r in range(a.repeats)]
-                      for loss in STYLE for n in sizes])
-        for i, loss in enumerate(STYLE):
-            out[(src, loss)] = (np.array(sizes, float), v[i * len(sizes):(i + 1) * len(sizes)])
+        e = [[estimate(n, sampler, seed=1000 * r + n) for r in range(a.repeats)] for n in sizes]
+        for loss in STYLE:
+            out[(src, loss)] = (np.array(sizes, float),
+                                np.array([[x[loss] for x in row] for row in e]))
 
     for src, (sizes, _) in samplers.items():
         print('\n%-26s %s' % (src, ' '.join('%10d' % n for n in sizes)))
@@ -326,21 +293,33 @@ if __name__ == '__main__':
                                   ' '.join('%10.5f' % x for x in vals.mean(1))))
             print('  %-32s %s' % ('  sd over repeats', ' '.join('%10.5f' % x for x in sd)))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 3.9), sharey=True, constrained_layout=True)
+    # on a log axis each panel keeps its own limits
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.9), sharey=not logy, constrained_layout=True)
     for ax, loss in zip(axes, STYLE):
+        # log axis floor: a factor 5 under the smallest positive estimate
+        pos = np.concatenate([out[(src, loss)][1].mean(1) for src in samplers])
+        floor = pos[pos > 0].min() / 5 if (pos > 0).any() else 1e-12
         for src in samplers:
             sizes, vals = out[(src, loss)]
             mu = vals.mean(1)
             sd = vals.std(1, ddof=1) if vals.shape[1] > 1 else np.zeros(len(sizes))
+            lo = mu - sd
+            if logy:                # drop zero estimates; a band reaching zero runs to the floor
+                mu = np.where(mu > 0, mu, np.nan)
+                lo = np.where(lo > floor, lo, floor)
             ax.plot(sizes, mu, color=COLOR[src], marker='o', ms=4, mfc='none', lw=1.6,
                     label=src)
-            ax.fill_between(sizes, mu - sd, mu + sd, color=COLOR[src], alpha=.13, lw=0)
-        # each panel gets its own nominal line: the whole data file under that same loss
+            ax.fill_between(sizes, lo, mu + sd, where=np.isfinite(mu), color=COLOR[src],
+                            alpha=.13, lw=0)
         ax.axhline(gold['data'][loss], color='.4', lw=1, ls=':',
                    label=f'full nominal sample ({data.shape[0]:,})')
         ax.set(xscale='log', xlabel='loss evaluations', title=f'{loss} loss')
+        if logy:
+            ax.set_yscale('log', nonpositive='clip')
+            ax.set_ylim(bottom=floor)
         ax.legend(fontsize=7, loc='lower right')
-    axes[0].set_ylabel(f'estimated total loss ({a.repeats} runs, mean $\\pm$ sd)')
+    axes[0].set_ylabel(f'estimated total loss ({a.repeats} runs, mean $\\pm$ sd)'
+                       + ('\nzero estimates not shown' if logy else ''))
     fig.suptitle(a.problem, fontsize=10)
     os.makedirs(OUT, exist_ok=True)
     name = f'integration_loss_{a.problem}.png'

@@ -1,3 +1,13 @@
+"""Train the LCSO surrogate of the muon shield on a rolling buffer of simulated designs (GPU).
+
+The buffer holds n_phi designs (slot 0 is the nominal one); every refresh_every epochs half
+of them are replaced by fresh designs and muons. Training stops when the hit-count error on
+a fixed validation set (temperature-1 muons) stops improving, and the best weights are
+saved to outputs/lcso_resample_<model_type>.pt.
+
+    python lcso_resample.py --model_type deeponet
+    python lcso_resample.py --model_type taylor --load_val    # reuse outputs/resample_val_data.h5
+"""
 import argparse
 import copy
 import os
@@ -12,23 +22,25 @@ import matplotlib.pyplot as plt
 from models import build_surrogate, save_surrogate
 from problems import ShipMuonShieldCuda
 
-parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+    pass
+
+
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
 parser.add_argument('--model_type', default='deeponet', choices=['deeponet', 'taylor'])
-parser.add_argument('--rank', type=int, default=8, help='taylor: shared curvature directions')
+parser.add_argument('--rank', type=int, default=8, help='taylor: curvature directions')
 parser.add_argument('--hidden_dim', type=int, default=64)
 parser.add_argument('--p', type=int, default=8, help='latent dim in deeponet')
-parser.add_argument('--muons', default='temp', choices=['data', 'uniform', 'temp', 'mixed'])
-parser.add_argument('--n_phi', type=int, default=64,
-                    help='Designs in the buffer (slot 0 is phi_0, pinned)')
+parser.add_argument('--muons', default='temp', choices=['data', 'uniform', 'temp', 'mixed'],
+                    help='training muons (temp = flow at temperature 1.5)')
+parser.add_argument('--n_phi', type=int, default=64, help='designs in the buffer')
 parser.add_argument('--n_muons', type=int, default=int(5e6),
-                    help='Muons per design. The buffer holds n_phi * n_muons * 28 bytes')
-parser.add_argument('--refresh_every', type=int, default=5,
-                    help='Epochs between refreshes; each re-simulates half the buffer '
-                         '(0 disables, which reduces this to lcso.py)')
-parser.add_argument('--n_phi_val', type=int, default=64, help='Held-out designs (fixed)')
+                    help='muons per design (buffer RAM: n_phi * n_muons * 28 bytes)')
+parser.add_argument('--refresh_every', type=int, default=5, help='epochs; 0 = never')
+parser.add_argument('--n_phi_val', type=int, default=64)
 parser.add_argument('--n_muons_val', type=int, default=int(10e6))
-parser.add_argument('--epochs', type=int, default=200, help='Hard cap: passes over the buffer')
-parser.add_argument('--patience', type=int, default=20, help='Epochs without improvement')
+parser.add_argument('--epochs', type=int, default=200, help='max epochs')
+parser.add_argument('--patience', type=int, default=20, help='epochs without improvement')
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--batch_size', type=int, default=2 ** 20)
 parser.add_argument('--load_val', action='store_true')
@@ -42,13 +54,11 @@ os.makedirs(FIGS, exist_ok=True)
 VAL_H5 = os.path.join(args.out_dir, 'resample_val_data.h5')
 MODEL = os.path.join(args.out_dir, f'lcso_resample_{args.model_type}.pt')
 
-# The envelope the transport kernel is exercised on: outside it the CUDA kernel dies with
-# an illegal memory access, and the tempered flow does reach there. Floors on the sampler,
-# not tuning knobs.
+# flow muons outside this envelope can crash the CUDA kernel
 ShipMuonShieldCuda.PZ_MIN = 1.0
 ShipMuonShieldCuda.PT_MAX = 13.0
 
-# uniform_fields=True disables the field-map simulation, as in every other script here.
+# uniform fields, as in every other script (the class default is the field map)
 shield = ShipMuonShieldCuda(n_samples=args.n_muons, uniform_fields=True)
 phi_0 = shield.initial_phi
 model = build_surrogate(args.model_type, phi_dim=phi_0.shape[-1], x_dim=7, phi_0=phi_0,
@@ -122,11 +132,9 @@ for i in range(W):
     muons[i], hits[i] = simulate(phis[i], M)
 print(f'buffer: {tuple(muons.shape)}, hit rate {hits.float().mean():.3e}')
 
-# Muon statistics are computed ONCE and frozen: they are baked into every weight learned,
-# so recomputing them at a refresh would silently invalidate the training so far. The
-# float64 accumulator matters on its own -- in float32 a sum over ~1e9 values stalls and
-# the statistics come out quietly wrong.
-sub = muons.numpy()[..., :6]                    # .numpy() on a CPU tensor is zero-copy
+# Muon statistics: computed once on the initial buffer and frozen (the weights depend on
+# them). float64 accumulator: a float32 sum over ~1e9 values stalls.
+sub = muons.numpy()[..., :6]
 model.set_muon_norm(sub.mean(axis=(0, 1), dtype=np.float64),
                     sub.std(axis=(0, 1), dtype=np.float64) + 1e-12)
 del sub
@@ -152,8 +160,8 @@ sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
 
 @torch.no_grad()
 def validate(batch=2 ** 19):
-    """BCE and the hit-count error on the held-out designs. The count error is the one
-    that decides anything -- see the docstring."""
+    """Validation BCE, mean |log(pred/true)| of the hit counts (what training stops on),
+    and the predicted counts."""
     model.eval()
     tot, n, pred = 0.0, 0, np.zeros(len(val_phis))
     for i in range(len(val_phis)):

@@ -1,19 +1,10 @@
-"""The inner loop: three ambiguity sets against a fixed portfolio.
+"""Inner loop for the portfolio: three ambiguity sets against a fixed (w, tau).
 
-Given fixed (w, tau), each method solves sup_{Q in U(P)} E_Q[l] and returns the worst-case
-risk with the distribution that achieved it.
+  KL-DRO        reweights the observed returns, KL(w || 1/n) <= rho.
+  Wasserstein   moves the return vectors, (1/n) sum ||delta_i||^2 <= eps^2.
+  Latent-DRO    perturbs the latent of the fitted flow, KL(T # p_0 || p_0) <= rho.
 
-  KL-DRO        reweights the observed returns, KL(w || 1/n) <= rho, maximizer
-                w propto exp(l/beta) (Hu & Hong 2013; Namkoong & Duchi 2016).
-  Wasserstein   moves the return vectors under a shared budget
-                (1/n) sum ||delta_i||^2 <= eps^2 -- the W_2 ball of Mohajerin Esfahani &
-                Kuhn (2018), whose portfolio experiment is this problem.
-  Latent-DRO    perturbs the latent of the fitted flow, KL(T_eta # p_0 || p_0) <= rho,
-                which by diffeomorphic invariance is the same divergence in return space.
-
-The loss sees the returns only through the scalar r = w'xi, so what every adversary is
-really doing is reshaping the distribution of r -- and since the CVaR term looks at its
-lower tail, that is where the damage has to come from.
+Each returns (worst-case risk, the distribution that achieved it).
 """
 import os
 import sys
@@ -68,22 +59,16 @@ def latent_dro(problem, flow, phi, rho, family='full-affine', n=20000, steps=300
 
 
 def plausibility(problem, x):
-    """Mean log-density of the adversarial returns under the TRUE model -- the only axis
-    on which the three radii can be compared."""
+    """Mean log-density under the TRUE model: the common axis for the three radii."""
     return float(problem.true_log_prob(x).mean())
 
-class Counter:
-    """Counts true-loss evaluations, in (design, sample) pairs.
 
-    The unit is one call of the real objective on one sample -- what a simulator charges
-    for. The inner loops differ enormously in this: reweighting needs the losses once,
-    a data-space adversary needs them again at every ascent step, and a latent adversary
-    reading a surrogate needs none at all.
-    """
+class Counter:
+    """Wraps problem.loss and counts true-loss evaluations, in (design, sample) pairs."""
 
     def __init__(self, problem):
         self.problem, self.n = problem, 0
 
-    def loss(self, phi, x, *a):
+    def loss(self, phi, x):
         self.n += x.shape[0]
-        return self.problem.loss(phi, x, *a)
+        return self.problem.loss(phi, x)

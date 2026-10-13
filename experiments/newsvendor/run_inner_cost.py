@@ -1,10 +1,9 @@
-"""What does the inner loop cost, in true-loss evaluations? (portfolio)
+"""Cost of one inner solve, in true-loss evaluations (one unit = one sample of the real loss).
 
     python3 run_inner_cost.py
 
-Same accounting as the two-moons version: one unit is one evaluation of the real objective
-on one sample. Reweighting needs the losses once, a data-space adversary needs them again
-at every ascent step, and a latent adversary reading a surrogate needs none.
+Also fits and saves the nominal design and the local surrogate to models/ (design.pt,
+surrogate.pt), which run_inner_samples.py, inner_compare/ and integration/ load.
 """
 import os
 import sys
@@ -18,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import inner                                                       # noqa: E402
 from optb.lcso import _fit, _make_surrogate                        # noqa: E402
-from problem import Newsvendor                                      # noqa: E402
+from problem import Newsvendor                                     # noqa: E402
 from train_generator import train                                  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
@@ -30,6 +29,7 @@ STYLE = {'KL-DRO': ('C2', 'o'), 'Wasserstein': ('C1', 'v'),
 
 
 class Adapter:
+    """The problem behind the interface optb.lcso's surrogate expects."""
     link = 'identity'
 
     def __init__(self, p):
@@ -45,11 +45,7 @@ class Adapter:
 
 
 def fit_surrogate(problem, phi, n_designs=60, n_samples=2000, delta=0.5, seed=0):
-    """Fit s(phi, x) near the incumbent. Returns (loss_fn, evaluations spent).
-
-    The design perturbations are small and projected back onto the simplex: the surrogate
-    only has to be right near the incumbent, which is the whole premise of a local model.
-    """
+    """Fit s(phi, x) on projected designs within delta of phi. Returns (loss_fn, evaluations)."""
     g = torch.Generator().manual_seed(seed)
     ad = Adapter(problem)
     designs = torch.stack([problem.project(phi + delta *
@@ -68,7 +64,7 @@ def fit_surrogate(problem, phi, n_designs=60, n_samples=2000, delta=0.5, seed=0)
 
 
 def surrogate_loss_fn(model):
-    """The surrogate as a loss: (phi, x) -> per-sample loss."""
+    """The surrogate as a loss (phi, x) -> per-sample loss; .model holds the network."""
     loss_fn = lambda p, x: model(p, x)
     loss_fn.model = model
     return loss_fn
@@ -83,7 +79,6 @@ def load_surrogate(path, problem):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = Newsvendor()
     x = problem.sample(20000, torch.Generator().manual_seed(0))
@@ -105,10 +100,9 @@ if __name__ == '__main__':
         c = inner.Counter(problem)
         v, _ = inner.wasserstein_dro(problem, phi, x, eps, loss_fn=c.loss)
         rows['Wasserstein'].append((c.n, v))
-    for rho in RHOS:
-        c = inner.Counter(problem)
+    for rho in RHOS:            # reads only the surrogate: no true-loss evaluations
         v, _ = inner.latent_dro(problem, flow, phi, rho, loss_fn=surrogate)
-        rows['Latent-DRO (surrogate)'].append((c.n, v))
+        rows['Latent-DRO (surrogate)'].append((0, v))
 
     for name in STYLE:
         print(f'\n  {name}')
@@ -128,7 +122,7 @@ if __name__ == '__main__':
     ax.text(setup, .5, ' surrogate fit (one-off)', color='C0', fontsize=7, rotation=90,
             va='center', transform=ax.get_xaxis_transform())
     ax.set(xscale='log', xlabel='true-loss evaluations for ONE inner solve',
-           ylabel='worst-case mean-CVaR risk', title='what the inner loop costs (portfolio)')
+           ylabel='worst-case risk', title='what the inner loop costs (newsvendor)')
     ax.legend(fontsize=8, loc='upper left')
     fig.savefig(os.path.join(OUT, 'inner_cost.png'), dpi=150)
     print(f'\n  wrote {OUT}/inner_cost.png')

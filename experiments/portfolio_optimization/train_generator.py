@@ -1,13 +1,9 @@
-"""Fit a normalizing flow to the return distribution and validate what it learned.
+"""Fit a normalizing flow to the return distribution and validate it.
 
     python3 train_generator.py
 
-Three things are recorded, because the training loss alone does not say whether the
-generator is usable. The held-out loss says whether it is overfitting; KL(P || p_theta),
-available exactly here because the return model is Gaussian, says how far the fitted
-density actually sits from the truth -- which is the number the DRO layer cares about,
-since the ambiguity radii are of the same order. Marginals are checked per asset at the
-end, so an error in one of the ten cannot hide in an average.
+Records train/held-out NLL and the exact KL(P || p_theta) (the return model is Gaussian),
+checks per-asset marginals, and saves models/generator.pt and models/data.pt.
 """
 import os
 import sys
@@ -18,7 +14,7 @@ import matplotlib.pyplot as plt
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dro.flows import Flow, load_flow                                        # noqa: E402
+from dro.flows import Flow, load_flow                             # noqa: E402
 from problem import Portfolio                                     # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs')
@@ -27,13 +23,10 @@ MODELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 
 def train(problem, n_train=4000, epochs=800, batch=512, lr=3e-3, seed=0, every=10,
           patience=15):
-    """Fit the flow, recording train loss, held-out loss and KL(P || p_theta).
+    """Fit the flow, early-stopped on held-out NLL.
 
-    Early stopping on the held-out loss is not optional here. Trained to convergence this
-    flow overfits rather than plateauing: the training loss keeps falling while the
-    held-out loss rises and KL(P || p_theta) climbs from 0.05 to 0.18, so the generator
-    the DRO layer would anchor to is three times worse than the one available at epoch 40.
-    The training loss alone never shows it.
+    Early stopping matters: run to convergence the flow overfits and KL(P || p_theta) climbs
+    from 0.05 to 0.18 while the training loss keeps falling.
     """
     g = torch.Generator().manual_seed(seed)
     x = problem.sample(n_train, g)
@@ -66,20 +59,14 @@ def train(problem, n_train=4000, epochs=800, batch=512, lr=3e-3, seed=0, every=1
                                   for k, v in flow.state_dict().items()})
             elif ep - best[1] >= patience * every:
                 break
-    if best[2] is not None:
-        flow.load_state_dict(best[2])
+    flow.load_state_dict(best[2])
     hist['stopped_at'] = best[1]
     flow.eval()
     return flow, hist
 
 
 class Generator:
-    """The fitted flow behind the (latent_dim, model(z)) interface the samplers expect.
-
-    One latent per asset and no discrete coordinate, so unlike the two-moons generator this
-    is a plain diffeomorphism of a standard normal -- which is also why a quadrature rule
-    over the latent costs m**n_assets here and prices itself out immediately.
-    """
+    """The fitted flow behind the (latent_dim, model(z)) interface integration/ expects."""
 
     def __init__(self, flow):
         self.flow, self.latent_dim = flow, flow.dim
@@ -103,21 +90,17 @@ def plot_training(hist, ax_loss, ax_kl):
 
     ax_kl.plot(hist['epoch'], hist['kl'], lw=1.8, color='C3')
     ax_kl.axhline(0, color='0.6', lw=.8, ls=':')
-    stop = hist.get('stopped_at')
-    if stop is not None:
-        k_at = hist['kl'][hist['epoch'].index(min(hist['epoch'], key=lambda e: abs(e - stop)))]
-        for ax in (ax_loss, ax_kl):
-            ax.axvline(stop, color='0.4', lw=1.0, ls=':')
-        ax_loss.text(stop, ax_loss.get_ylim()[1], ' kept', color='0.4', fontsize=7,
-                     va='top')
-        ax_kl.set(title=f'KL to the true model (kept {k_at:.4f})')
-    else:
-        ax_kl.set(title=f"KL to the true model (final {hist['kl'][-1]:.4f})")
+    stop = hist['stopped_at']
+    k_at = hist['kl'][hist['epoch'].index(min(hist['epoch'], key=lambda e: abs(e - stop)))]
+    for ax in (ax_loss, ax_kl):
+        ax.axvline(stop, color='0.4', lw=1.0, ls=':')
+    ax_loss.text(stop, ax_loss.get_ylim()[1], ' kept', color='0.4', fontsize=7, va='top')
+    ax_kl.set(title=f'KL to the true model (kept {k_at:.4f})')
     ax_kl.set(xlabel='epoch', ylabel=r'$\mathrm{KL}(P\,\|\,p_\theta)$', yscale='log')
 
 
 def plot_marginals(problem, flow, n=50000):
-    """One panel per asset: an error in any single marginal is visible, not averaged away."""
+    """One panel per asset, true vs flow."""
     real = problem.sample(n, torch.Generator().manual_seed(1))
     fake = flow.sample(n, torch.Generator().manual_seed(2))
     d = problem.n_assets
@@ -161,7 +144,6 @@ def plot_summary(problem, flow, hist, n=50000):
 
 
 if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
     os.makedirs(OUT, exist_ok=True)
     problem = Portfolio()
     flow, hist = train(problem)

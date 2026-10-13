@@ -1,36 +1,29 @@
+"""LCSO: local surrogate fitted to per-sample losses around the incumbent, then a trust-region step.
 
+The problem object needs: dim, link, sample(n, g), loss(phi, x), objective(phi, x),
+true_objective(phi), design_bounds(), init_design(), and optionally project(phi),
+transform(score, x) (surrogate models an intermediate score), loss_scale, fit_keep.
+"""
 import torch
 
 from dro.method import trust_region_max
-from dro.surrogate import BranchTrunk, TaylorBranchTrunk
+from dro.surrogate import BranchTrunk, TaylorBranchTrunk, TaylorResidualBranchTrunk
 from .samplers import draw_designs
 
 
 class Budget:
-    """Counts SAMPLES handed to the simulator, not designs.
+    """Counts simulated SAMPLES (not designs): a muon-shield design costs its muons, so
+    many designs with few samples each cost the same as few designs with many.
 
-    This is the accounting that matters, and getting it wrong inverts the conclusion. In
-    the muon shield the cost of evaluating a design is dominated by transporting its
-    muons, not by the fixed setup: `lcso_resample.py` runs 64 designs at 5e6 muons each,
-    so the per-design overhead is negligible against 3.2e8 transports. Charging per design
-    therefore makes "many designs, few samples each" look expensive when it is in fact the
-    same price -- and that trade is the whole idea of the resample scheme.
-
-    Under this accounting a fixed budget buys either a few designs known precisely or many
-    designs known roughly, and which is better depends on what the budget is for. To fit
-    the *design dependence* of a surrogate the second is worth far more: per-design noise
-    averages out across designs during the fit, while design coverage cannot be recovered
-    by sampling one design harder.
-
-    The trace records the true objective of the design the method currently believes is
-    best, chosen on its own noisy observations. No method may consult the true objective.
+    trace: (samples spent, true objective of the best design so far, chosen on noisy
+    observations only).
     """
 
     def __init__(self, limit):
-        self.limit = limit                 # total samples
+        self.limit = limit
         self.spent = 0
         self.designs = 0
-        self.trace = []                    # (samples spent, best true objective so far)
+        self.trace = []
 
     def charge(self, n_samples, n_designs=1):
         self.spent += n_samples
@@ -49,26 +42,24 @@ class Budget:
 
 
 def simulate(problem, phi, n_samples, generator):
-    """One design handed to the simulator: fresh inputs, per-sample losses, and the
-    scalar the simulator reports. The scalar is all a derivative-free method sees; the
-    per-sample losses are what a surrogate method additionally exploits, which is the
-    real asymmetry between the two families and not an unfair one -- the simulator does
-    return per-particle outcomes."""
+    """One design through the simulator: (inputs, per-sample losses, observed objective).
+
+    The observation uses every sample; with problem.fit_keep only a uniform subset of the
+    per-sample rows is kept for the fit (memory: the muon shield runs 1e7-1e8 per design).
+    """
     x = problem.sample(n_samples, generator)
     with torch.no_grad():
         y = problem.loss(phi, x)
         obs = float(problem.objective(phi, x))
+    keep = getattr(problem, 'fit_keep', None)
+    if keep is not None and x.shape[0] > keep:
+        idx = torch.randperm(x.shape[0], generator=generator)[:keep]
+        x, y = x[idx], y[idx]
     return x, y, obs
 
 
 def _feasible(problem, phi, lo, hi):
-    """Put a design back in the feasible set.
-
-    A box clamp is right when the constraints are bounds, and wrong when they are not:
-    the portfolio's weights live on a simplex, where clamping gives a point that sums to
-    something other than one and is not a portfolio at all. Any problem that defines
-    `project` gets to say what feasibility means for it.
-    """
+    """problem.project if it has one (e.g. a simplex), else clamp to [lo, hi]."""
     if hasattr(problem, 'project'):
         if phi.dim() == 1:
             return problem.project(phi)
@@ -76,62 +67,61 @@ def _feasible(problem, phi, lo, hi):
     return torch.minimum(torch.maximum(phi, lo), hi)
 
 
-def _make_surrogate(problem, kind, seed, rank=8, p=32, hidden=64):
-    cls = TaylorBranchTrunk if kind == 'taylor' else BranchTrunk
-    kw = dict(rank=rank) if kind == 'taylor' else dict(p=p)
-    x_dim = problem.sample(2).shape[1]
-    return cls(problem.dim, x_dim, hidden=hidden, link=problem.link, seed=seed, **kw)
+def _make_surrogate(problem, kind, seed, rank=8, p=32, hidden=64, res_penalty=0.0):
+    """A fresh surrogate.
 
+    kind: 'taylor' (TaylorBranchTrunk), 'taylor-full' (centred quadratic, no residual),
+    'taylor-res[:lam[:keep|reset|fold]]' (TaylorResidualBranchTrunk with residual penalty
+    lam and that recentring), anything else BranchTrunk ('mlp', 'deeponet').
+    rank=None is a full-rank Hessian for the taylor-full/-res models.
 
-def _score_batch(model, designs, Xb):
-    """Score every design against its OWN input batch, in one pass.
-
-    designs: (M, D).  Xb: (M, B, dx).  Returns (M, B).
-
-    Scoring design by design in a Python loop costs M forward passes per epoch, which at
-    128 designs and 400 epochs is fifty thousand of them and dominates the whole study.
-    Both surrogates factor into a design part and an input part, so the per-design inputs
-    only change which trunk outputs pair with which branch outputs -- an einsum, not a
-    loop.
+    model.y_scale = problem.loss_scale (default 1): the model fits loss / y_scale, and every
+    value and derivative read from it is scaled back. A plain attribute, not in the state_dict.
     """
-    dn = (designs - model.design_loc) / model.design_scale             # (M, D)
-    xn = (Xb - model.input_loc) / model.input_scale                    # (M, B, dx)
-    if hasattr(model, 'Q_raw'):                                        # Taylor quadratic
-        tau = model.trunk(xn)                                          # (M, B, 1+D+r)
-        a = tau[..., 0]
-        c = tau[..., 1:1 + model.D]
-        nu = tau[..., 1 + model.D:]
-        proj = dn @ model.Q                                            # (M, r)
-        lin = torch.einsum('md,mbd->mb', dn, c)
-        quad = 0.5 * torch.einsum('mr,mbr->mb', proj ** 2, nu)
-        return a + lin + quad + model.beta
-    b = model.branch(dn)                                               # (M, p)
-    t = model.trunk(xn)                                                # (M, B, p)
-    return torch.einsum('mp,mbp->mb', b, t) + model.beta
+    kind, *opts = kind.split(':')
+    res_penalty = float(opts[0]) if opts and opts[0] else res_penalty
+    recentre = opts[1] if len(opts) > 1 else 'keep'
+    x_dim = problem.sample(2).shape[1]
+    if kind in ('taylor-res', 'taylor-full'):
+        model = TaylorResidualBranchTrunk(problem.dim, x_dim, rank=rank, hidden=hidden,
+                                          p_res=p if kind == 'taylor-res' else 0,
+                                          link=problem.link, seed=seed,
+                                          res_penalty=res_penalty, recentre=recentre)
+    elif kind == 'taylor':
+        model = TaylorBranchTrunk(problem.dim, x_dim, rank=rank, hidden=hidden,
+                                  link=problem.link, seed=seed)
+    else:
+        model = BranchTrunk(problem.dim, x_dim, p=p, hidden=hidden, link=problem.link,
+                            seed=seed)
+    model.y_scale = float(getattr(problem, 'loss_scale', 1.0))
+    return model
 
 
 def _fit(model, designs, X, Y, epochs, seed, lr=3e-3, batch=2048, link='identity',
          opt=None):
-    """Fit on per-design input samples, which is what a simulator actually returns.
+    """Fit on per-design inputs: designs (M, D), X (M, N, dx), Y (M, N).
 
-    `train_surrogate` in dro/surrogate.py assumes one input pool shared by every design --
-    reasonable when the pool is drawn once, and it makes the trunk evaluation cheap. Here
-    each simulated design carries its own fresh inputs, exactly as `lcso_resample.py`
-    holds a separate muon block per design, so the batch is a shared *index* into each
-    design's own block.
+    Each step uses the same random index into every design's own sample block. Pass the
+    returned optimiser back in to continue training the same model; the first call
+    (opt=None) sets the normalisation.
     """
-    if opt is None:                       # first fit: set the normalisation and the state
+    if opt is None:
         model.set_norm(designs, X.reshape(-1, X.shape[-1]))
         opt = torch.optim.Adam(model.parameters(), lr=lr)
+    elif hasattr(model, 'set_gate'):      # the trust region may have grown or shrunk
+        model.set_gate(designs)
     g = torch.Generator().manual_seed(seed)
     M, N = Y.shape
+    Y = Y / model.y_scale
     bce = torch.nn.BCEWithLogitsLoss()
     model.train()
     for _ in range(epochs):
         idx = torch.randperm(N, generator=g)[:batch]
-        s = _score_batch(model, designs, X[:, idx])
+        s = model.score_batch(designs, X[:, idx])
         y = Y[:, idx]
         loss = bce(s, y) if link == 'sigmoid' else ((s - y) ** 2).mean()
+        if getattr(model, 'res_penalty', 0):
+            loss = loss + model.res_penalty * model.last_residual.pow(2).mean()
         opt.zero_grad()
         loss.backward()
         opt.step()
@@ -140,39 +130,28 @@ def _fit(model, designs, X, Y, epochs, seed, lr=3e-3, batch=2048, link='identity
 
 
 def predicted_objective(problem, model, phi, x):
-    """What the surrogate says the objective is at `phi`.
-
-    If the problem defines `transform`, the surrogate is modelling an intermediate
-    quantity -- a score, say -- and the known function of it is applied here rather than
-    being left for the surrogate to learn. That is worth doing whenever the intermediate
-    is better matched to the architecture than the objective is: a branch-trunk surrogate
-    represents <b(phi), t(x)> exactly, so a score linear in the design is exact, while a
-    nonlinear function of that score is only approximated.
-    """
-    s = model(phi, x)
+    """The surrogate's objective at phi, through problem.transform if there is one."""
+    s = model(phi, x) * model.y_scale
     return problem.transform(s, x).mean() if hasattr(problem, 'transform') else s.mean()
 
 
 def _derivatives(problem, model, phi, x, need_hessian):
-    """Gradient (and Hessian) of the surrogate's predicted objective in the design.
+    """(grad, Hessian or None) of the predicted objective in the design.
 
-    The Taylor surrogate has both in closed form. For the branch network the gradient
-    comes from autograd; its Hessian is not requested, which is exactly why the
-    trust-region variant is paired with the Taylor surrogate.
+    Closed form from model.design_derivatives when a Hessian is wanted and there is no
+    transform; otherwise the gradient by autograd and no Hessian.
     """
-    if hasattr(problem, 'transform'):          # closed forms do not apply through it
+    if hasattr(problem, 'transform'):
         p = phi.detach().clone().requires_grad_(True)
         g, = torch.autograd.grad(predicted_objective(problem, model, p, x), p)
         return g.detach(), None
     if hasattr(model, 'design_derivatives') and need_hessian:
-        # Detach: these come back attached to the surrogate's parameters, and the step
-        # built from them becomes the next incumbent, which becomes the centre of the next
-        # round's designs. Left attached, the next fit tries to backward through the
-        # previous model's graph.
+        # detached: the step becomes the next incumbent and must not carry this model's graph
         _, g, H = model.design_derivatives(phi, x)
-        return g.detach(), H.detach()
+        k = model.y_scale
+        return k * g.detach(), k * H.detach()
     p = phi.detach().clone().requires_grad_(True)
-    out = model(p, x).mean()
+    out = model(p, x).mean() * model.y_scale
     g, = torch.autograd.grad(out, p)
     return g.detach(), None
 
@@ -181,24 +160,15 @@ def lcso(problem, budget, n_samples=20000, surrogate='taylor', step='tr-newton',
          scheme='resample', delta0=0.35, n_designs=None, epochs=250, seed=0,
          min_delta=5e-3, rank=8, resample_factor=8, refresh_frac=0.5,
          sampler='uniform', radial=True, min_per_design=50, verbose=False):
-    """LCSO to exhaustion of the budget, where the budget is total simulated samples.
+    """Run LCSO until `budget` (total simulated samples) is spent. Returns (best design,
+    its true objective).
 
-    `scheme` is the choice this study is really about, and both arms cost the same:
-
-      nominal   few designs, each with the full `n_samples`. Every design is measured
-                precisely, which is what you want if you intend to *trust* an individual
-                measurement -- and what a derivative-free baseline needs.
-      resample  `resample_factor` times as many designs, each with `n_samples` divided by
-                that factor, held in a rotating buffer of which a fraction is re-simulated
-                at fresh designs every iteration. Each design is measured badly; the fit
-                does not care, because the design dependence is identified across designs
-                and the per-design noise averages out, while design coverage is something
-                no amount of sampling one design can recover.
-
-    The measurement in optb/gradcheck.py is what decides between them: the surrogate
-    gradient needs ~4D designs to align with the truth, and below 2D it is uncorrelated or
-    worse. At a fixed sample budget only the resample arm can afford 4D designs once D is
-    large.
+    scheme:
+      nominal   n_designs / resample_factor designs per round, n_samples each.
+      resample  n_designs per round, n_samples / resample_factor each, in a rotating buffer
+                where refresh_frac of the old designs are replaced every round.
+    Both cost the same per round. step: 'tr-newton' (needs a Hessian) or a normalised
+    gradient step of length delta. One surrogate is trained on for the whole run.
     """
     g = torch.Generator().manual_seed(1000 + seed)
     lo, hi = problem.design_bounds()
@@ -210,7 +180,7 @@ def lcso(problem, budget, n_samples=20000, surrogate='taylor', step='tr-newton',
     if scheme == 'resample':
         per_design = max(min_per_design, n_samples // resample_factor)
         k_round = n_designs
-    else:                                    # nominal: full samples, proportionally fewer
+    else:
         per_design = n_samples
         k_round = max(4, n_designs // resample_factor)
 
@@ -244,8 +214,7 @@ def lcso(problem, budget, n_samples=20000, surrogate='taylor', step='tr-newton',
             best_obs, best_phi = obs[j], new_designs[j].clone()
 
         if scheme == 'resample' and buf_designs is not None:
-            # rotate: keep the newest designs, retire the oldest, as lcso_resample.py
-            # re-simulates half the buffer at fresh designs every few epochs
+            # keep the newest designs, retire the oldest
             keep = int((1.0 - refresh_frac) * buf_designs.shape[0])
             buf_designs = torch.cat([buf_designs[-keep:], new_designs]) if keep else new_designs
             buf_x = torch.cat([buf_x[-keep:], nx]) if keep else nx
@@ -253,22 +222,18 @@ def lcso(problem, budget, n_samples=20000, surrogate='taylor', step='tr-newton',
         else:
             buf_designs, buf_x, buf_y = new_designs, nx, ny
 
-        # One surrogate for the whole run, trained on as the buffer rotates -- which is
-        # what `lcso_resample.py` does, and the reason the buffer rotates at all. Rebuilding
-        # it every round throws away everything it learned, so with few epochs per round it
-        # never converges, and it makes each round cost a full fit.
+        # re-centre an expansion on the incumbent so its derivatives are read there
+        # (the first fit sets the centre itself through set_norm)
+        if opt is not None and hasattr(model, 'phi_0'):
+            model.phi_0 = phi
         model, opt = _fit(model, buf_designs, buf_x, buf_y, epochs, seed,
                           link=problem.link, opt=opt)
 
         xs = buf_x[-k]                                        # the incumbent's inputs
         grad, hess = _derivatives(problem, model, phi, xs, need_hessian=(step == 'tr-newton'))
-        # Take the step in NORMALISED design coordinates, u = phi / scale, and map back.
-        # A step of fixed length in raw coordinates is isotropic in units that have no
-        # reason to be comparable: on the portfolio the gradient in tau is 60x the
-        # gradient in a weight, so a normalised raw step goes almost entirely into tau and
-        # the weights barely move. The surrogate already works in these coordinates.
+        # step in normalised coordinates u = phi / scale, then map back
         scale = (hi - lo) / 2
-        g_u = grad * scale                       # chain rule: dF/du = dF/dphi * scale
+        g_u = grad * scale
         if step == 'tr-newton' and hess is not None:
             h_u = hess * scale.unsqueeze(1) * scale.unsqueeze(0)
             p_u, _, _ = trust_region_max(-g_u, -h_u, delta)
@@ -295,9 +260,7 @@ def lcso(problem, budget, n_samples=20000, surrogate='taylor', step='tr-newton',
             delta *= 0.5
         elif ratio > 0.75:
             delta = min(delta * 2.0, 1.0)
-        # Re-expand rather than ratchet down: a run of uninformative ratios early on --
-        # which noisy observations produce -- otherwise collapses delta to its floor in a
-        # few rounds and freezes the method there for the rest of the budget.
+        # re-expand instead of freezing at the floor after a run of noisy ratios
         if delta <= min_delta:
             delta = delta0 * 0.25
         budget.record(problem.true_objective(best_phi))
