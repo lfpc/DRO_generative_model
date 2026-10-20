@@ -18,7 +18,7 @@ def sobol_designs(lo, hi, m, seed=0):
 
 
 def radial_designs(center, lo, hi, m, seed=0):
-    """Sobol designs pulled toward `center` by a uniform radial factor (as lcso_resample.py)."""
+    """Sobol designs pulled toward `center` by a uniform radial factor (as train_surrogate.py)."""
     eng = torch.quasirandom.SobolEngine(dimension=len(lo), scramble=True, seed=seed)
     u = eng.draw(m).to(lo.dtype) * 2 - 1
     g = torch.Generator().manual_seed(seed)

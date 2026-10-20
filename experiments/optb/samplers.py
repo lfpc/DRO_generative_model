@@ -1,6 +1,6 @@
 """Designs around the incumbent, as points in [-1, 1]^d (the caller scales and centres them).
 
-radial=True multiplies each point by a uniform factor, as lcso_resample.py does: in high
+radial=True multiplies each point by a uniform factor, as train_surrogate.py does: in high
 dimension box-filling points all sit near the surface, and the fit would never see the
 neighbourhood of the incumbent, where the gradient is wanted.
 """

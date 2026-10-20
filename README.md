@@ -1,61 +1,63 @@
 # Robustness of the SHiP muon shield
 
-Train a surrogate of the muon shield's hits (LCSO), then read robustness off it: sensitivities,
-Hessian, active subspace and worst-case directions, each checked with the simulator.
+Train a surrogate of the muon shield's hits (LCSO, DeepONet), then read robustness off it:
+sensitivities, Hessian, active subspace and worst-case directions, each checked with the simulator.
+The write-up is `report/muon_shield_robustness.tex`.
 
-The simulator (`cuda_muons_ship`) needs a GPU. The muons come from the generative flow in
-`~/projects/generator_muons` (`--muons gen`, the default) or from the real data file (`--muons data`).
-Set `PROJECTS_DIR` if your projects are not in `~/projects`. Everything writes to `outputs/`.
+`source env.sh` first: the `muonshield` conda env, and the simulator (`cuda_muons_ship`, from
+MuonsAndMatter, needs a GPU) on the path. The muons come from the generative flow in
+`~/projects/generator_muons` (`src.flows.load_generator`); set `PROJECTS_DIR` if your projects
+are not in `~/projects`.
 
 ## The pipeline
 
 ```bash
-# 1. train the surrogate
-python lcso_resample.py --model_type deeponet      # -> outputs/lcso_resample_deeponet.pt
-python lcso.py                                     # alternative: fixed designs -> outputs/lcso_model.pt
-python test_lcso.py --model outputs/lcso_model.pt  # predicted vs. true hits
-
-# 2. robustness of the nominal design
-python robustness.py --model outputs/lcso_resample_deeponet.pt               # main analysis
-python robustness_per_momenta.py --model outputs/lcso_resample_deeponet.pt   # split by muon kinematics
+source env.sh
+# 1. simulate training pools once (designs in the +-10% box, flow muons at a raised momentum temperature)
+GPUS="0 1 2 3" bash surrogate_study/run_shield_pool.sh
+# 2. the surrogate: four seeds on all pools, averaged into one network (outputs/lcso.pt)
+P=T1.5_d1+T1.5_d0.5+T1.5_d2+T1_d1+T2_d1+T2_m1e6
+for s in 0 1 2 3; do python train_surrogate.py --pool $P --hidden 128 --p 32 --seed $s --name lcso_s$s; done
+python train_surrogate.py --stack outputs/lcso_s{0,1,2,3}.pt --name lcso --score
+# 3. the robustness analysis, ~6 h of simulation (FAST=1: ~2 h)
+nohup bash run_analysis.sh > outputs/logs/run_analysis.log 2>&1 &
 ```
 
-`--no_sim` skips the simulator, so step 2 can be run with the surrogate alone.
-`--model_type taylor` (per-muon quadratic) works with every script as well.
+`run_analysis.sh` runs, all writing to `outputs/robustness/`:
 
-## Other checks
+| script | what it does | writes |
+|---|---|---|
+| `robustness.py` | sensitivities, Hessian, active subspace, worst directions, random designs, walks checked with the simulator | `robustness.npz`, `robustness_report.txt` |
+| `worst_cases.py` | concrete designs (worst direction scaled to X%, its top-k parameters, single parameters, box worst case, random tolerances), simulated | `worst_cases.npz`, `worst_cases_report.txt` |
+| `per_momenta.py` | the sensitivity split by p_z, p_t or charge | `<var>_bins.npz`, `<var>_bins_report.txt` |
+| `plots.py` | every figure, from the saved results | `figs/*.png` |
 
-| script | what it does |
-|---|---|
-| `grad_test.py` | walk the descent direction, surrogate vs. simulator |
-| `active_subspace_test.py` | active subspace of log hits, walk its top directions |
-| `optimization_test.py` | one steepest-descent / trust-region Newton step, checked with the simulator |
-| `zero_order_robustness.py` | 1-D scan of one parameter with the simulator |
-| `gp.py` | Gaussian-process baseline on total hits |
-
-Every script takes `--help`, which lists each flag with its default.
+The surrogate is integrated over the muon flow on a quadrature grid (`MuonShield.grid`: the
+flow's 2-d momentum latent x azimuth x charge, with Gaussian weights), not sampled: exact to
+~1e-5 in seconds, where 1e9 sampled muons left 2-5% of noise. Errors on surrogate quantities are
+the scatter of the ensemble's members; only the simulator uses sampled muons. `--no_sim` runs
+`robustness.py` and `per_momenta.py` on the surrogate alone (minutes). Every script takes
+`--help`, which lists each flag with its default.
 
 ## Code
 
 | file | contents |
 |---|---|
-| `problems.py` | `ShipMuonShieldCuda`: the shield parameters, muon sampling, the simulator call |
-| `models.py` | the LCSO surrogates (DeepONet, Taylor) and `load_surrogate` |
-| `trainer.py` | `train_hits_classifier` |
-| `muons_io.py` | muon blocks and the surrogate-vs-simulator sweep shared by the test scripts |
+| `shield.py` | `MuonShield`: the 43 free parameters, flow muons, the simulator call |
+| `surrogate.py` | `LCSONet` (DeepONet on (px, py, pz, charge)), `stack` (an ensemble as one network), `load_surrogate` |
+| `train_surrogate.py` | fit `LCSONet` on simulated pools, or stack checkpoints |
+| `analysis.py` | shared machinery: the frozen-trunk derivatives, cached hits, surrogate-vs-simulator passes |
+| `surrogate_study/` | how good are the surrogates, and which choices matter: toy problems with an exact answer and the muon shield against the simulator (`surrogate_study/README.md`) |
+| `experiments/` | the DRO / LCSO study on toy problems and its muon-shield port (`experiments/README.md`) |
 
-## What works for the robustness analysis
+## What the surrogate study says (details in `surrogate_study/README.md`)
 
-From the toy-problem study (`experiments/optb/robustcheck.py`), which compares each surrogate's
-directions with ones found by simulation:
-
-- The **active subspace** and the **gradient** directions are reliable. They find at least
-  0.95 of the worst-case rise in almost every case.
-- **Hessian eigen-directions** are only useful when the curvature is large compared with the
-  tolerance. At a flat optimum or a small tolerance they are no better than random.
-- **Projected-gradient ascent** and **corner** search on the surrogate find the worst design
-  in the box reliably. Always confirm those few designs with the simulator.
-- Non-smooth responses (sharp ridges at an optimum) defeat every smooth surrogate.
-
-`experiments/` holds the DRO / LCSO paper study on toy problems and its muon-shield port;
-see `experiments/README.md`.
+- Per-muon surrogates are what make this work: a response surface of the hit count alone needs
+  ~10x more simulation for the same gradient.
+- Train on many designs with few muons each, all at once (not a rolling buffer), at a raised
+  momentum temperature, and on every pool available: the surrogate models p(hit | design, muon),
+  so muons from any temperature are valid data.
+- With ~2e8 training rows, capacity matters (128 hidden, 32 features), and averaging seeds
+  removes most of what is left of the scatter of the gradient.
+- Directions (gradient, top Hessian eigenvector, worst direction) are well determined; magnitudes
+  away from the nominal design are not quadratic, so they are always simulated.
