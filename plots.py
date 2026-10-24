@@ -4,10 +4,13 @@ Reads whichever of these exist in <run> and writes <run>/figs/:
   robustness.npz     robustness_{sensitivity,magnets,spectra,directions,walks,summary,calibration,mc,scans,plane}.png
   worst_cases.npz    worst_direction_scaled, worst_parameters, random_tolerances, sim_pz_profiles .png
   <var>_bins.npz     <var>_bins_{overview,sensitivity,alignment,walks,mc}.png
+  scan_sim_*.npz     (scan_sim.py) the simulated points of robustness_scans.png
+  tolerance_boxes.npz (tolerance_boxes.py) tolerance_boxes, tolerance_allocation .png
 
     python plots.py outputs/robustness
 """
 import argparse
+import glob
 import os
 
 import numpy as np
@@ -15,13 +18,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from analysis import BAD, GREY, OK
-
-
-
-class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
-    pass
-
+from analysis import BAD, GREY, OK, ArgFormatter
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
 parser.add_argument('run', nargs='?', default='outputs/robustness')
@@ -198,15 +195,33 @@ def robustness_figures(r):
 
     if 'scan' not in r:
         return
-    # --- 1-D scans
-    fig, ax = plt.subplots(figsize=(7.5, 5), constrained_layout=True)
+    # --- 1-D scans: the surrogate, and the simulated points of scan_sim.py if there are any
+    sims = [np.load(f) for f in sorted(glob.glob(os.path.join(args.run, 'scan_sim_*.npz')))]
+    n = len(r['scan'])
+    fig, axes = plt.subplots(2, (n + 1) // 2, figsize=(3.1 * ((n + 1) // 2), 5.6), constrained_layout=True,
+                             sharex=True, squeeze=False)
     for j, (k, s) in enumerate(zip(r['scan_params'], r['scan'])):
-        ax.plot(r['scan_t'] * 10, s, 'o-', ms=3, lw=1.5, color=plt.cm.tab10(j % 10), label=labels[k])
-    ax.axhline(1, color='k', lw=0.8, ls=':')
-    ax.axvline(0, color=GREY, lw=0.8, ls='--')
-    ax.set(xlabel='change of the parameter (% of nominal)', ylabel='$H/H_0$ (surrogate)',
-           title=f'The {len(r["scan"])} most sensitive parameters, one at a time')
-    ax.legend(fontsize=8, ncol=2)
+        ax = axes.flat[j]
+        ax.plot(r['scan_t'] * 10, s, '-', lw=2, color=OK, label='surrogate')
+        for i, ss in enumerate(sims):
+            m = ss['params'] == k
+            if m.any():
+                rt, se = poisson_ratio(ss['hits'][m], float(ss['nominal']))
+                ax.errorbar(ss['t'][m] * 10, rt, yerr=se, fmt='s', ms=5, color=BAD, capsize=2,
+                            label='simulator' if i == 0 else None)
+        ax.axhline(1, color='k', lw=0.8, ls=':')
+        ax.axvline(0, color=GREY, lw=0.8, ls='--')
+        ax.set_title(labels[k], fontsize=10)
+        if j % axes.shape[1] == 0:
+            ax.set_ylabel('$H/H_0$')
+        if j >= axes.shape[1]:
+            ax.set_xlabel('change (% of nominal)')
+    for ax in axes.flat[n:]:
+        ax.set_visible(False)
+    handles = {l: h for ax in axes.flat for h, l in zip(*ax.get_legend_handles_labels())}
+    axes.flat[0].legend(handles.values(), handles.keys(), fontsize=8)
+    fig.suptitle(f'The {n} most sensitive parameters, one at a time' +
+                 (f' (simulator: {int(sims[0]["n_muons"]):.0e} muons, Poisson errors)' if sims else ''))
     save(fig, 'robustness_scans.png')
 
     # --- the plane of two directions, with the simulated points of their walks
@@ -418,6 +433,64 @@ def bin_figures(b):
     save(fig, f'{var}_bins_mc.png')
 
 
+# =============================================================================
+# tolerance_boxes.npz (+ _eval.npz)
+# =============================================================================
+def tolerance_figures(t, ev):
+    names, labels = [str(s) for s in t['names']], list(t['labels'])
+    pred, pred_se, sim, S0 = ev['pred'], ev['pred_se'], ev['sim'], float(ev['sim0'])
+    SIM = np.isfinite(sim)
+
+    # --- the worst design in each box against the scaled worst direction
+    pcts = t['pcts']
+    bi = [names.index(f'box{x:g}%') for x in pcts]
+    fig, ax = plt.subplots(figsize=(7.5, 4.8), constrained_layout=True)
+    ax.errorbar(pcts, pred[bi], yerr=pred_se[bi], fmt='o-', color=OK, ms=6, capsize=3, label='box worst case: surrogate')
+    if SIM[bi].any():
+        sb = [i for i in bi if SIM[i]]
+        sr, sr_se = poisson_ratio(sim[sb], S0)
+        ax.errorbar(pcts[SIM[bi]], sr, yerr=sr_se, fmt='s', color=BAD, ms=7, capsize=3, label='box worst case: simulator')
+        for x, s in zip(pcts[SIM[bi]], sr):
+            ax.annotate(f'x{s:.3g}', (x, s), textcoords='offset points', xytext=(6, -12), fontsize=8)
+    if len(ev['wc_pcts']):
+        ax.plot(ev['wc_pcts'], ev['wc'][:, 0], 'o--', color=OK, mfc='white', ms=6, label='scaled worst direction: surrogate')
+        ax.plot(ev['wc_pcts'], ev['wc'][:, 1], 's--', color=BAD, mfc='white', ms=6, label='scaled worst direction: simulator')
+    ax.axhline(1, color='k', lw=0.8, ls=':')
+    ax.set(yscale='log', xlabel='tolerance X (every parameter within $\\pm$X%)', ylabel='worst $H/H_0$',
+           title='Worst case for a given tolerance')
+    ax.legend(fontsize=8)
+    save(fig, 'tolerance_boxes.png')
+
+    # --- the allocations: per-parameter tolerance for each target, and the greedy path
+    alloc = [nm for nm in names if nm.startswith('alloc')]
+    if not alloc:
+        return
+    path_e, path_h = t['path_e'], np.exp(t['path_h'])
+    steps = [int(np.argmax(path_h <= float(nm[5:]))) for nm in alloc]
+    tight = np.flatnonzero(path_e[max(steps)] < 1)
+    tight = tight[np.argsort(path_e[max(steps)][tight])]
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(13, 0.28 * len(tight) + 2.5), constrained_layout=True,
+                                 gridspec_kw=dict(width_ratios=[2, 1]))
+    y = np.arange(len(tight))[::-1]
+    h = 0.8 / len(alloc)
+    cmap = plt.get_cmap('viridis')
+    for j, (nm, st) in enumerate(zip(alloc, steps)):
+        i = names.index(nm)
+        lab = f'worst $\\leq$ {nm[5:]} $H_0$ (surr. {pred[i]:.2f}' + (f', sim. {sim[i] / S0:.2f})' if SIM[i] else ')')
+        ax.barh(y + 0.4 - (j + 0.5) * h, 10 * path_e[st][tight], h, color=cmap(j / max(1, len(alloc) - 1)), label=lab)
+    ax.axvline(10, color='k', lw=0.8, ls=':')
+    ax.set_yticks(y, [labels[k] for k in tight], fontsize=8)
+    ax.set(xlabel='allowed tolerance ($\\pm$%); every other parameter $\\pm$10%', xlim=(0, 10.5),
+           title='Tolerance allocation (greedy, surrogate)')
+    ax.legend(fontsize=8, loc='lower right')
+    bx.plot((path_e < 1).sum(1), path_h, '-', color=OK)
+    for j, (nm, st) in enumerate(zip(alloc, steps)):
+        bx.plot((path_e[st] < 1).sum(), path_h[st], 'o', color=cmap(j / max(1, len(alloc) - 1)), ms=7)
+    bx.set(yscale='log', xlabel='parameters tightened', ylabel='worst $H/H_0$ in the box (surrogate)',
+           title='Greedy path')
+    save(fig, 'tolerance_allocation.png')
+
+
 path = os.path.join(args.run, '{}.npz')
 if os.path.exists(path.format('robustness')):
     robustness_figures(np.load(path.format('robustness')))
@@ -426,3 +499,5 @@ if os.path.exists(path.format('worst_cases')):
 for var in ('pz', 'pt', 'p', 'charge'):
     if os.path.exists(path.format(f'{var}_bins')):
         bin_figures(np.load(path.format(f'{var}_bins')))
+if os.path.exists(path.format('tolerance_boxes_eval')):
+    tolerance_figures(np.load(path.format('tolerance_boxes')), np.load(path.format('tolerance_boxes_eval')))

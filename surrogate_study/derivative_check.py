@@ -1,7 +1,7 @@
 """Which parts of the gradient and Hessian at u = 0 are determined, and does the rest matter?
 
-From the arrays run_shield.py saved (gradient and Hessian of the T = 1 hits at u = 0, on the
-1e9 reference muons) of the best-trained models:
+From the arrays run_shield.py saved (gradient and Hessian of the hits at u = 0, on the 1e9
+nominal reference muons) of the best-trained models:
 
   1. the gradient component by component: consensus (median over models), spread, and how
      far the models agree once the k largest components are kept
@@ -59,8 +59,8 @@ if __name__ == '__main__':
     G = np.array([m[2] for m in new])
     g_c = np.median(G, 0)
     order = np.argsort(-np.abs(g_c))
-    lines = [f'{len(new)} models at 1.8e10 muons (+ the existing one); gradient of the T = 1 hits at u = 0 '
-             '(1e9 muons), in hits per unit u (u = 1: +10%)', '']
+    lines = [f'{len(new)} models at 1.8e10 muons (+ the existing one); gradient of the hits at u = 0 '
+             '(1e9 nominal muons), in hits per unit u (u = 1: +10%)', '']
 
     # 1. components
     lines.append('largest components of the consensus (median) gradient:  median, [min, max] over the new models, existing')
@@ -122,7 +122,7 @@ if __name__ == '__main__':
         ax[1].plot(ks, cos_k[name], '-o', ms=3, lw=1.5, color=COLOR[kind])
     ax[0].axhline(0, color='0.7', lw=0.8)
     ax[0].set_xticks(x, [labels[i] for i in order[:20]], rotation=60, fontsize=7)
-    ax[0].set(ylabel='dH/du_i at u = 0 [hits per +10%]', title='gradient at T = 1, largest 20 components (consensus order)')
+    ax[0].set(ylabel='dH/du_i at u = 0 [hits per +10%]', title='gradient, largest 20 components (consensus order)')
     ax[0].legend(fontsize=7)
     ax[1].set(xscale='log', xlabel='k largest components kept', ylabel='cos with the consensus',
               title='agreement of the leading components', ylim=(0, 1.02))

@@ -8,9 +8,9 @@ Schemes, over the same rows:
   fixed    every training design from the start. The learning rate drops 3x whenever the
            validation loss has not improved for `patience` evaluations; training stops after
            `drops` drops
-  stream   the rolling buffer of train_surrogate.py: --buffer designs at a time, half of them
-           replaced by unseen ones at each refresh, the refreshes spread evenly over
-           max_steps, with a cosine learning rate
+  stream   a rolling buffer: `buffer` designs at a time, half of them replaced by unseen ones
+           at each refresh, the refreshes spread evenly over max_steps, with a cosine
+           learning rate (the study found it worse; lcso/train.py uses fixed)
 Both keep the weights that did best on the validation designs.
 """
 import copy

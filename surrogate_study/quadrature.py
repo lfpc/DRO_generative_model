@@ -32,10 +32,19 @@ from scipy.stats import norm, qmc
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # after this folder: both have a plots.py
 from analysis import branch_jacobian, derivatives  # noqa: E402
 from shield import MuonShield  # noqa: E402
-from surrogate import load_surrogate  # noqa: E402
+from lcso.surrogate import load_surrogate  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIGS = os.path.join(ROOT, 'outputs/surrogate_study/figs')
+
+
+def kinematics(m, uv):
+    """The momentum flow's de-standardized output uv (n, 2) -> pz, pt and the indicator of
+    shield.sample's kinematic envelope (m: the flow's metadata)."""
+    p = m['p_min'] + (m['p_max'] - m['p_min']) / (1 + torch.exp(-uv[:, 0]))
+    pz = p / torch.sqrt(1 + torch.exp(2 * uv[:, 1]))
+    pt = pz * torch.exp(uv[:, 1])
+    return pz, pt, (p <= MuonShield.P_MAX) & (pt <= MuonShield.PT_MAX) & (pz > MuonShield.PZ_MIN)
 
 
 class Muons:
@@ -47,21 +56,15 @@ class Muons:
         self.flow, self.m, self.mu_plus = gen.flow.momentum, gen.m, gen.mu_plus
         self.mean = torch.as_tensor(gen.mean[:2], dtype=torch.float64, device=dev)
         self.std = torch.as_tensor(gen.std[:2], dtype=torch.float64, device=dev)
-        self.env, self.dev = shield, dev
+        self.dev = dev
 
     @torch.no_grad()
     def momentum(self, z):
-        """Latent (n, 2) -> pz, pt, and the envelope indicator."""
-        y = z.float()
+        """Latent (n, 2) -> pz, pt, and the envelope indicator, on self.dev."""
+        y = z.float().to(next(self.flow.parameters()).device)
         for layer in reversed(self.flow.layers):
             y = layer.inverse(y, None)
-        uv = y.double() * self.std + self.mean
-        m = self.m
-        p = m['p_min'] + (m['p_max'] - m['p_min']) / (1 + torch.exp(-uv[:, 0]))
-        pz = p / torch.sqrt(1 + torch.exp(2 * uv[:, 1]))
-        pt = pz * torch.exp(uv[:, 1])
-        ok = (p <= self.env.P_MAX) & (pt <= self.env.PT_MAX) & (pz > self.env.PZ_MIN)
-        return pz, pt, ok
+        return kinematics(self.m, y.double().to(self.dev) * self.std + self.mean)
 
     def muons(self, pz, pt, phi, q):
         """Raw muon rows (n, 7) as shield.sample makes them."""
@@ -206,6 +209,6 @@ if __name__ == '__main__':
         axes[i].set(xscale='log', yscale='log', xlabel='points (muons) per estimate', title=title)
     axes[0].set_ylabel('relative error vs. the finest grid')
     axes[0].legend(fontsize=8)
-    fig.suptitle('Integrating the surrogate over the muon flow: sampling vs. quadrature (final surrogate, T = 1)')
+    fig.suptitle('Integrating the surrogate over the muon flow: sampling vs. quadrature (final surrogate)')
     fig.savefig(os.path.join(FIGS, 'quadrature.png'), dpi=150)
     print('saved quadrature.png, quadrature.txt, quadrature.json')

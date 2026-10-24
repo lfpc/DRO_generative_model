@@ -10,6 +10,11 @@ the truth (metrics.py). Experiments vary one setting at a time away from DEFAULT
   delta     size of the design region the training designs are drawn from; radial pull on/off
   shape     DeepONet width x depth, latent size p, branch activation
   rank      rank of the Taylor curvature (taylor:r) and of the design manifold (taylor-sub:r)
+  gate      Taylor + gated residual: the gate (mean(u^2))^2 or mean(u^4) (-res4), and the
+            near-weighted loss (near: the Taylor part learns from rows near u = 0 only)
+  converge  the DeepONet against the Taylor surrogates at larger budgets (3e7, 1e8; the step cap
+            raised to 1e5 so that the fits are not cut short): how many simulated samples each
+            needs for a given gradient and Hessian error
 
 Jobs shared between experiments run once. Results: <out>/results_<worker>.jsonl, resumable.
 
@@ -30,8 +35,8 @@ import torch
 
 import metrics
 import toys
-from surrogates import derivatives, features, make, n_params, predict
-from training import Rows, draw_designs, fit, split
+from lcso.models import derivatives, features, make, n_params, predict
+from lcso.training import Rows, draw_designs, fit, split
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'outputs/surrogate_study/toys')
 DEFAULTS = dict(kind='deeponet', budget=1_000_000, n=1000, delta=1.0, radial=True, scheme='fixed',
@@ -53,13 +58,18 @@ def experiments():
          + [dict(p=p) for p in (2, 4, 8, 16, 32, 64)]
          + [dict(act=a) for a in ('relu', 'silu', 'gelu', 'tanh', 'softplus')],
          'rank': [dict(kind=f'{k}:{r}') for k in ('taylor', 'taylor-sub') for r in (1, 2, 4, 8, 16)]
-         + [dict(kind='taylor-sub')]}
+         + [dict(kind='taylor-sub')],
+         'gate': [dict(kind=k, budget=b, **({'near': nr} if nr else {}))
+                  for k in ('taylor-res:8', 'taylor-res4:8', 'taylor-sub-res4:4') for nr in (0, 0.3) for b in BUDGETS],
+         'converge': [dict(kind=k, budget=b, max_steps=100_000, **({'near': nr} if nr else {}))
+                      for k, nr in (('deeponet', 0), ('taylor-res4:8', 0), ('taylor-res4:8', 0.3), ('taylor-sub-res4:4', 0))
+                      for b in (30_000_000, 100_000_000)]}
     return E
 
 
-def jobs(problems, seeds):
+def jobs(problems, seeds, only=None):
     out = {}
-    for over in sum(experiments().values(), []):
+    for over in sum((v for k, v in experiments().items() if only is None or k in only), []):
         for prob in problems:
             for s in range(seeds):
                 c = dict(DEFAULTS, **over, problem=prob, seed=s)
@@ -141,6 +151,7 @@ def run(c, prob, T):
     train, val = split(rows, 0.1, c['seed'])
     torch.manual_seed(c['seed'])
     model = make(c['kind'], prob.D, prob.dx, p=c['p'], hidden=c['hidden'], depth=c['depth'], act=c['act']).to(prob.dev)
+    model.near = c.get('near', 0.0)          # (not in DEFAULTS, so earlier results keep their keys)
     info = fit(model, train, val, c['scheme'], c['buffer'], c['max_steps'], c['batch'], c['lr'], seed=c['seed'])
     out = score(prob, model, T)
     out.update(steps=info['steps'], val_bce=info['val_bce'], designs=M, hits=int(rows.y.sum()),
@@ -162,6 +173,7 @@ def claim(todo, out):
 
 
 def load_results(out=OUT):
+    """Every result row written by the workers to <out>/results_*.jsonl."""
     rows = []
     for f in glob.glob(os.path.join(out, 'results_*.jsonl')):
         with open(f) as fh:
@@ -174,6 +186,7 @@ if __name__ == '__main__':
         'F', (argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter), {}))
     parser.add_argument('--problems', default=','.join(toys.PROBLEMS))
     parser.add_argument('--seeds', type=int, default=3)
+    parser.add_argument('--experiments', default=None, help='comma-separated experiments to run (default: all)')
     parser.add_argument('--worker', default='0', help='name of this worker (its results file)')
     parser.add_argument('--threads', type=int, default=4, help='CPU threads')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
@@ -184,7 +197,7 @@ if __name__ == '__main__':
     torch.backends.cuda.matmul.allow_tf32 = False
 
     problems = args.problems.split(',')
-    todo = jobs(problems, args.seeds)
+    todo = jobs(problems, args.seeds, args.experiments.split(',') if args.experiments else None)
     if args.quick:
         args.out = os.path.join(args.out, 'quick')
         todo = [dict(DEFAULTS, kind=k, budget=200_000, max_steps=1000, problem=p, seed=0)

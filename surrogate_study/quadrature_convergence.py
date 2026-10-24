@@ -1,13 +1,13 @@
 """Monte Carlo vs. the quadrature grid, as the analysis reports them: running estimates.
 
-For four quantities of the robustness analysis (final surrogate, T = 1, per 1e9 muons):
+For four quantities of the robustness analysis (final surrogate, per 1e9 nominal muons):
   H_0                   the nominal hits
   H_0, pz > 300 GeV     the nominal hits of the sparse high-momentum muons
   M7:B at -10%          H/H_0 with the field of M7 alone lowered by 10%
   worst, |u| = 1        H/H_0 one tolerance unit along the worst direction
-the running Monte Carlo estimate as muons accumulate (several seeds, the way the analysis
-sampled them until now), the quadrature grid at increasing resolution, and the value the
-earlier 1e9-muon Monte Carlo analysis reported, with its jackknife error.
+the running Monte Carlo estimate as muons accumulate (several seeds), and the quadrature grid at
+increasing resolution. --earlier also draws the values a 1e9-muon Monte Carlo robustness run
+(--run) reported, with its jackknife errors.
 
     python quadrature_convergence.py    # -> outputs/surrogate_study/figs/quadrature_convergence.png
 """
@@ -23,7 +23,7 @@ import torch
 
 from quadrature import FIGS, ROOT, Muons, grid_points, mc_points
 from shield import MuonShield
-from surrogate import load_surrogate
+from lcso.surrogate import load_surrogate
 
 QUANTITIES = ['H_0', 'H_0, pz > 300 GeV', 'M7:B at -10%', 'worst direction, |u| = 1']
 
@@ -55,8 +55,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=type(
         'F', (argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter), {}))
     parser.add_argument('--model', default=os.path.join(ROOT, 'outputs/lcso.pt'))
-    parser.add_argument('--run', default=os.path.join(ROOT, 'outputs/archive/robustness_v2_mc'),
-                        help='the Monte Carlo robustness run to compare with (its directions and values)')
+    parser.add_argument('--run', default=os.path.join(ROOT, 'outputs/robustness'),
+                        help='robustness run whose worst direction is used (and, with --earlier, its values)')
+    parser.add_argument('--earlier', action='store_true', help='draw --run\'s Monte Carlo values (a sampled run)')
     parser.add_argument('--n_max', type=float, default=1e9, help='muons per Monte Carlo run')
     parser.add_argument('--seeds', type=int, default=6)
     parser.add_argument('--grids', default='51x4,101x8,201x16,401x32,801x64,1601x64')
@@ -72,7 +73,7 @@ if __name__ == '__main__':
     U = np.stack([np.zeros(43), -np.eye(43)[k], np.clip(v, -1, 1)])
     i_w = r['dir_idx'][names.index('worst')][-1]
     pz = np.load(os.path.join(args.run, 'pz_bins.npz'), allow_pickle=True)
-    earlier = [(float(r['H_0']), 3.608),               # the jackknife error its report gives
+    earlier = None if not args.earlier else [(float(r['H_0']), 3.608),               # the jackknife error its report gives
                (float(pz['H_b'][-1]), np.nan),         # (the bins had no errors)
                (1 + float(r['oat_minus'][k]), float(r['oat_minus_se'][k])),
                (float(r['ratio'][i_w]), float(r['ratio_se'][i_w]))]
@@ -104,15 +105,16 @@ if __name__ == '__main__':
         ax.plot([g[0] for g in grids], [g[2][q] for g in grids], '-o', color='#1baf7a', lw=2, ms=5,
                 label='quadrature grid')
         ax.axhline(ref[q], color='#1baf7a', ls=':', lw=1)
-        e, se = earlier[q]
-        ax.errorbar([1e9], [e], yerr=[0 if np.isnan(se) else se], fmt='s', color='k', ms=6, capsize=3,
-                    label='earlier analysis (1e9 MC, jackknife)')
+        if earlier:
+            e, se = earlier[q]
+            ax.errorbar([1e9], [e], yerr=[0 if np.isnan(se) else se], fmt='s', color='k', ms=6, capsize=3,
+                        label='Monte Carlo run (1e9, jackknife)')
         ax.set(xscale='log', xlabel='muons / grid points', title=QUANTITIES[q])
         lo, hi = ref[q] * 0.75, ref[q] * 1.25
         ax.set_ylim(lo, hi)
     axes[0].set_ylabel('per 1e9 muons, or H/H_0')
     axes[0].legend(fontsize=7.5, loc='lower right')
-    fig.suptitle('The surrogate integrated over the muon flow: running Monte Carlo (as the analysis sampled until now) '
-                 'vs. the quadrature grid (dotted: its finest value)')
+    fig.suptitle('The surrogate integrated over the muon flow: running Monte Carlo vs. the quadrature grid '
+                 '(dotted: its finest value)')
     fig.savefig(os.path.join(FIGS, 'quadrature_convergence.png'), dpi=150)
     print('saved quadrature_convergence.png')

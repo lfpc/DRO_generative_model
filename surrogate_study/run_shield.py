@@ -1,26 +1,28 @@
-"""The surrogate study on the muon shield: fit on the simulated pool, score on the reference.
+"""The surrogate study on the muon shield: fit on a simulated pool, score on the references.
 
-Training rows come from a pool (shield_pool.py): budget / n designs, each with n of its 1e7
-muons (hits and kept misses subsampled alike), the misses optionally thinned further to
-keep_neg (case-control: the logit offset -log(keep_neg) makes the model one of p(hit | u, x)).
-The trunk sees (px, py, pz, charge).
+Training rows come from a pool (lcso/simulate_pools.py, lcso/data.py): budget / n designs, each with n of its muons
+(hits and kept misses subsampled alike), the misses optionally thinned further to keep_neg
+(case-control: the logit offset -log(keep_neg) makes the model one of p(hit | u, x)). The trunk
+sees (px, py, pz, charge).
 
-Scores (no exact truth here): on each reference (shield_ref.py; the same muons the simulator
-saw), the predicted vs. simulated hits at u = 0 (h0_err), in the half box and in the box
-(pred_half, pred_box: median |log pred / sim|); on the T = 1.5 reference also the one-at-a-time
-secants (H(+e_i) - H(-e_i)) / 2 and curvatures H(+e_i) + H(-e_i) - 2 H(0) of the 43 parameters
-(oat_slope_err, oat_curv_err: relative vector errors, and their cosines). The gradient and
-Hessian at u = 0 on the T = 1 muons are saved for the convergence plots.
+Scores, on the reference designs simulated on stored muons (shield_ref.py), which the surrogate
+predicts on the same muons. Two references (REF_LABEL): 'T1', the nominal muons, and 'T1.5', a
+hot check sample drawn like the T = 1.5 pools (many more hits per design). On each: predicted vs.
+simulated hits at u = 0 (h0_err), in the half box and in the box (pred_half, pred_box: median
+|log pred / sim|); on the hot check also the one-at-a-time secants (H(+e_i) - H(-e_i)) / 2 and
+curvatures H(+e_i) + H(-e_i) - 2 H(0) of the 43 parameters (oat_slope_err, oat_curv_err:
+relative vector errors, and their cosines). The gradient and Hessian at u = 0 on the nominal
+muons are saved for the convergence plots.
 
 Experiments, one setting at a time away from DEFAULTS: budget (every architecture), n (muons
 per design), delta and temperature (pools), shape (DeepONet), rank (Taylor), scheme (stream),
-keep_neg, and hot (momentum temperature 2 and 3 with 1e6 muons x up to 9000 designs). Results: <out>/results_<worker>.jsonl and <out>/arrays/<key>.npz, resumable.
+keep_neg, and hot (momentum temperature 2 and 3, 1e6 muons x up to 9000 designs). Results:
+<out>/results_<worker>.jsonl and <out>/arrays/<key>.npz, resumable.
 
     python run_shield.py --list
     python run_shield.py --worker 0          # as many workers as wanted; each claims the jobs left
 """
 import argparse
-import glob
 import hashlib
 import json
 import os
@@ -32,21 +34,23 @@ import torch
 
 import run_toys
 import shield_ref
-from surrogates import derivatives, make, n_params
-from training import Rows, fit, split
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # after this folder: both have a plots.py
+from lcso.data import to_x, train_val  # noqa: E402
+from lcso.models import derivatives, make, n_params  # noqa: E402
+from lcso.surrogate import load_surrogate  # noqa: E402
+from lcso.training import fit  # noqa: E402
 from shield import MuonShield  # noqa: E402
-from surrogate import load_surrogate  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-POOL, OUT = (os.path.join(ROOT, 'outputs/surrogate_study', d) for d in ('shield_pool', 'shield'))
+OUT = os.path.join(ROOT, 'outputs/surrogate_study/shield')
 DEFAULTS = dict(kind='deeponet', budget=4_000_000_000, n=10_000_000, pool='T1.5_d1', scheme='fixed', buffer=64,
                 keep_neg=4e-3, p=16, hidden=64, depth=2, act='silu', lr=1e-3, batch=16384, max_steps=40000, seed=0)
 KINDS = ['deeponet', 'taylor', 'taylor:8', 'taylor-sub:4', 'taylor-res', 'quad', 'rsm']
 BUDGETS = [300_000_000, 1_000_000_000, 3_000_000_000, 10_000_000_000, 18_000_000_000]
 REFS = ('T1', 'T1.5')
-# production surrogates scored alongside: the earlier one, and the final ensemble (train_surrogate.py)
+REF_LABEL = {'T1': 'nominal muons', 'T1.5': 'hot check sample'}
+# production surrogates scored alongside: the earlier one, and the final ensemble (lcso/train.py)
 PRODUCTION = {'existing': 'outputs/lcso_deeponet.pt', 'final': 'outputs/lcso.pt'}
 
 
@@ -83,74 +87,6 @@ def key(c):
     return hashlib.md5(json.dumps(c, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def to_x(mu):
-    """(px, py, pz, charge) of raw muons (..., 7)."""
-    mu = torch.as_tensor(mu)
-    return torch.cat([mu[:, :3], -torch.sign(mu[:, 6:7])], 1).float()
-
-
-# ---------------------------------------------------------------------------
-# Data
-# ---------------------------------------------------------------------------
-_pools = {}
-
-
-def load_pool(name):
-    """All designs simulated so far in a pool, or in several ('A+B+C', design ids offset):
-    dict(U, ids, d, x, y, keep_neg, n_muons) with n_muons the muons simulated per design (M,)."""
-    if '+' in name:
-        parts = [load_pool(p) for p in name.split('+')]
-        if len({P['keep_neg'] for P in parts}) > 1:
-            raise ValueError(f'{name}: the pools kept different fractions of the misses')
-        off = np.cumsum([0] + [len(P['U']) for P in parts])
-        return dict(U=torch.cat([P['U'] for P in parts]), ids=np.concatenate([P['ids'] + o for P, o in zip(parts, off)]),
-                    d=torch.cat([P['d'] + int(o) for P, o in zip(parts, off)]), x=torch.cat([P['x'] for P in parts]),
-                    y=torch.cat([P['y'] for P in parts]), keep_neg=parts[0]['keep_neg'],
-                    n_muons=torch.cat([P['n_muons'] for P in parts]))
-    if name not in _pools:
-        shards = [torch.load(f, weights_only=False) for f in sorted(glob.glob(os.path.join(POOL, name, 'shard_*.pt')))]
-        a = shards[0]['args']
-        from shield_pool import pool_designs
-        U = pool_designs(a['n_designs'], a['delta'], a['n_nominal'], a['seed'])
-        _pools[name] = dict(U=torch.as_tensor(U), ids=np.array(sum((s['ids'] for s in shards), [])),
-                            d=torch.cat([t for s in shards for t in s['d']]).long(),
-                            x=to_x(torch.cat([t for s in shards for t in s['x']])),
-                            y=torch.cat([t for s in shards for t in s['y']]).float(),
-                            keep_neg=a['keep_neg'], n_muons=torch.full((len(U),), float(a['n_muons'])))
-    return _pools[name]
-
-
-def training_rows(c):
-    """Rows of budget / n designs of the pool, n muons each (n = None: all budget / max designs,
-    every muon), misses thinned to keep_neg."""
-    P = load_pool(c['pool'])
-    g = torch.Generator().manual_seed(c['seed'])
-    M = len(P['ids']) if c.get('n') is None else int(c['budget'] // c['n'])
-    avail = P['ids'][torch.randperm(len(P['ids']), generator=g).numpy()]
-    if M > len(avail):
-        raise ValueError(f'{c["pool"]} has {len(avail)} designs, {M} needed')
-    sel = torch.as_tensor(np.sort(avail[:M]))
-    member = torch.zeros(len(P['U']), dtype=torch.bool)
-    member[sel] = True
-    keep = member[P['d']]
-    if c.get('n') is not None:                                                    # n muons per design
-        keep &= torch.rand(len(P['y']), generator=g) < c['n'] / P['n_muons'][P['d']]
-    keep &= (P['y'] > 0) | (torch.rand(len(P['y']), generator=g) < c['keep_neg'] / P['keep_neg'])   # thin the misses
-    new = torch.full((len(P['U']),), -1, dtype=torch.long)
-    new[sel] = torch.arange(M)
-    return Rows(P['U'][sel], new[P['d'][keep]], P['x'][keep], P['y'][keep], -float(np.log(c['keep_neg'])))
-
-
-def train_val(c, dev, val_frac=0.1, max_val_rows=2_000_000):
-    """(train, val) Rows on dev: split in host memory, so only the halves go to the GPU; the
-    validation designs' rows thinned to at most max_val_rows (hits and misses alike)."""
-    train, val = split(training_rows(c), val_frac, c['seed'])
-    if len(val.y) > max_val_rows:
-        keep = torch.randperm(len(val.y), generator=torch.Generator().manual_seed(c['seed']))[:max_val_rows]
-        val = Rows(val.U, val.d[keep], val.x[keep], val.y[keep], val.offset)
-    return train.to(dev), val.to(dev)
-
-
 class Reference:
     """A finished shield_ref.py run, its muons as (px, py, pz, charge) in pinned host memory."""
 
@@ -165,9 +101,20 @@ class Reference:
     def predict(self, model):
         """Predicted hits (sum over the muons) of every reference design."""
         dev = model.bias.device
-        chunk = 2 ** 27 // (model.P + 3 * len(self.U))     # ~0.5 GB of features and logits at a time
-        b = model.branch(self.U.to(dev))
-        out = torch.zeros(len(self.U), dtype=torch.float64, device=dev)
+        U = self.U.to(dev)
+        out = torch.zeros(len(U), dtype=torch.float64, device=dev)
+        if not model.separable:     # the whole network per design and muon; TF32 here (~1e-3 on the sums)
+            chunk = 2 ** 24 // len(U)
+            tf32 = torch.backends.cuda.matmul.allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = True
+            try:
+                for c in range(0, self.n, chunk):
+                    out += torch.sigmoid(model.logits(U, self.X[c:c + chunk].to(dev, non_blocking=True))).double().sum(1)
+            finally:
+                torch.backends.cuda.matmul.allow_tf32 = tf32
+            return out.cpu().numpy()
+        chunk = 2 ** 27 // (model.P + 3 * len(U))       # ~0.5 GB of features and logits at a time
+        b = model.branch(U)
         for c in range(0, self.n, chunk):
             t = model.trunk(self.X[c:c + chunk].to(dev, non_blocking=True))
             out += torch.sigmoid(b @ t.T + model.bias).double().sum(1)
@@ -198,25 +145,35 @@ def score(model, refs, arrays):
         pred = R.predict(model)
         arrays[f'pred_{tag}'] = pred
         out.update(ref_scores(R, pred, tag))
-    X = (refs['T1'] if 'T1' in refs else next(iter(refs.values()))).X          # derivatives on the T = 1 muons
+    if not model.separable:                  # (final_compare.py takes these on the grid, by autograd)
+        return out
+    X = (refs['T1'] if 'T1' in refs else next(iter(refs.values()))).X          # derivatives on the nominal muons
     H0, g, H = derivatives(model, X, chunk=min(2 ** 20, 2 ** 27 // model.P))
     arrays.update(H0=H0 * len(X), g=g.numpy() * len(X), H=H.numpy() * len(X))   # in hits, not rates
     return out
 
 
 # ---------------------------------------------------------------------------
-# A production surrogate (surrogate.LCSONet, e.g. outputs/lcso_deeponet.pt) in the same interface
+# A production surrogate (surrogate.py, e.g. outputs/lcso.pt) in the study's interface
 # ---------------------------------------------------------------------------
+def as_study(model):
+    """A production surrogate as a study network for score(): a ModelSurrogate's own network
+    (its u and inputs are the study's), an LCSONet through Production."""
+    return model.net if hasattr(model, 'net') else Production(model)
+
+
 class Production(torch.nn.Module):
+    separable = True
+
     def __init__(self, model):
         super().__init__()
-        self.m, self.bias, self.D, self.P = model, model.bias, model.dim, model.hp['p']
+        self.m, self.bias, self.D, self.P = model, model.bias, model.dim, model.P
 
     def branch(self, u):                       # its u is ours: +-1 = +-10% of phi_0
         return self.m.branch_net(u)
 
     def trunk(self, x):                        # and so are its inputs (px, py, pz, charge)
-        return self.m.trunk_net((x - self.m.x_loc) / self.m.x_scale)
+        return self.m.trunk4(x)
 
 
 def run(c, refs, dev):
@@ -240,11 +197,7 @@ def run(c, refs, dev):
 
 
 def load_results(out=OUT):
-    rows = []
-    for f in glob.glob(os.path.join(out, 'results_*.jsonl')):
-        with open(f) as fh:
-            rows += [json.loads(line) for line in fh if line.strip()]
-    return rows
+    return run_toys.load_results(out)
 
 
 if __name__ == '__main__':

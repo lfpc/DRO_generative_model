@@ -34,13 +34,6 @@ class Toy:
     def prob(self, U, x):
         return torch.sigmoid(self.logit(U, x))
 
-    def simulate(self, U, n, g):
-        """n fresh samples per design and their hits: x (M, n, dx), y (M, n) int8."""
-        x = torch.stack([self.sample(n, g) for _ in range(U.shape[0])])
-        y = torch.stack([torch.rand(n, generator=g, device=x.device) < self.prob(U[i:i + 1], x[i])[0]
-                         for i in range(U.shape[0])])
-        return x, y.to(torch.int8)
-
     def to(self, dev):
         for k, v in vars(self).items():
             if torch.is_tensor(v):

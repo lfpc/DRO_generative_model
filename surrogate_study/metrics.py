@@ -55,6 +55,17 @@ def top_eigvec(H):
     return Q[:, ev.abs().argmax()]
 
 
+def cos(a, b):
+    """Cosine of two numpy vectors."""
+    return float(a @ b / np.linalg.norm(a) / np.linalg.norm(b))
+
+
+def top_vec(h):
+    """The eigenvector of the largest |eigenvalue| of a numpy matrix."""
+    ev, Q = np.linalg.eigh(h)
+    return Q[:, np.argmax(np.abs(ev))]
+
+
 def derivative_scores(g_hat, H_hat, g, H):
     return dict(grad_err=float((g_hat - g).norm() / g.norm()),
                 grad_cos=float(g_hat @ g / (g_hat.norm() * g.norm()).clamp_min(1e-300)),

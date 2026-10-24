@@ -15,8 +15,9 @@ gives the derivatives of the expected hits H(u) = sum w p:
 with J = db/du from autograd on the branch net alone. The trunk features of a coarser grid are
 cached, after which the hits of any design are one matmul. The simulator still needs sampled
 muons (muon_blocks, simulate). The surrogate's own uncertainty is the spread of the ensemble
-members it averages (members).
+members it averages (surrogate.load_members).
 """
+import argparse
 import time
 from types import SimpleNamespace
 
@@ -24,9 +25,13 @@ import numpy as np
 import torch
 
 from shield import MuonShield
-from surrogate import load_surrogate
+from lcso.surrogate import load_surrogate
 
 OK, BAD, GREY = '#0072B2', '#D55E00', '0.6'      # figure colours
+
+
+class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+    """--help with the module docstring as written and every flag's default."""
 
 
 def setup(model_path, device):
@@ -39,16 +44,15 @@ def setup(model_path, device):
     return shield, model
 
 
-def members(model_path, phi_0, device):
-    """The networks an ensemble checkpoint (train_surrogate.py --stack) averages; [] for one network."""
-    obj = torch.load(model_path, map_location='cpu', weights_only=False)
-    return [load_surrogate(p, phi_0, device) for p in obj.get('stacked', [])]
-
-
 def grid_spec(spec):
     """'801x64' -> (801, 64): latent points per side, azimuth points."""
     n_z, n_phi = spec.split('x')
     return int(n_z), int(n_phi)
+
+
+def one_group(x):
+    """Every muon in group 0."""
+    return torch.zeros(len(x), dtype=torch.long)
 
 
 def muon_blocks(shield, n, block, seed=0, temperature=1.0):
@@ -197,4 +201,4 @@ class Report:
 
     def save(self, path):
         with open(path, 'w') as f:
-            f.write('\n'.join(line for line in self.lines) + '\n')
+            f.write('\n'.join(self.lines) + '\n')

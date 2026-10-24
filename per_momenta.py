@@ -20,20 +20,15 @@ import os
 import numpy as np
 import torch
 
-from analysis import (Report, branch_jacobian, cached_hits, derivatives, feature_cache, grid_spec, muon_blocks,
-                      nominal_pass, setup, simulate, trust_region_max, unit)
-
-
-class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
-    pass
-
+from analysis import (ArgFormatter, Report, branch_jacobian, cached_hits, derivatives, feature_cache, grid_spec,
+                      muon_blocks, nominal_pass, setup, simulate, trust_region_max, unit)
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
 parser.add_argument('--model', default='outputs/lcso.pt')
 parser.add_argument('--bin_var', default='pz', choices=['pz', 'pt', 'p', 'charge'])
 parser.add_argument('--edges', default='10,20,30,45,75,125,175,225,300',
                     help='interior bin edges in GeV (ignored for charge)')
-parser.add_argument('--temperature', type=float, default=1.0, help='flow (momentum) temperature of the muons')
+parser.add_argument('--temperature', type=float, default=1.0, help='flow (momentum) temperature of the muons; 1 = the physical flux')
 parser.add_argument('--grid', default='801x64', help='quadrature grid of the derivatives: latent points per side x azimuths')
 parser.add_argument('--cache_grid', default='201x64', help='quadrature grid whose trunk features are cached')
 parser.add_argument('--n_ref', type=float, default=1e9, help='hits are quoted per this many muons')
@@ -75,7 +70,8 @@ def grid(spec):
     return shield.grid(*grid_spec(spec), args.n_ref, args.temperature)
 
 
-say(f'model {args.model}; the muon flow at T = {args.temperature:g} on grids of {args.grid} and {args.cache_grid} '
+FLUX = 'the muon flow' + (f' at momentum temperature {args.temperature:g}' if args.temperature != 1 else '')
+say(f'model {args.model}; {FLUX} on grids of {args.grid} and {args.cache_grid} '
     f'latent x azimuth points; hits per {args.n_ref:.0e} muons; {B} bins in {args.bin_var}: ' + ' | '.join(SHORT))
 
 # =============================================================================

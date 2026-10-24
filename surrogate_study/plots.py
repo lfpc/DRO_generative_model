@@ -6,6 +6,7 @@ Each curve is the median over seeds, the band the seed range; one setting varies
 stay at the defaults of run_toys.py / run_shield.py.
 """
 import json
+import argparse
 import os
 
 import matplotlib
@@ -268,16 +269,19 @@ def noise_floors(refs):
     return out
 
 
-SHIELD_METRICS = [('pred_box_T1', 'T = 1: median $|\\log$ pred / sim$|$ in the box', 'log'),
-                  ('pred_box_T1.5', 'T = 1.5: median $|\\log$ pred / sim$|$ in the box', 'log'),
+SHIELD_METRICS = [('pred_box_T1', 'nominal muons: median $|\\log$ pred / sim$|$ in the box', 'log'),
+                  ('pred_box_T1.5', 'hot check: median $|\\log$ pred / sim$|$ in the box', 'log'),
                   ('oat_slope_err', 'one-at-a-time secants: rel. error', 'log'),
                   ('oat_curv_err', 'one-at-a-time curvatures: rel. error', 'log')]
 
 
-def shield_figures(rows, refs):
+def shield_figures(rows, refs, final_only=False):
+    """final_only: without the earlier production surrogate and the study's single models (the
+    report's versions, saved as *_final.png)."""
     D = dict(run_shield.DEFAULTS)
     floor = noise_floors(refs)
-    existing = next((r for r in rows if r['config']['kind'] == 'existing'), None)
+    existing = None if final_only else next((r for r in rows if r['config']['kind'] == 'existing'), None)
+    sfx = '_final' if final_only else ''
     final = next((r for r in rows if r['config']['kind'] == 'final'), None)
 
     def reference_lines(ax, m):
@@ -298,7 +302,7 @@ def shield_figures(rows, refs):
         ax.set(xscale='log', yscale=yscale, xlabel='simulated muons at T = 1.5 (1e7 per design)', title=ylabel)
     axes[0, 0].legend(fontsize=7)
     fig.suptitle('Muon shield: convergence with the simulation budget, scored on the reference designs')
-    save(fig, 'shield_budget.png')
+    save(fig, f'shield_budget{sfx}.png')
 
     # convergence of the derivatives at u = 0: seed-to-seed agreement, and agreement with the
     # largest-budget DeepONet
@@ -328,8 +332,8 @@ def shield_figures(rows, refs):
     for ax in axes[0]:
         ax.set_xlabel('simulated muons at T = 1.5')
     axes[0, 0].legend(fontsize=7)
-    fig.suptitle('Muon shield: do the gradient and Hessian at u = 0 converge? (on the 1e9 reference muons at T = 1)')
-    save(fig, 'shield_derivatives.png')
+    fig.suptitle('Muon shield: do the gradient and Hessian at u = 0 converge? (on the 1e9 nominal reference muons)')
+    save(fig, f'shield_derivatives{sfx}.png')
 
     # one setting at a time: (setting, panel title, fixed overrides, series [(label, color, kind or None)])
     rank_kinds = [f'taylor:{r}' for r in (2, 4, 8, 16)] + ['taylor']
@@ -380,11 +384,11 @@ def shield_figures(rows, refs):
             if i == 0:
                 ax.set_title(title, fontsize=8)
             if j == 0:
-                ax.set_ylabel(['T = 1.5 box prediction error', 'one-at-a-time secant error'][i])
+                ax.set_ylabel(['hot-check box prediction error', 'one-at-a-time secant error'][i])
             if i == 0 and len(series) > 1 and (j == 0 or free == 'kind' or len(series) > 2):
                 ax.legend(fontsize=6.5)
     fig.suptitle('Muon shield: one training setting at a time (budget 4e9 unless labelled; dots: median of 2 seeds, bars: range)')
-    save(fig, 'shield_settings.png')
+    save(fig, f'shield_settings{sfx}.png')
 
     # calibration on the reference designs
     best = {k: min(matching(rows, dict(D, kind=k, budget=max(run_shield.BUDGETS)), None) or [None],
@@ -393,7 +397,7 @@ def shield_figures(rows, refs):
     for j, tag in enumerate(('T1', 'T1.5')):
         names, U, hits, n, _ = refs[tag]
         ax = axes[0, j]
-        for k, r in [('deeponet', best['deeponet']), ('existing', existing), ('final', final)]:
+        for k, r in [('deeponet', None if final_only else best['deeponet']), ('existing', existing), ('final', final)]:
             if r is None:
                 continue
             pred = np.load(os.path.join(run_shield.OUT, 'arrays', f'{r["key"]}.npz'))[f'pred_{tag}']
@@ -402,10 +406,10 @@ def shield_figures(rows, refs):
         lim = [hits.min() * 0.8, hits.max() * 1.2]
         ax.plot(lim, lim, color='0.6', lw=1, zorder=0)
         ax.set(xscale='log', yscale='log', xlabel='simulated hits', ylabel='predicted hits',
-               title=f'reference at {tag.replace("T", "T = ")} ({n:.0e} muons)')
+               title=f'{run_shield.REF_LABEL[tag]} ({n:.0e} muons)')
     axes[0, 0].legend(fontsize=7)
     fig.suptitle('Muon shield: predicted vs. simulated hits on the reference designs, same muons')
-    save(fig, 'shield_calibration.png')
+    save(fig, f'shield_calibration{sfx}.png')
 
     # one-at-a-time secants of the 43 parameters
     names, U, hits, n, _ = refs['T1.5']
@@ -418,7 +422,7 @@ def shield_figures(rows, refs):
     ax.errorbar(np.arange(Dm), sim[order], yerr=err[order], fmt='s', color='0.25', ms=4, label='simulator (1 s.d.)')
     from shield import MuonShield
     labels = MuonShield().labels
-    for k, r in [('deeponet', best['deeponet']), ('existing', existing), ('final', final)]:
+    for k, r in [('deeponet', None if final_only else best['deeponet']), ('existing', existing), ('final', final)]:
         if r is None:
             continue
         pred = np.load(os.path.join(run_shield.OUT, 'arrays', f'{r["key"]}.npz'))['pred_T1.5']
@@ -428,8 +432,9 @@ def shield_figures(rows, refs):
     ax.set_xticks(range(Dm), [labels[i] for i in order], rotation=90, fontsize=6)
     ax.set_ylabel('(H(+10%) - H(-10%)) / 2  [hits]')
     ax.legend(fontsize=7)
-    ax.set_title(f'One parameter at a time at T = 1.5 ({n:.0e} muons): simulator vs. surrogates')
-    save(fig, 'shield_oat.png')
+    ax.set_title(f'One parameter at a time, hot check sample ({n:.0e} muons): simulator vs. '
+                 + ('surrogate' if final_only else 'surrogates'))
+    save(fig, f'shield_oat{sfx}.png')
     return floor
 
 
@@ -455,7 +460,16 @@ def shield_summary(rows, floor):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=type(
+        'F', (argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter), {}))
+    parser.add_argument('--final_only', action='store_true',
+                        help='shield figures with the final surrogate only (*_final.png, for the report)')
+    args = parser.parse_args()
     os.makedirs(FIGS, exist_ok=True)
+    if args.final_only:
+        refs = {t: shield_ref.load(t) for t in run_shield.REFS}
+        shield_figures(run_shield.load_results(), refs, final_only=True)
+        raise SystemExit
     toys_rows = run_toys.load_results()
     if toys_rows:
         print(f'toys: {len(toys_rows)} results; worst-case rescaled by ' + str(renormalize_worst(toys_rows)))

@@ -1,7 +1,7 @@
 """Do the worst directions of different surrogates differ in a way that matters? Simulate them.
 
 Candidates (u, u_i = +-1 at +-10%), each at |u| = 1 and 2 (the box itself reaches |u| = 6.6):
-  report    the worst direction of the report's robustness run (outputs/robustness_deeponet)
+  report    the worst direction of the earlier report's robustness run (outputs/archive/robustness_v1)
   existing  the trust-region worst of lcso_deeponet.pt's gradient and Hessian (derivative_check.py)
   consensus the same for the median gradient and Hessian of the 8 best new models
   random    two random directions, for scale
@@ -49,7 +49,7 @@ def candidates():
     new = [i for i, n in enumerate(names) if n != 'existing']
     g_c, H_c = np.median(g[new], 0), np.median(H[new], 0)
     ex = names.index('existing')
-    rep = np.load(os.path.join(ROOT, 'outputs/robustness_deeponet/robustness.npz'), allow_pickle=True)
+    rep = np.load(os.path.join(ROOT, 'outputs/archive/robustness_v1/robustness.npz'), allow_pickle=True)
     dn = [str(s) for s in rep['dir_names']]
     out = {}
     for r in (1.0, 2.0):
@@ -90,7 +90,7 @@ if __name__ == '__main__':
         h0 = rh[np.array([x == 'nominal' for x in rn])]
         s0, e0 = h0.mean(), np.sqrt(h0.mean() / len(h0))
         lines.append(f'\nreference {ref} ({n:.0e} muons): nominal {s0:.0f} +- {e0:.0f} hits (mean of {len(h0)} runs)')
-        lines.append(f'  {"design":16s} {"sim hits":>9s} {"sim H/H0":>15s}  predicted rise (quadratic, T = 1): consensus / existing')
+        lines.append(f'  {"design":16s} {"sim hits":>9s} {"sim H/H0":>15s}  predicted rise (quadratic, nominal muons): consensus / existing')
         for name, u in C.items():
             if name not in hits:
                 continue

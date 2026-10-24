@@ -8,7 +8,7 @@ the figures.
 The surrogate is integrated over the muon flow on quadrature grids (MuonShield.grid), not
 sampled: the derivatives on --grid, everything else on the cached --cache_grid. Hits are quoted
 per --n_ref muons. The errors are the surrogate's own: the standard error of the ensemble's
-members (train_surrogate.py --stack), sd / sqrt(K). The simulator walks use --n_muons_sim
+members (lcso/train.py --stack), sd / sqrt(K). The simulator walks use --n_muons_sim
 sampled muons, with Poisson errors.
 
 Directions (--dirs): ascent (+grad), descent, worst (trust-region maximizer of the quadratic
@@ -25,17 +25,13 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
-from analysis import (Report, branch_jacobian, cached_hits, derivatives, feature_cache, grid_spec, members,
-                      muon_blocks, nominal_pass, seed_se, setup, simulate, trust_region_max, unit)
-
-
-class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
-    pass
-
+from analysis import (ArgFormatter, Report, branch_jacobian, cached_hits, derivatives, feature_cache, grid_spec,
+                      muon_blocks, nominal_pass, one_group, seed_se, setup, simulate, trust_region_max, unit)
+from lcso.surrogate import load_members
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
 parser.add_argument('--model', default='outputs/lcso.pt')
-parser.add_argument('--temperature', type=float, default=1.0, help='flow (momentum) temperature of the muons')
+parser.add_argument('--temperature', type=float, default=1.0, help='flow (momentum) temperature of the muons; 1 = the physical flux')
 parser.add_argument('--grid', default='801x64', help='quadrature grid of the derivatives: latent points per side x azimuths')
 parser.add_argument('--cache_grid', default='201x64', help='quadrature grid whose trunk features are cached')
 parser.add_argument('--n_ref', type=float, default=1e9, help='hits are quoted per this many muons')
@@ -47,7 +43,8 @@ parser.add_argument('--t_max', type=float, default=1.0, help='walk half-length (
 parser.add_argument('--n_points', type=int, default=5, help='points per walk (made odd)')
 parser.add_argument('--no_sim', dest='sim', action='store_false', help='walks on the surrogate only')
 parser.add_argument('--n_mc', type=int, default=4096, help='random designs in the box')
-parser.add_argument('--pga_restarts', type=int, default=4)
+parser.add_argument('--pga_restarts', type=int, default=4,
+                    help='starts of the box search: nominal, sign(grad)/2, worst direction, then random')
 parser.add_argument('--pga_steps', type=int, default=200)
 parser.add_argument('--pga_lr', type=float, default=0.05)
 parser.add_argument('--n_scan', type=int, default=8, help='parameters scanned one at a time')
@@ -63,23 +60,19 @@ os.makedirs(args.out_dir, exist_ok=True)
 say = Report()
 NS = args.n_sigma
 shield, model = setup(args.model, args.device)
-MEMBERS = members(args.model, shield.phi_0, args.device)
+MEMBERS = load_members(args.model, shield.phi_0, args.device)
 D, labels = model.dim, shield.labels
-
-
-def one(x):
-    return torch.zeros(len(x), dtype=torch.long)
 
 
 def integrate(m, cache=True):
     """Everything taken from the grids for one network: H0, grad, hess, active matrix, cache."""
-    acc = nominal_pass(m, shield.grid(*grid_spec(args.grid), args.n_ref, args.temperature), one, 1)
+    acc = nominal_pass(m, shield.grid(*grid_spec(args.grid), args.n_ref, args.temperature), one_group, 1)
     J = branch_jacobian(m)
     grad, hess = derivatives(m, J, acc.T[0], acc.A[0])
     out = SimpleNamespace(H0=float(acc.H[0]), grad=grad, hess=hess,
                           act=((J.T @ acc.S[0] @ J) / acc.N[0]).cpu().numpy())
     if cache:
-        out.cache = feature_cache(m, shield.grid(*grid_spec(args.cache_grid), args.n_ref, args.temperature), one)
+        out.cache = feature_cache(m, shield.grid(*grid_spec(args.cache_grid), args.n_ref, args.temperature), one_group)
         out.H0c = float(cached_hits(m, out.cache, 1, np.zeros((1, D)))[0, 0])
     return out
 
@@ -93,7 +86,8 @@ def pm(value, se, fmt='.3f'):
     return f'{value:{fmt}} +- {se:{fmt}}'
 
 
-say(f'model {args.model} ({len(MEMBERS)} members); the muon flow at T = {args.temperature:g} integrated on '
+FLUX = 'the muon flow' + (f' at momentum temperature {args.temperature:g}' if args.temperature != 1 else '')
+say(f'model {args.model} ({len(MEMBERS)} members); {FLUX} integrated on '
     f'grids of {args.grid} (derivatives) and {args.cache_grid} (cache) latent x azimuth points, both charges; '
     f'hits per {args.n_ref:.0e} muons; errors: the members\' standard error; "resolved" = {NS:g} sigma')
 S = integrate(model)
@@ -219,9 +213,8 @@ for k, m in enumerate(MEMBERS):
     print(f'  member {k + 1}/{len(MEMBERS)} integrated')
 se = {key: seed_se([v[key] for v in mem]) for key in main}
 oat_p_se, oat_m_se = se['oat'][:D], se['oat'][D:]
-worse = np.where(oat_p >= oat_m, oat_p, oat_m)
-worse_se = np.where(oat_p >= oat_m, oat_p_se, oat_m_se)
-resolved = np.abs(worse) > NS * worse_se
+larger = np.abs(oat_p) > np.abs(oat_m)                     # the side with the larger effect, as plots.py
+resolved = np.abs(np.where(larger, oat_p, oat_m)) > NS * np.where(larger, oat_p_se, oat_m_se)
 if mem:   # the best and worst place of each parameter over the members
     key = np.array([np.maximum(np.abs(v['oat'][:D] - 1), np.abs(v['oat'][D:] - 1)) for v in mem])
     ranks = np.argsort(np.argsort(-key, axis=1), axis=1) + 1
@@ -272,7 +265,7 @@ sim = np.zeros(len(designs))
 if args.sim:
     say(f'\nwalking {len(designs)} designs with the simulator over {args.n_muons_sim:,} sampled muons')
     blocks = muon_blocks(shield, args.n_muons_sim, args.block, args.seed, args.temperature)
-    sim = simulate(model, shield, blocks, designs, lambda x: torch.zeros(len(x), dtype=torch.long), 1)[:, 0]
+    sim = simulate(model, shield, blocks, designs, one_group, 1)[:, 0]
 
 say('\n' + '=' * 79 + '\n4. THE WALKS\n' + '=' * 79)
 if args.sim:

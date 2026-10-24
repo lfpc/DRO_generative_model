@@ -1,0 +1,288 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage[section]{placeins}
+\graphicspath{{figs/}}
+\newcommand{\HH}{H/H_0}
+
+\title{DeepONet and Taylor surrogates for the robustness of the SHiP muon shield:\\[0.3ex]
+\large a comparison on problems with a known answer and on the shield}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Two surrogates of the per-muon hit probability were used for the robustness analysis of the SHiP
+muon shield: a DeepONet ensemble and a Taylor surrogate, a second-order expansion in the design
+parameters with explicit gradient and Hessian coefficients plus a residual switched off at the
+nominal design. On four toy problems with exact derivatives, both converge to the true gradient
+and Hessian as the number of simulated samples grows. The DeepONet reaches a moderate accuracy
+with the fewest samples and then levels off; the unweighted Taylor surrogates keep improving and
+end with better Hessians on three of the four problems, and the reduced (low-rank) one reaches a
+given Hessian accuracy with the fewest samples. The weighted Taylor surrogate used on the shield
+needs 2--12 times more samples than the unweighted one. On the shield both surrogates reach the
+same robustness conclusions, checked with the simulator: the same worst directions ($\cos=0.99$),
+the same worst cases per tolerance within the errors up to $\pm3\%$, the same tolerance priorities
+and the same momentum picture. The DeepONet predicts magnitudes more accurately (one-at-a-time
+effects to $4\%$ against $6\%$); each surrogate predicts the other's worst designs better than its
+own.
+\end{abstract}
+
+\tableofcontents
+
+%==============================================================================
+\section{The two surrogates}
+%==============================================================================
+
+Both model the probability that a muon $x$ reaches the sensitive plane for a design $u$ (the 43
+free parameters, $u_i=\pm1$ at $\pm10\%$), and both are separable, $\text{logit}=\sum_k b_k(u)\,t_k(x)$,
+so that the expected hits $H(u)$ and their exact derivatives come from one pass over the muons.
+\begin{itemize}
+  \item \textbf{DeepONet}: $b(u)$ and $t(x)$ are two networks (two hidden layers of 128 units, 32
+        features). It makes no assumption about how $u$ enters.
+  \item \textbf{Taylor}: $b(u)=[1,\,u,\,\tfrac12(Q^\top u)^2,\,\gamma(u)\,r(u)]$: a constant, the full
+        gradient, a curvature of rank $r$ in a learned basis $Q$, and a residual network $r(u)$
+        gated by $\gamma(u)=\langle u_i^4\rangle/\rho^4$, which vanishes with its gradient and Hessian at
+        $u=0$. The gradient and Hessian at the nominal design are therefore explicit coefficients.
+        The \emph{reduced} variant restricts the linear term to the same subspace ($Q^\top u$); the
+        \emph{weighted} variant lets the Taylor coefficients learn only from designs near the nominal
+        one (weight $\exp(-\langle u_i^4\rangle^{1/2}/0.3^2)$ per row) and the residual from all.
+\end{itemize}
+On the shield, each surrogate is an average of four seeds trained on the same simulated data
+($15\,181$ designs, $6.2\times10^{10}$ muons); the Taylor surrogate there is the weighted full one
+(rank 8).
+
+%==============================================================================
+\section{Toy problems: convergence to the exact derivatives}
+%==============================================================================
+
+Four problems with a binary outcome per sample and known probabilities (beam, short column, a
+43-parameter synthetic problem, two moons; 10--43 parameters): each surrogate is trained on
+$10^5$--$10^8$ simulated samples (1000 per design, designs in the region of interest pulled towards
+$u=0$), and its gradient and Hessian at $u=0$ are compared with the exact ones (relative errors;
+median of 2--3 seeds). The networks are smaller than on the shield (64 hidden units, 16 features),
+the same for all budgets.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{compare_toys.png}
+  \caption{Relative error of the gradient (top) and the Hessian (bottom) at $u=0$ against the
+  number of simulated samples, on each toy problem (lines: median over the seeds; dots: seeds).}
+  \label{fig:toys}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Simulated samples needed to reach a Hessian error of $0.5$ and a gradient error of $0.1$
+(log-log interpolation of the medians; ``$>10^8$'': not reached), and the errors at $10^8$ samples.}
+\label{tab:toys}
+\small
+\resizebox{\linewidth}{!}{\begin{tabular}{llcccc}
+\toprule
+problem & surrogate & samples, Hessian $0.5$ & samples, gradient $0.1$ & Hessian at $10^8$ & gradient at $10^8$ \\
+\midrule
+beam         & DeepONet         & $2.6\times10^6$ & $6.6\times10^5$ & 0.33 & 0.029 \\
+             & Taylor, weighted & $7.1\times10^6$ & $1.8\times10^6$ & 0.26 & 0.036 \\
+             & Taylor, full     & $2.5\times10^6$ & $1.1\times10^6$ & 0.14 & 0.020 \\
+             & Taylor, reduced  & $1.0\times10^6$ & $9.7\times10^5$ & 0.10 & 0.015 \\
+\midrule
+short column & DeepONet         & $3.9\times10^5$ & $1.5\times10^6$ & 0.28 & 0.064 \\
+             & Taylor, weighted & $4.1\times10^7$ & $5.1\times10^6$ & 0.39 & 0.076 \\
+             & Taylor, full     & $3.4\times10^6$ & $2.3\times10^6$ & 0.45 & 0.043 \\
+             & Taylor, reduced  & $4.9\times10^5$ & $2.0\times10^6$ & 0.29 & 0.042 \\
+\midrule
+synthetic    & DeepONet         & $1.1\times10^7$ & $>10^8$ & 0.39 & 0.14 \\
+             & Taylor, weighted & $6.3\times10^7$ & $>10^8$ & 0.44 & 0.25 \\
+             & Taylor, full     & $2.0\times10^7$ & $>10^8$ & 0.31 & 0.16 \\
+             & Taylor, reduced  & $8.4\times10^6$ & $>10^8$ & 0.34 & 0.20 \\
+\midrule
+two moons    & DeepONet         & $9.0\times10^5$ & $>10^8$ & 0.18 & 0.13 \\
+             & Taylor, weighted & $1.8\times10^6$ & $>10^8$ & 0.09 & 0.18 \\
+             & Taylor, full     & $9.8\times10^5$ & $>10^8$ & 0.05 & 0.12 \\
+             & Taylor, reduced  & $2.9\times10^5$ & $>10^8$ & 0.06 & 0.49 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\paragraph{Every surrogate converges.} The errors of the gradient and the Hessian fall steadily
+with the number of simulated samples for all four surrogates on all four problems
+(Fig.~\ref{fig:toys}).
+
+\paragraph{Few samples: the DeepONet.} At $10^5$ samples the DeepONet has the smallest errors
+almost everywhere: the Taylor surrogates have more coefficients to determine (a full
+gradient and a curvature per muon feature) before they are accurate. It reaches a gradient error of
+$0.1$ first wherever that is reached.
+
+\paragraph{Many samples: the Taylor surrogates.} The DeepONet levels off (beam Hessian $0.44$ at
+$10^7$, $0.33$ at $10^8$), while the Taylor surrogates keep improving: at $10^8$ samples the full
+Taylor has the better Hessian on three problems (beam $0.14$ vs.\ $0.33$, synthetic $0.31$ vs.\
+$0.39$, two moons $0.05$ vs.\ $0.18$) and the worse one on the short column ($0.45$ vs.\ $0.28$).
+
+\paragraph{Fewest samples for a given Hessian: the reduced Taylor.} Where the response has
+low-rank structure, restricting the expansion to a subspace pays: the reduced Taylor reaches a
+Hessian error of $0.5$ with the fewest samples on three problems (beam $1.0\times10^6$ vs.\
+$2.6\times10^6$ for the DeepONet; synthetic $8.4\times10^6$ vs.\ $1.1\times10^7$; two moons
+$2.9\times10^5$ vs.\ $9.0\times10^5$) and as fast as the DeepONet on the fourth. Its gradient fails
+where it does not lie in the subspace (two moons: $0.49$).
+
+\paragraph{The weighting costs samples.} Letting the Taylor coefficients learn from the designs
+near $u=0$ only discards most of the data for them: the weighted surrogate needs 2--12 times more
+samples than the unweighted one for the same Hessian accuracy, and is still somewhat less accurate
+at $10^8$ samples. On the shield, with $6\times10^{10}$ simulated muons, it was the better choice
+near the nominal design (Sec.~\ref{sec:shield}).
+
+%==============================================================================
+\section{The muon shield}
+\label{sec:shield}
+%==============================================================================
+
+\subsection{Accuracy}
+
+\begin{table}[h]
+\centering
+\caption{Surrogate vs.\ simulator on the reference designs (never trained on): median
+$|\log(\text{pred}/\text{sim})|$ (signed for the nominal design), and the relative vector errors of the
+43 one-at-a-time (OAT) secants and curvatures on the check sample (Poisson noise: $1.6\%$ and
+$7.6\%$).}
+\label{tab:val}
+\begin{tabular}{lcc}
+\toprule
+ & DeepONet & Taylor \\
+\midrule
+nominal design, nominal muons      & $-2.0\%$ & $+1.3\%$ \\
+designs in the half box            & $4.1\%$  & $8.5\%$ \\
+designs in the box                 & $12.6\%$ & $12.0\%$ \\
+check sample: nominal design       & $+0.6\%$ & $-1.5\%$ \\
+check sample: designs in the box   & $3.9\%$  & $6.0\%$ \\
+OAT secants                        & $3.9\%$  & $6.4\%$ \\
+OAT curvatures                     & $12\%$   & $15\%$ \\
+members' gradients agree ($\cos$)  & 0.97--0.99 & 0.90--0.95 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{refs_lcso_tr4n30r_oat.png}\\[1ex]
+  \includegraphics[width=0.75\linewidth]{refs_lcso_tr4n30r_calibration.png}
+  \caption{Top: every parameter alone at $\pm10\%$ on the check sample: simulator and both
+  surrogates. Bottom: predicted vs.\ simulated hits of the reference designs.}
+  \label{fig:val}
+\end{figure}
+
+Each robustness analysis simulated the designs its own surrogate pointed to (walks along its
+directions, concrete worst cases, worst designs within each tolerance), on the same $10^9$ muons.
+Both surrogates can be scored on both sets:
+
+\begin{table}[h]
+\centering
+\caption{Median $|\log(\text{pred}/\text{sim})|$ of each surrogate on the designs simulated in each
+analysis. The scans are the same designs in both.}
+\label{tab:cross}
+\resizebox{\linewidth}{!}{\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{designs of the DeepONet analysis} & \multicolumn{2}{c}{designs of the Taylor analysis} \\
+ & DeepONet & Taylor & DeepONet & Taylor \\
+\midrule
+walks within one tolerance unit (28)    & $5.0\%$ & $4.0\%$ & $3.4\%$ & $4.5\%$ \\
+worst direction scaled to 1--10\% (7)   & $9.4\%$ & $4.7\%$ & $5.4\%$ & $12\%$ \\
+worst direction, top changes only (4)   & $11\%$  & $30\%$  & $11\%$  & $20\%$ \\
+single parameters at $\pm10\%$ (8)      & $5.5\%$ & $3.8\%$ & $3.5\%$ & $8.2\%$ \\
+random designs (24)                     & $9.1\%$ & $6.6\%$ & $7.0\%$ & $12\%$ \\
+worst designs within $\pm1$--$3\%$ (3)  & $4.0\%$ & $11\%$  & $5.8\%$ & $2.0\%$ \\
+scans (32)                              & $3.7\%$ & $5.1\%$ & $3.7\%$ & $5.1\%$ \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Each surrogate predicts the \emph{other's} designs better than its own (Table~\ref{tab:cross}): the
+designs an analysis chooses are those its surrogate rates worst, which selects where it errs (the
+optimiser's curse). Averaged over both sets the two are comparable near the nominal design; the
+DeepONet is better on corner-like designs (the truncated directions) and on the one-at-a-time
+scans. Along its own harmful directions the Taylor surrogate is $13$--$20\%$ low at one tolerance
+unit, the DeepONet within $5\%$.
+
+\subsection{Robustness conclusions}
+
+\begin{table}[h]
+\centering
+\caption{The robustness conclusions of the two analyses. Simulated values on $10^9$ muons;
+the cosines compare the two surrogates' quantities.}
+\label{tab:conclusions}
+\small
+\begin{tabular}{p{0.38\linewidth}p{0.26\linewidth}p{0.26\linewidth}}
+\toprule
+ & DeepONet & Taylor \\
+\midrule
+gradient at $u=0$ & \multicolumn{2}{c}{$\cos=0.92$ between the two} \\
+worst direction / top Hessian eigenvector / active direction & \multicolumn{2}{c}{$\cos=0.99$ / $0.98$ / $1.00$} \\
+Hessian eigenvalues ($H_0$ per unit$^2$) & 3.41, 1.01, 0.86 & 2.39, 1.40, 0.58 \\
+most sensitive parameters (top 8, 7 shared; rank corr.\ 0.93) & M7 field, M2 entrance, M7 length, M7 inner yoke, M3 inner yoke, M7 exit, M2 field, M6 length & M7 field, M7 exit, M7 length, M2 entrance, M7 inner yoke, M2 field, M4 length, M3 inner yoke \\
+worst direction, one tolerance unit (sim.) & $\times4.95\pm0.19$ & $\times5.20\pm0.20$ \\
+corner pattern, every parameter $\pm1.5\%$ (sim.) & $\times2.01$ & $\times2.24$ \\
+worst single parameter (sim.) & M7 field, $\times2.11$ & M7 field, $\times2.29$ \\
+worst design within $\pm1/2/3\%$ (sim.) & $\times1.72$ / $3.78$ / $9.0$ & $\times1.67$ / $3.62$ / $8.9$ \\
+worst design within $\pm5/10\%$ (sim.) & $\times132$ / $3440$ & $\times103$ / $5090$ \\
+tolerance allocation, worst $\le3/2/1.5\,H_0$ (sim.) & $2.44$ / $1.56$ / $1.40$ & $2.25$ / $1.64$ / $1.38$ \\
+tightest tolerances & M7 field, M2 entrance, M7 length, M7 inner yoke, M7 exit & M2 entrance, M7 field, M7 length, M7 inner yoke, M3 inner yoke \\
+random $\pm10\%$: median, 99th percentile (surr.) & $\times2.08$, $\times29$ & $\times2.03$, $\times34$ \\
+momentum: hits at $30$--$75$ / $>150$\,GeV (sim.) & $66\%$ / $24\%$ & $65\%$ / $24\%$ \\
+intermediate vs.\ high momenta, worst directions & $\cos=-0.24$ to $-0.47$ & $\cos=-0.39$ to $-0.52$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.49\linewidth]{tolerance_boxes_deeponet.png}\hfill
+  \includegraphics[width=0.49\linewidth]{tolerance_boxes_taylor.png}
+  \caption{Worst case for a given tolerance, found with each surrogate and simulated: DeepONet
+  (left), Taylor (right).}
+  \label{fig:tolerance}
+\end{figure}
+
+The two analyses agree on every conclusion (Table~\ref{tab:conclusions}, Fig.~\ref{fig:tolerance}):
+\begin{itemize}
+  \item the same worst direction, as harmful in the simulator ($\times5.0$ and $\times5.2$), and the
+        same active direction (the lengths and fields of M1--M4, harmful on both sides);
+  \item the same worst cases per tolerance within the errors up to $\pm3\%$; at $\pm5\%$ and
+        $\pm10\%$ both searches find the same mechanism (narrower M7 yokes, wider M2 entrance and
+        M3 yoke), at different corners of similar severity;
+  \item the same tolerance priorities (M7 and M2's entrance first, the gaps between magnets last),
+        and allocations that hold their targets in the simulator;
+  \item the same momentum picture: the harmful directions act through the $30$--$75$\,GeV muons,
+        against the high-momentum ones.
+\end{itemize}
+They differ in the details the simulator does not decide alone: the Hessian of the Taylor
+surrogate is less dominated by one direction (eigenvalues $2.4$ and $1.4$ against $3.4$ and $1.0$),
+and the order of the second-tier parameters.
+
+%==============================================================================
+\section{Conclusions}
+%==============================================================================
+
+\begin{enumerate}
+  \item \textbf{Both surrogates converge to the exact gradient and Hessian} on problems with a
+        known answer. The DeepONet needs the fewest samples for a moderate accuracy; the Taylor
+        surrogates keep improving where it levels off, and the reduced one needs the fewest samples
+        for a given Hessian accuracy when the response is low-rank.
+  \item \textbf{Weighting the Taylor part towards the nominal design costs samples} (2--12 times
+        on the toys) but, with the shield's large training set, gave the better local accuracy.
+  \item \textbf{On the shield the conclusions do not depend on the surrogate}: worst directions,
+        worst cases per tolerance, tolerance priorities and the momentum picture agree, all checked
+        with the simulator.
+  \item \textbf{The DeepONet is the more accurate predictor of magnitudes} (one-at-a-time effects,
+        walks along the harmful directions); the Taylor surrogate offers explicit, interpretable
+        derivatives at the nominal design at a modest cost in accuracy.
+  \item \textbf{A surrogate is least reliable on the designs it selects}: each predicts the other's
+        worst designs better than its own, so worst-case magnitudes must always be simulated.
+\end{enumerate}
+
+\end{document}

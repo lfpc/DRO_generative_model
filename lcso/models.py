@@ -1,17 +1,25 @@
-"""LCSO surrogates of p(hit | u, x) = sigmoid(<B(u), T(x)> + bias), u the normalized design.
+"""The architectures of the LCSO surrogate of p(hit | u, x) = sigmoid(<B(u), T(x)> + bias), u the
+normalized design.
 
 Every architecture is a branch B: R^D -> R^P and a trunk T: R^dx -> R^P, so they share the fit,
 the predictions and the derivatives. make(kind, D, dx, ...) builds one; kinds:
 
-  deeponet         B and T are MLPs (hidden, depth, p, act)
-  taylor:r         B = [1, u, (Q'u)^2 / 2]: each sample has its own value, gradient and rank-r
-                   curvature diag(nu(x)) in a learned shared eigenbasis Q (D x r); r = D: full rank
-  taylor-sub:r     B = [1, Q'u, (Q'u)^2 / 2]: the design enters only through r directions
-                   (a low-dimensional manifold), gradient included
-  taylor-res:r     taylor:r plus a residual MLP gated by (|u|^2 / D / gate^2)^2, which vanishes
-                   with its first three derivatives at u = 0
-  quad             B = [1, u, u_i u_j (i <= j)]: a full quadratic per sample
+  deeponet          B and T are MLPs (hidden, depth, p, act)
+  taylor:r          B = [1, u, (Q'u)^2 / 2]: each sample has its own value, gradient and rank-r
+                    curvature diag(nu(x)) in a learned shared eigenbasis Q (D x r); r = D: full rank
+  taylor-sub:r      B = [1, Q'u, (Q'u)^2 / 2]: the design enters only through r directions
+                    (a low-dimensional manifold), gradient included
+  taylor-res:r      taylor:r plus a residual MLP gated by (mean u^2)^2 / radius^4, which vanishes
+                    with its first three derivatives at u = 0, so the value, gradient and Hessian
+                    there are the Taylor part's
+  taylor-sub-res:r  taylor-sub:r plus the same gated residual
+  taylor-res4:r,    the same with the gate mean(u^4) / radius^4: it also opens along a single
+  taylor-sub-res4:r axis, so one parameter at its limit can get a one-sided response
+  quad              B = [1, u, u_i u_j (i <= j)]: a full quadratic per sample
   rsm              quad with a constant trunk: a response surface of the hit rate, blind to x
+  mlp              an MLP on [u, x]: not separable, the expressivity ceiling (mlp:k: depth k)
+
+Ensemble(models) is the mean logit of several of them, itself a branch-trunk surrogate.
 
 The expected hit rate of a sample X is H(u) = mean_x sigmoid(<B(u), T(x)> + bias); derivatives()
 gives its gradient and Hessian exactly, from one pass over X.
@@ -36,6 +44,7 @@ def mlp(d_in, hidden, depth, d_out, act='silu'):
 class Surrogate(nn.Module):
     """logit(u, x) = <branch(u), trunk(x)> + bias. Subclasses define branch; the trunk is an MLP
     on the standardized x, or a constant (const_trunk)."""
+    separable = True          # the logit is a dot product of a design part and a sample part
 
     def __init__(self, D, dx, P, hidden=64, depth=2, trunk_act='relu', const_trunk=False):
         super().__init__()
@@ -80,13 +89,23 @@ class DeepONet(Surrogate):
 
 
 class Taylor(Surrogate):
-    """[1, u or Q'u, (Q'u)^2 / 2], optionally + gate(u) * residual MLP(u)."""
+    """A per-sample Taylor expansion in u: B(u) = [1, u or Q'u, (Q'u)^2 / 2], optionally plus a
+    gated residual gate(u) * MLP(u).
 
-    def __init__(self, D, dx, rank, sub=False, p_res=0, hidden=64, depth=2, trunk_act='relu'):
+    The gate is zero, with zero gradient and Hessian, at u = 0, so the value, gradient and Hessian
+    there are the Taylor part's coefficients. It is (mean u^2)^2, or with quartic mean(u^4) (which
+    also opens it along a single axis), divided by the training designs' radius^4 (set by fit()).
+
+    near > 0 (training only) splits what the two parts learn from: each row's gradient reaches the
+    Taylor coefficients with the weight exp(-sqrt(dist4(u)) / near^2), the residual with weight 1.
+    The predictions are unchanged."""
+    near = 0.0
+
+    def __init__(self, D, dx, rank, sub=False, p_res=0, hidden=64, depth=2, trunk_act='relu', quartic=False):
         r = min(rank, D)
         P = 1 + (r if sub else D) + r + p_res
         super().__init__(D, dx, P, hidden, depth, trunk_act)
-        self.r, self.sub, self.p_res = r, sub, p_res
+        self.r, self.sub, self.p_res, self.quartic = r, sub, p_res, quartic
         self.Q_raw = nn.Parameter(torch.linalg.qr(torch.randn(D, r))[0])
         self.res = mlp(D, hidden, depth, p_res) if p_res else None
         self.register_buffer('gate', torch.ones(()))       # radius (rms, per coordinate) of the training designs
@@ -98,13 +117,27 @@ class Taylor(Surrogate):
     def Q(self):
         return torch.linalg.qr(self.Q_raw)[0]
 
+    def dist4(self, u):
+        """The gate's measure of the distance from u = 0, to the fourth power (smooth at 0)."""
+        return u.pow(4).mean(-1) if self.quartic else u.pow(2).mean(-1) ** 2
+
     def branch(self, u):
         z = u @ self.Q
         feats = [torch.ones_like(u[..., :1]), z if self.sub else u, 0.5 * z ** 2]
         if self.p_res:
-            g = (u.pow(2).mean(-1, keepdim=True) / self.gate ** 2) ** 2
-            feats.append(g * self.res(u))
+            feats.append(self.dist4(u)[..., None] / self.gate ** 4 * self.res(u))
         return torch.cat(feats, -1)
+
+    def logit_rows(self, U, d, x):
+        if not (self.training and self.near and self.p_res):
+            return super().logit_rows(U, d, x)
+        u = U[d]
+        f = self.branch(u) * self.trunk(x)
+        k = self.P - self.p_res                         # the Taylor features come first
+        taylor = f[:, :k].sum(-1)
+        w = torch.exp(-self.dist4(u).sqrt() / self.near ** 2)
+        taylor = w * taylor + (1 - w) * taylor.detach()  # same value, gradient scaled by w
+        return taylor + f[:, k:].sum(-1) + self.bias
 
 
 class Quad(Surrogate):
@@ -122,17 +155,96 @@ class Quad(Surrogate):
         return torch.cat([torch.ones_like(u[..., :1]), u, u[..., self.i] * u[..., self.j]], -1)
 
 
+class MLP(nn.Module):
+    """logit(u, x) = MLP([u, standardized x]): no separable structure (the expressivity ceiling).
+    Predictions need the network per design and sample; derivatives need autograd
+    (derivatives_autograd)."""
+    separable = False
+
+    def __init__(self, D, dx, hidden=256, depth=3, act='silu'):
+        super().__init__()
+        self.D = D
+        self.net = mlp(D + dx, hidden, depth, 1, act)
+        self.bias = nn.Parameter(torch.zeros(1))
+        self.register_buffer('x_loc', torch.zeros(dx))
+        self.register_buffer('x_scale', torch.ones(dx))
+
+    set_norm = Surrogate.set_norm
+
+    def logit_rows(self, U, d, x):
+        return self.net(torch.cat([U[d], (x - self.x_loc) / self.x_scale], -1))[:, 0] + self.bias
+
+    def logits(self, U, x):
+        """Every design against every sample: (B, N)."""
+        xn = (x - self.x_loc) / self.x_scale
+        B, N = U.shape[0], x.shape[0]
+        z = torch.cat([U[:, None].expand(B, N, -1), xn[None].expand(B, N, -1)], -1)
+        return self.net(z)[..., 0] + self.bias
+
+
+class Ensemble(Surrogate):
+    """The mean logit of several surrogates. If they are all separable, it is itself a
+    branch-trunk surrogate (branch and trunk features concatenated, branches scaled by 1/K), so
+    derivatives() etc. apply; otherwise only logits and logit_rows."""
+
+    def __init__(self, models):
+        torch.nn.Module.__init__(self)
+        self.models = nn.ModuleList(models)
+        self.separable = all(m.separable for m in models)
+        self.D = models[0].D
+        self.P = sum(m.P for m in models) if self.separable else None
+        self.bias = nn.Parameter(torch.stack([m.bias for m in models]).mean(0).detach())
+
+    def branch(self, u):
+        return torch.cat([m.branch(u) for m in self.models], -1) / len(self.models)
+
+    def trunk(self, x):
+        return torch.cat([m.trunk(x) for m in self.models], -1)
+
+    def logit_rows(self, U, d, x):
+        if self.separable:
+            return super().logit_rows(U, d, x)
+        return sum(m.logit_rows(U, d, x) for m in self.models) / len(self.models)
+
+    def logits(self, U, x):
+        if self.separable:
+            return super().logits(U, x)
+        return sum(m.logits(U, x) for m in self.models) / len(self.models)
+
+
+def derivatives_autograd(model, points, u0=None, chunk=2 ** 11):
+    """(H, grad, Hessian) of H(u) = sum_w w sigmoid(logit(u, x)) at u0 (default 0), by autograd
+    through the whole network, over weighted points (x, w): for non-separable surrogates."""
+    dev = next(model.parameters()).device
+    u0 = torch.zeros(model.D, device=dev) if u0 is None else u0.to(dev)
+    H, g, h = 0.0, 0.0, 0.0
+    for x, w in points:
+        for c in range(0, len(x), chunk):
+            xb, wb = x[c:c + chunk].to(dev), w[c:c + chunk].to(dev)
+
+            def F(u):
+                return (torch.sigmoid(model.logits(u[None], xb)[0]).double() * wb).sum()
+
+            H += float(F(u0).detach())
+            g = g + jacrev(F)(u0).detach()
+            h = h + hessian(F)(u0).detach()
+    return H, g.cpu(), (0.5 * (h + h.T)).cpu()
+
+
 def make(kind, D, dx, p=16, hidden=64, depth=2, act='silu', trunk_act='relu', p_res=16):
-    """A surrogate from its kind string, e.g. 'deeponet', 'taylor:8', 'taylor-sub:4', 'quad'."""
+    """A surrogate from its kind string, e.g. 'deeponet', 'taylor:8', 'taylor-sub:4', 'taylor-sub-res:4',
+    'taylor-res4:8' (residual gated by mean(u^4))."""
     name, _, r = kind.partition(':')
     r = int(r) if r else D
     if name == 'deeponet':
         return DeepONet(D, dx, p, hidden, depth, act, trunk_act)
-    if name in ('taylor', 'taylor-sub', 'taylor-res'):
-        return Taylor(D, dx, r, sub=name == 'taylor-sub', p_res=p_res if name == 'taylor-res' else 0,
-                      hidden=hidden, depth=depth, trunk_act=trunk_act)
+    if name in ('taylor', 'taylor-sub', 'taylor-res', 'taylor-sub-res', 'taylor-res4', 'taylor-sub-res4'):
+        return Taylor(D, dx, r, sub=name.startswith('taylor-sub'), p_res=p_res if '-res' in name else 0,
+                      hidden=hidden, depth=depth, trunk_act=trunk_act, quartic=name.endswith('-res4'))
     if name in ('quad', 'rsm'):
         return Quad(D, dx, hidden, depth, trunk_act, const_trunk=name == 'rsm')
+    if name == 'mlp':
+        return MLP(D, dx, hidden, r if ':' in kind else depth, act)
     raise ValueError(kind)
 
 

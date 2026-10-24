@@ -1,17 +1,18 @@
 """Would importance sampling make the simulator's estimates cheaper?
 
-Sample the muons at momentum temperature T and weight each by the density ratio to T = 1. The
+Sample the muons at momentum temperature T and weight each by the density ratio to the nominal
+flux (T = 1). The
 momentum flow maps its latent z to (pz, pt) the same way at every T, and only the latent's
 spread changes (N(0, T^2 I) instead of N(0, I)), so the weight is exact and closed form:
 
     w(z) = T^2 exp(-|z|^2 (1 - 1/T^2) / 2)
 
-(times the ratio of the envelope acceptances, a constant). The T = 1 hit rate is
+(times the ratio of the envelope acceptances, a constant). The nominal hit rate is
 H = E_T[w hit], and per simulated muon the relative variance is E_T[w^2 hit] / H^2 - 1, against
-1 / H - 1 for plain sampling at T = 1. Their ratio is the gain: how many times fewer simulated
+1 / H - 1 for plain sampling of the nominal flux. Their ratio is the gain: how many times fewer simulated
 muons give the same precision.
 
-Every hit at the nominal design is stored in the pools (shield_pool.py; the nominal designs are
+Every hit at the nominal design is stored in the pools (lcso/simulate_pools.py; the nominal designs are
 the first --n_nominal of each pool), with its muon, so the latent of every hit, and with it the
 gain, follows without new simulation.
 
@@ -21,8 +22,9 @@ import glob
 import os
 import sys
 
-import numpy as np
 import torch
+
+from quadrature import kinematics
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # after this folder: both have a plots.py
 from shield import MuonShield  # noqa: E402
@@ -49,12 +51,8 @@ def latent(gen, mu):
 def accept(gen, T, n=2_000_000, seed=0):
     """Fraction of the flow's muons at temperature T inside shield.sample's envelope."""
     torch.manual_seed(seed)
-    s = gen.flow.momentum.sample(n, temperature=T).double().cpu().numpy() * gen.std[:2] + gen.mean[:2]
-    m = gen.m
-    p = m['p_min'] + (m['p_max'] - m['p_min']) / (1 + np.exp(-s[:, 0]))
-    pz = p / np.sqrt(1 + np.exp(2 * s[:, 1]))
-    pt = pz * np.exp(s[:, 1])
-    return float(np.mean((p <= MuonShield.P_MAX) & (pt <= MuonShield.PT_MAX) & (pz > MuonShield.PZ_MIN)))
+    s = gen.flow.momentum.sample(n, temperature=T).double().cpu()
+    return float(kinematics(gen.m, s * torch.as_tensor(gen.std[:2]) + torch.as_tensor(gen.mean[:2]))[2].double().mean())
 
 
 if __name__ == '__main__':
@@ -63,7 +61,7 @@ if __name__ == '__main__':
     gen = shield._flow
     a1 = accept(gen, 1.0)
     lines = ['importance sampling of the simulator at the nominal design: muons drawn at momentum temperature T, '
-             'weighted to T = 1', f'{"T":>4s} {"designs":>8s} {"muons":>10s} {"hits":>9s} {"H(T=1) per 1e9":>15s} '
+             'weighted to the nominal flux', f'{"T":>4s} {"designs":>8s} {"muons":>10s} {"hits":>9s} {"H per 1e9":>15s} '
              f'{"ESS / hits":>10s} {"gain":>8s}']
     for T, name in POOLS.items():
         shards = [torch.load(f, weights_only=False) for f in sorted(glob.glob(os.path.join(POOL, name, 'shard_*.pt')))]
@@ -76,13 +74,13 @@ if __name__ == '__main__':
         n_total = n_nom * n_mu
         z = latent(gen, x[sel])
         w = T ** 2 * torch.exp(-(z ** 2).sum(1) * (1 - 1 / T ** 2) / 2) * accept(gen, T) / a1
-        H = float(w.sum()) / n_total                       # hit rate at T = 1
+        H = float(w.sum()) / n_total                       # nominal hit rate
         m2 = float((w ** 2).sum()) / n_total
         rv_is, rv_mc = m2 / H ** 2 - 1, 1 / H - 1
         ess = float(w.sum() ** 2 / (w ** 2).sum())
         lines.append(f'{T:4.1f} {n_nom:8d} {n_total:10.1e} {int(sel.sum()):9d} {H * 1e9:15.1f} '
                      f'{ess / max(int(sel.sum()), 1):10.3f} {rv_mc / rv_is:8.1f}')
-    lines.append('gain: plain T = 1 sampling needs this many times more simulated muons for the same precision on H; '
+    lines.append('gain: plain nominal sampling needs this many times more simulated muons for the same precision on H; '
                  'ESS / hits: the weighted hits\' effective share')
     os.makedirs(FIGS, exist_ok=True)
     with open(os.path.join(FIGS, 'importance.txt'), 'w') as f:

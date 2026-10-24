@@ -1,7 +1,7 @@
 """Concrete worst cases of the muon shield, simulated: what is changed, and what it does.
 
 Takes the directions of a robustness.py run and simulates, all on the same --n_muons sampled
-muons at temperature 1, a set of concrete designs (the surrogate's predictions are integrated
+muons of the physical flux, a set of concrete designs (the surrogate's predictions are integrated
 over the muon flow on a quadrature grid, quoted per as many muons):
 
   worst@X%     the worst direction, scaled so that no parameter moves by more than X% (X < 0:
@@ -24,12 +24,7 @@ import os
 import numpy as np
 import torch
 
-from analysis import Report, cached_hits, feature_cache, grid_spec, muon_blocks, setup, simulate
-
-
-class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
-    pass
-
+from analysis import ArgFormatter, Report, cached_hits, feature_cache, grid_spec, muon_blocks, setup, simulate
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=ArgFormatter)
 parser.add_argument('--run', default='outputs/robustness', help='robustness.py --out_dir')
@@ -71,7 +66,8 @@ if 'pga' in NAMES:
 rng = np.random.default_rng(args.seed)
 RAND = {}                                                # X -> indices of its random designs
 for spec in args.random.split(','):
-    x, m = float(spec.split(':')[0]), int(spec.split(':')[1])
+    x, m = spec.split(':')
+    x, m = float(x), int(m)
     RAND[x] = list(range(len(DESIGNS), len(DESIGNS) + m))
     DESIGNS += [(f'rand{x:g}%_{i + 1}', rng.uniform(-1, 1, D) * x / 10) for i in range(m)]
 U_mc = {x: rng.uniform(-1, 1, (args.n_mc, D)) * x / 10 for x in RAND}
@@ -119,7 +115,7 @@ def changes(d):
             for k in np.argsort(-np.abs(U[d])) if U[d][k] != 0]
 
 
-say(f'{args.n_muons:,} muons from the flow at T = 1 (seed {args.seed}); directions from {args.run}')
+say(f'{args.n_muons:,} muons from the flow (seed {args.seed}); directions from {args.run}')
 if args.sim:
     say(f'nominal design: simulator {S0:.0f} +- {np.sqrt(S0):.0f} hits, surrogate {P0:.0f}')
 say('\n' + '=' * 90 + '\nSUMMARY\n' + '=' * 90)
