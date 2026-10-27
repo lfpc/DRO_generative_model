@@ -17,11 +17,11 @@ import torch
 
 import cli
 from lcso.surrogate import load_surrogate
-from paths import EXPERIMENTS, OUTPUTS, ROOT
+from paths import EXPERIMENTS, ROOT, checkpoint, figures
 from shield import MuonShield
 from validation.validate import REFS, Reference, as_study, ref_scores
 
-FIGS = os.path.join(EXPERIMENTS, 'figs')
+FIGS = figures(EXPERIMENTS)
 KEYS = ['h0_err_T1', 'pred_half_T1', 'pred_box_T1', 'h0_err_T1.5', 'pred_box_T1.5', 'oat_slope_err', 'oat_curv_err']
 
 if __name__ == '__main__':
@@ -32,13 +32,13 @@ if __name__ == '__main__':
     torch.backends.cuda.matmul.allow_tf32 = False
     shield = MuonShield()
     refs = {t: Reference(t) for t in REFS}
-    cache_path = os.path.join(FIGS, 'member_scores.json')
+    cache_path = os.path.join(EXPERIMENTS, 'member_scores.json')
     cache = json.load(open(cache_path)) if os.path.exists(cache_path) else {}
     lines = ['each member alone on the reference designs (columns _T1: nominal muons, _T1.5: hot check sample); '
              'mean +- sd over the members, and the ensemble (final_compare.py)', '',
              f'{"":16s}' + ''.join(f'{k:>16s}' for k in KEYS)]
     for ens in args.ensembles.split(','):
-        ck = torch.load(os.path.join(OUTPUTS, f'{ens}.pt'), map_location='cpu', weights_only=False)
+        ck = torch.load(checkpoint(ens), map_location='cpu', weights_only=False)
         rows = []
         for p in ck['stacked']:
             name = os.path.splitext(os.path.basename(p))[0]
@@ -56,11 +56,11 @@ if __name__ == '__main__':
             lines.append(f'  {name:14s}' + ''.join(f'{v:16.4f}' for v in rows[-1]))
         rows = np.array(rows)
         lines.append(f'  {ens + " mean+-sd":14s}' + ''.join(f'{m:9.4f}+-{s:.3f}' for m, s in zip(rows.mean(0), rows.std(0, ddof=1))))
-        ef = os.path.join(FIGS, f'final_compare_{ens}_scores.json')
+        ef = os.path.join(EXPERIMENTS, f'final_compare_{ens}_scores.json')
         if os.path.exists(ef):
             e = json.load(open(ef))
             lines.append(f'  {ens + " ensemble":14s}' + ''.join(f'{e[k]:16.4f}' for k in KEYS))
         lines.append('')
-    with open(os.path.join(FIGS, 'member_scores.txt'), 'w') as f:
+    with open(os.path.join(EXPERIMENTS, 'member_scores.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))

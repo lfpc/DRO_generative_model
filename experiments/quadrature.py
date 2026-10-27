@@ -14,7 +14,7 @@ and two estimators of it (and of its gradient and Hessian at u = 0) are compared
          the grid's only noise, measured here over seeds and against n_pos
 The reference is the finest grid with several production points per node (--ref).
 
-    python experiments/quadrature.py            # -> outputs/experiments/figs/quadrature.{png,txt,json}
+    python experiments/quadrature.py            # -> outputs/{figures,results}/experiments/quadrature.{png,txt,json}
 """
 import json
 import os
@@ -29,10 +29,10 @@ import torch
 from analysis.core import branch_jacobian, derivatives
 import cli
 from lcso.surrogate import load_surrogate
-from paths import EXPERIMENTS
+from paths import EXPERIMENTS, figures
 from shield import MuonShield
 
-FIGS = os.path.join(EXPERIMENTS, 'figs')
+FIGS = figures(EXPERIMENTS)
 
 
 @torch.no_grad()
@@ -120,7 +120,8 @@ if __name__ == '__main__':
         Hs = [r['H'] for r in rs]
         print(f'mc n = {float(size):.0e}: H = {np.mean(Hs):.3f} +- {np.std(Hs, ddof=1):.3f} (sd over {args.reps})', flush=True)
     os.makedirs(FIGS, exist_ok=True)
-    with open(os.path.join(FIGS, f'{args.out}.json'), 'w') as f:
+    os.makedirs(EXPERIMENTS, exist_ok=True)
+    with open(os.path.join(EXPERIMENTS, f'{args.out}.json'), 'w') as f:
         json.dump(out, f)
 
     lines = [f'model {args.model}; reference: grid {args.ref} (n_z x n_phi : production points per node), '
@@ -142,7 +143,7 @@ if __name__ == '__main__':
         curves['noise'].append((rs[0]['points'], *e, key))
         lines.append(f'{"grid " + spec + ", " + k + " position" + "s" * (k != "1") + " (" + str(len(rs)) + " seeds)":34s} {rs[0]["points"]:9.1e} '
                      + ' '.join(f'{v:{w}.2e}' for v, w in zip(e, (11, 14, 14))))
-    with open(os.path.join(FIGS, f'{args.out}.txt'), 'w') as f:
+    with open(os.path.join(EXPERIMENTS, f'{args.out}.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
 

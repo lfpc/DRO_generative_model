@@ -2,8 +2,8 @@
 
 The studies that chose and checked the method; none of them is part of the pipeline
 (`run_all.sh`). Run from the repository root after `source env.sh`, e.g.
-`python experiments/quadrature.py`. Results go to `outputs/experiments/` (`figs/` for the
-figures and tables). Most ran in the first analysis (43 parameters, muons on axis); their
+`python experiments/quadrature.py`. Results go to `outputs/results/experiments/`, figures to
+`outputs/figures/experiments/`. Most ran in the first analysis (43 parameters, muons on axis); their
 results are in `outputs/archive/round1_43p_onaxis/surrogate_study/`.
 
 ## Integrating over the muons (second analysis)

@@ -20,7 +20,7 @@ and the gain of q over T = 2 in effective training muons, (E(T=2) / E(q))^2. It 
 q* ~ p^(2/3) pi^(1/3) (a mild temperature, sqrt(3/2) for a Gaussian, times a gentle tilt towards
 high pi), the bound any proposal can reach.
 
-    python experiments/proposal_check.py --device cpu       # -> outputs/experiments/figs/proposal_check.txt
+    python experiments/proposal_check.py --device cpu       # -> outputs/results/experiments/proposal_check.txt
 
 Run in the first analysis (muons on axis at z = -1 m, as here).
 """
@@ -126,7 +126,7 @@ if __name__ == '__main__':
         eff = (ref[2] / E) ** 2
         lines.append(f'{name:52s} {np.median(h / ref[0]):6.2f} {np.median(hb / ref[1]):10.2f} {np.median(eff):24.2f} '
                      f'{np.quantile(eff, .1):6.2f} {eff[0]:8.2f} {fb:8.1%}')
-    out = os.path.join(EXPERIMENTS, 'figs', 'proposal_check.txt')
+    out = os.path.join(EXPERIMENTS, 'proposal_check.txt')
     with open(out, 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))

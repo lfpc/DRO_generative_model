@@ -9,7 +9,7 @@ nominal reference muons) of the best-trained models:
   3. what matters for robustness: each model's worst design in the +-10% box (quadratic
      model, trust region in u), its rise predicted by every other model
 
-    python experiments/derivative_check.py        # -> outputs/experiments/figs/derivatives_*.png, *.txt
+    python experiments/derivative_check.py        # -> outputs/figures/experiments/derivatives_*.png, outputs/results/experiments/*.txt
 
 Run in the first analysis (43 parameters, muons on axis).
 """
@@ -24,6 +24,7 @@ from plots import COLOR, FIGS, LABEL
 import run_shield
 
 from analysis.core import trust_region_max
+from paths import EXPERIMENTS
 from shield import MuonShield
 
 D = dict(run_shield.DEFAULTS)
@@ -107,10 +108,11 @@ if __name__ == '__main__':
     for i, ni in enumerate(names):
         lines.append(f'  {ni:>16s} ' + ' '.join(f'{cos(V[ni], V[nj]):6.2f}' for nj in names))
     os.makedirs(FIGS, exist_ok=True)
-    with open(os.path.join(FIGS, 'derivatives_check.txt'), 'w') as f:
+    os.makedirs(EXPERIMENTS, exist_ok=True)
+    with open(os.path.join(EXPERIMENTS, 'derivatives_check.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
-    np.savez(os.path.join(FIGS, 'derivatives_check.npz'), names=names, V=np.array([V[n] for n in names]), R=R,
+    np.savez(os.path.join(EXPERIMENTS, 'derivatives_check.npz'), names=names, V=np.array([V[n] for n in names]), R=R,
              g=np.array([m[2] for m in M]), H=np.array([m[3] for m in M]), order=order)
 
     # figure: components, and the k-truncated agreement

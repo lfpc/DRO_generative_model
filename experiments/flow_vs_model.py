@@ -44,7 +44,7 @@ def band(x):
 
 if __name__ == '__main__':
     parser = cli.parser(__doc__)
-    parser.add_argument('--models', default='outputs/lcso_deeponet.pt,outputs/lcso.pt')
+    parser.add_argument('--models', default='outputs/models/lcso_deeponet.pt,outputs/models/lcso.pt')
     parser.add_argument('--flows', default='outputs/flow_2026.pt,outputs/muon_flow.pt', help='in generator_muons')
     parser.add_argument('--params', default='M2:Z_len,M3:Z_len,M4:Z_len,M7:Z_len,M7:NI,M2:dXIn,M7:dXOut,M6:Z_len')
     parser.add_argument('--grid', default='201x32')
@@ -76,7 +76,7 @@ if __name__ == '__main__':
             for k in ks:
                 lines.append(f'  {labels[k]:16s} {gb[:, k].sum() / H:+8.3f}   ' + ' '.join(f'{v / H:+7.3f}' for v in gb[:, k]))
             lines.append('')
-    out = os.path.join(EXPERIMENTS, 'figs', 'flow_vs_model.txt')
+    out = os.path.join(EXPERIMENTS, 'flow_vs_model.txt')
     with open(out, 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))

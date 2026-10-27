@@ -48,10 +48,10 @@ pool() {  # GPU worker n_workers name T delta n seed muons [extra]: restarted af
   grep -q "^done" $log
 }
 train() {  # name seed gpu
-  [ -f outputs/$1.pt ] && return 0
+  [ -f outputs/models/$1.pt ] && return 0
   CUDA_VISIBLE_DEVICES=$3 python -W ignore -m lcso.train --pool $POOLS $ARCH --seed $2 --name $1 > $L/train_$1.log 2>&1
 }
-ensemble() {  # name gpu: seeds 0-3 two at a time, a bad seed replaced (seeds 4, 5, ...), stacked into outputs/<name>.pt
+ensemble() {  # name gpu: seeds 0-3 two at a time, a bad seed replaced (seeds 4, 5, ...), stacked into outputs/models/<name>.pt
   local name=$1 gpu=$2 a b
   train ${name}_s0 0 $gpu & a=$!; train ${name}_s1 1 $gpu & b=$!; wait $a $b
   train ${name}_s2 2 $gpu & a=$!; train ${name}_s3 3 $gpu & b=$!; wait $a $b
@@ -60,7 +60,7 @@ ensemble() {  # name gpu: seeds 0-3 two at a time, a bad seed replaced (seeds 4,
     local bad=$(python - $name $seeds <<'EOF'
 import sys, numpy as np, torch
 name, seeds = sys.argv[1], sys.argv[2:]
-v = {s: torch.load(f'outputs/{name}_s{s}.pt', weights_only=False)['trained_on']['val_bce'] for s in seeds}
+v = {s: torch.load(f'outputs/models/{name}_s{s}.pt', weights_only=False)['trained_on']['val_bce'] for s in seeds}
 print(' '.join(s for s in seeds if v[s] > 1.1 * np.median([v[t] for t in seeds if t != s])))
 EOF
 )
@@ -71,7 +71,7 @@ EOF
       seeds=$(echo $seeds | sed "s/\b$s\b/$next/"); next=$((next + 1))
     done
   done
-  python -W ignore -m lcso.train --stack $(for s in $seeds; do echo outputs/${name}_s$s.pt; done) --name $name > $L/stack_$name.log 2>&1
+  python -W ignore -m lcso.train --stack $(for s in $seeds; do echo outputs/models/${name}_s$s.pt; done) --name $name > $L/stack_$name.log 2>&1
   step "  $name: seeds $seeds"
 }
 
@@ -88,8 +88,8 @@ step "2. references | first ensemble, adaptive pool"
 (
   export CUDA_VISIBLE_DEVICES=$GPU_B
   R="python -W ignore -m validation.references --muons $MUONS"
-  [ -f outputs/references/T1.5/meta.pt ] || $R --name T1.5 --stage sample --temperature 1.5 --n_muons 400000000 --oat > $L/ref_sample_T1.5.log 2>&1
-  [ -f outputs/references/T1/meta.pt ] || $R --name T1 --stage sample --temperature 1 --n_muons 600000000 > $L/ref_sample_T1.log 2>&1
+  [ -f outputs/data/references/T1.5/meta.pt ] || $R --name T1.5 --stage sample --temperature 1.5 --n_muons 400000000 --oat > $L/ref_sample_T1.5.log 2>&1
+  [ -f outputs/data/references/T1/meta.pt ] || $R --name T1 --stage sample --temperature 1 --n_muons 600000000 > $L/ref_sample_T1.log 2>&1
   for t in T1.5 T1; do
     for try in 1 2 3; do $R --name $t --stage simulate >> $L/ref_sim_$t.log 2>&1 && break; done
   done
@@ -98,15 +98,15 @@ step "2. references | first ensemble, adaptive pool"
 REFS=$!
 (
   POOLS=$(names "$POOLS_A")${EXTRA:++$EXTRA} ensemble lcso_first $GPU_A
-  F=outputs/robustness_first
-  M="--model outputs/lcso_first.pt --muons $MUONS"
+  F=outputs/results/robustness_first
+  M="--model outputs/models/lcso_first.pt --muons $MUONS"
   export CUDA_VISIBLE_DEVICES=$GPU_A
   [ -f $F/robustness.npz ] || python -W ignore -m analysis.robustness $M --no_sim --out_dir $F > $L/first_robustness.log 2>&1
   [ -f $F/tolerance_boxes.npz ] || python -W ignore -m analysis.tolerance_boxes --run $F $M > $L/first_tolerance.log 2>&1
   ls $F/tolerance_sim_0.npz >/dev/null 2>&1 \
     || python -W ignore -m analysis.tolerance_boxes --run $F $M --sim --n_muons 300000000 > $L/first_tolerance_sim.log 2>&1
-  [ -f outputs/adaptive_designs.npy ] || python -W ignore -m lcso.adaptive_designs --run $F $M > $L/adaptive_designs.log 2>&1
-  pool $GPU_A 0 1 $ADAPT --designs outputs/adaptive_designs.npy --n_nominal 0
+  [ -f outputs/data/adaptive_designs.npy ] || python -W ignore -m lcso.adaptive_designs --run $F $M > $L/adaptive_designs.log 2>&1
+  pool $GPU_A 0 1 $ADAPT --designs outputs/data/adaptive_designs.npy --n_nominal 0
 ) || { step "2. first ensemble / adaptive pool failed"; exit 1; }
 step "2. adaptive pool done"
 

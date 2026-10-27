@@ -12,8 +12,8 @@ least sure. Three sources:
 
 Writes --out (n, D) and its .txt summary; simulate it as a pool:
 
-    python -m lcso.adaptive_designs --run outputs/robustness_first --model outputs/lcso_first.pt
-    python -m lcso.simulate_pools --name T1.5_adapt --designs outputs/adaptive_designs.npy --n_nominal 0 --seed 13
+    python -m lcso.adaptive_designs --run outputs/results/robustness_first --model outputs/models/lcso_first.pt
+    python -m lcso.simulate_pools --name T1.5_adapt --designs outputs/data/adaptive_designs.npy --n_nominal 0 --seed 13
 """
 import os
 
@@ -21,14 +21,14 @@ import numpy as np
 
 from analysis.core import cached_hits, feature_cache, one_group, setup
 import cli
-from paths import RUN, output
+from paths import DATA, RUN
 
 from .surrogate import load_members
 
 if __name__ == '__main__':
     parser = cli.add_common(cli.parser(__doc__))
     parser.add_argument('--run', default=RUN, help='with tolerance_boxes*.npz (analysis/tolerance_boxes.py)')
-    parser.add_argument('--out', default=output('adaptive_designs.npy'))
+    parser.add_argument('--out', default=os.path.join(DATA, 'adaptive_designs.npy'))
     parser.add_argument('--n_ray', type=int, default=4, help='points on the line to each worst case')
     parser.add_argument('--n_near', type=int, default=12, help='perturbations of each worst case (x2 if mispredicted)')
     parser.add_argument('--sigma', type=float, default=0.25, help='perturbation size, in units of the box half-width')

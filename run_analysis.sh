@@ -1,10 +1,10 @@
 #!/bin/bash
 # The robustness analysis of a trained surrogate (no training), on one or two GPUs. Everything goes
-# to $RUN: the .npz results, the *_report.txt files and figs/. A step is skipped when its result
+# to $RUN (the .npz results and *_report.txt files) and outputs/figures/<basename of $RUN>/. A step is skipped when its result
 # exists (delete it to redo the step).
 #
 #     nohup bash run_analysis.sh > outputs/logs/run_analysis.log 2>&1 &
-#     MODEL=outputs/other.pt RUN=outputs/robustness_other GPUS="0" bash run_analysis.sh
+#     MODEL=outputs/models/other.pt RUN=outputs/results/robustness_other GPUS="0" bash run_analysis.sh
 #     SIM=0 bash run_analysis.sh       # the surrogate alone, no simulation (minutes)
 #     FAST=1 bash run_analysis.sh      # 3e8 simulated muons and fewer concrete designs (< 1 h)
 #
@@ -17,8 +17,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 source env.sh
-MODEL=${MODEL:-outputs/lcso.pt}
-RUN=${RUN:-outputs/robustness}
+MODEL=${MODEL:-outputs/models/lcso.pt}
+RUN=${RUN:-outputs/results/robustness}
 MUONS=${MUONS:-flow}
 N=${N:-1000000000}                   # simulated muons (~1200 hits at the nominal design)
 GPUS=(${GPUS:-0 1})

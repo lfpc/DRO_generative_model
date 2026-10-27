@@ -9,7 +9,7 @@ the running Monte Carlo estimate as muons accumulate (several seeds), and the qu
 increasing resolution. --earlier also draws the values a 1e9-muon Monte Carlo robustness run
 (--run) reported, with its jackknife errors.
 
-    python experiments/quadrature_convergence.py    # -> outputs/experiments/figs/quadrature_convergence.png
+    python experiments/quadrature_convergence.py    # -> outputs/figures/experiments/quadrature_convergence.png
 """
 import json
 import os
@@ -24,7 +24,7 @@ from quadrature import FIGS, grid_points, mc_points
 
 import cli
 from lcso.surrogate import load_surrogate
-from paths import RUN
+from paths import EXPERIMENTS, RUN
 from shield import MuonShield
 
 QUANTITIES = ['H_0', 'H_0, pz > 300 GeV', 'M7:B at -10%', 'worst direction, |u| = 1']
@@ -88,7 +88,7 @@ if __name__ == '__main__':
         nz, nphi = map(int, spec.split('x'))
         grids.append((nz * nz * nphi * 2, spec, sums(model, grid_points(shield, spec), U)))
         print(f'grid {spec}: {grids[-1][2]}', flush=True)
-    with open(os.path.join(FIGS, 'quadrature_convergence.json'), 'w') as f:
+    with open(os.path.join(EXPERIMENTS, 'quadrature_convergence.json'), 'w') as f:
         json.dump(dict(runs=[[(n, [float(x) for x in val]) for n, val in run] for run in runs],
                        grids=[(n, s, [float(x) for x in val]) for n, s, val in grids], earlier=earlier), f)
 

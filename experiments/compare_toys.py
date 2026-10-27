@@ -15,9 +15,9 @@ import numpy as np
 import run_toys
 
 import cli
-from paths import EXPERIMENTS
+from paths import EXPERIMENTS, figures
 
-FIGS = os.path.join(EXPERIMENTS, 'figs')
+FIGS = figures(EXPERIMENTS)
 MODELS = [('deeponet', 0, 'DeepONet', '#e34948'),
           ('taylor-res4:8', 0.3, 'Taylor (full, weighted)', '#2a78d6'),
           ('taylor-res4:8', 0, 'Taylor (full)', '#1baf7a'),
@@ -81,6 +81,6 @@ if __name__ == '__main__':
         lines.append('')
     axes[0, 0].legend(fontsize=7)
     fig.savefig(os.path.join(FIGS, 'compare_toys.png'), dpi=150)
-    with open(os.path.join(FIGS, 'compare_toys.txt'), 'w') as f:
+    with open(os.path.join(EXPERIMENTS, 'compare_toys.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))

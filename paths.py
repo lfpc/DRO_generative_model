@@ -1,6 +1,11 @@
 """Where everything is read and written. Override with environment variables:
 
-  RMS_OUTPUTS    results, models, pools and references (default: <repo>/outputs)
+  RMS_OUTPUTS    everything produced (default: <repo>/outputs), laid out as
+                   models/    the surrogates (lcso.pt, its seeds lcso_s<k>.pt, ...)
+                   data/      simulations: training pools, reference designs, adaptive designs
+                   results/   numbers and text reports, one folder per stage
+                   figures/   every figure, one folder per stage
+                   archive/   earlier analyses
   PROJECTS_DIR   the folder holding generator_muons and MuonsAndMatter (default: ~/projects)
   MUON_FLOW      the generative flow of the muons (default: generator_muons/outputs/muon_flow.pt)
 """
@@ -12,14 +17,24 @@ PROJECTS_DIR = os.path.expanduser(os.environ.get('PROJECTS_DIR', '~/projects'))
 GENERATOR_DIR = os.path.join(PROJECTS_DIR, 'generator_muons')
 MUON_FLOW = os.environ.get('MUON_FLOW', os.path.join(GENERATOR_DIR, 'outputs', 'muon_flow.pt'))
 
-MODEL = os.path.join(OUTPUTS, 'lcso.pt')                  # the surrogate the analysis uses
-RUN = os.path.join(OUTPUTS, 'robustness')                 # the analysis' results and figures
-POOLS = os.path.join(OUTPUTS, 'pools')                    # training pools: <name>/shard_<worker>.pt
-REFERENCES = os.path.join(OUTPUTS, 'references')          # validation designs on stored muons: <name>/
-VALIDATION = os.path.join(OUTPUTS, 'validation')          # the surrogate scored on the references
-EXPERIMENTS = os.path.join(OUTPUTS, 'experiments')        # experiments/: results and figures
+MODELS = os.path.join(OUTPUTS, 'models')
+DATA = os.path.join(OUTPUTS, 'data')
+RESULTS = os.path.join(OUTPUTS, 'results')
+FIGURES = os.path.join(OUTPUTS, 'figures')
+
+MODEL = os.path.join(MODELS, 'lcso.pt')                   # the surrogate the analysis uses
+POOLS = os.path.join(DATA, 'pools')                       # training pools: <name>/shard_<worker>.pt
+REFERENCES = os.path.join(DATA, 'references')             # validation designs on stored muons: <name>/
+RUN = os.path.join(RESULTS, 'robustness')                 # the analysis' results (figures: figures(RUN))
+VALIDATION = os.path.join(RESULTS, 'validation')          # the surrogate scored on the references
+EXPERIMENTS = os.path.join(RESULTS, 'experiments')        # experiments/
 
 
-def output(path):
-    """A path relative to OUTPUTS (absolute paths are kept)."""
-    return os.path.join(OUTPUTS, path)
+def figures(results):
+    """The figure folder of a results folder (or of a name): results/<x> -> figures/<x>."""
+    return os.path.join(FIGURES, os.path.basename(os.path.normpath(results)))
+
+
+def checkpoint(name):
+    """A checkpoint by name ('lcso' -> models/lcso.pt); paths ending in .pt are kept."""
+    return name if name.endswith('.pt') else os.path.join(MODELS, f'{name}.pt')

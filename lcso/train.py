@@ -16,7 +16,7 @@ the median of the others is replaced by a new seed.
     P=T2_m1e6+T2_d2_m1e6+T1.5_d1+T1.5_adapt+r1_T2_m1e6+r1_T1.5_d1    # r1_: the first analysis' pools
     python -m lcso.train --pool $P --hidden 128 --p 32 --seed 0 --name lcso_s0
     python -m lcso.train --pool $P --hidden 128 --p 32 --p_res 32 --kind taylor-res4:8 --near 0.3 --seed 0 --name taylor_s0
-    python -m lcso.train --stack outputs/lcso_s0.pt outputs/lcso_s1.pt outputs/lcso_s2.pt outputs/lcso_s3.pt --name lcso
+    python -m lcso.train --stack outputs/models/lcso_s{0,1,2,3}.pt --name lcso
 """
 import fcntl
 import json
@@ -25,7 +25,7 @@ import os
 import torch
 
 import cli
-from paths import OUTPUTS
+from paths import MODELS, checkpoint
 from shield import MuonShield
 
 from . import data
@@ -36,7 +36,7 @@ from .training import fit
 parser = cli.parser(__doc__)
 parser.add_argument('--pool', help="pool (paths.POOLS/<pool>), or several: 'A+B'")
 parser.add_argument('--stack', nargs='+', default=None, help='instead of training: average these checkpoints')
-parser.add_argument('--name', default='lcso', help='checkpoint: paths.OUTPUTS/<name>.pt')
+parser.add_argument('--name', default='lcso', help='checkpoint: paths.MODELS/<name>.pt')
 parser.add_argument('--kind', default='deeponet', help="architecture (lcso/models.py), e.g. 'taylor-res4:8'")
 parser.add_argument('--n', type=int, default=None, help='muons per design to use (default: all of them)')
 parser.add_argument('--keep_neg', type=float, default=None, help='thin the stored misses to this fraction (default: as stored)')
@@ -52,7 +52,7 @@ parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--score', action='store_true', help='score on the study references (pins ~22 GB of host memory)')
 parser.add_argument('--device', default='cuda')
 args = parser.parse_args()
-path = os.path.join(OUTPUTS, f'{args.name}.pt')
+path = checkpoint(args.name)
 phi_0 = MuonShield().phi_0
 
 
@@ -78,7 +78,7 @@ if args.stack:
     raise SystemExit
 
 # the pools take 20-30 GB of host memory while loading: one process at a time, then free them
-with open(os.path.join(OUTPUTS, '.pool_load.lock'), 'w') as lock:
+with open(os.path.join(MODELS, '.pool_load.lock'), 'w') as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
     pool = data.load_pool(args.pool, len(phi_0))
     c = dict(pool=args.pool, seed=args.seed, n=args.n, keep_neg=args.keep_neg or pool['keep_neg'],

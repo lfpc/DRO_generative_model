@@ -34,7 +34,7 @@ from lcso.data import train_val
 from lcso.models import make, n_params
 from lcso.surrogate import load_surrogate
 from lcso.training import fit
-from paths import EXPERIMENTS, OUTPUTS
+from paths import EXPERIMENTS, checkpoint
 from shield import MuonShield
 from validation.validate import REFS, Production, Reference, score
 
@@ -84,7 +84,7 @@ def run(c, refs, dev):
     t0 = time.time()
     arrays = {}
     if c['kind'] in PRODUCTION:
-        model = Production(load_surrogate(os.path.join(OUTPUTS, PRODUCTION[c['kind']]), MuonShield().phi_0, dev))
+        model = Production(load_surrogate(checkpoint(PRODUCTION[c['kind']]), MuonShield().phi_0, dev))
         out = score(model, refs, arrays)
         return dict(out, seconds=time.time() - t0), arrays
     train, val = train_val(c, MuonShield().dim, dev)

@@ -56,6 +56,14 @@ def load(name):
     return meta['names'], meta['U'], hits, meta['n_muons'], os.path.join(d, 'muons.npy')
 
 
+def hit_index(name):
+    """{design index: indices of the muons that hit} of a finished reference."""
+    out = {}
+    for f in sorted(glob.glob(os.path.join(REFERENCES, name, 'shard_[0-9]*.pt'))):
+        out.update(torch.load(f, weights_only=False)['hit_idx'])
+    return out
+
+
 if __name__ == '__main__':
     parser = cli.add_common(cli.parser(__doc__), model=False)
     parser.add_argument('--name', required=True, help='the reference: paths.REFERENCES/<name>/')

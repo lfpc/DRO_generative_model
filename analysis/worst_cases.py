@@ -15,7 +15,7 @@ over the muons, quoted per as many):
 Reports which parameters each design changes, by how much, and the simulated and predicted
 hits, also per p_z bin. Writes <run>/worst_cases.npz and worst_cases_report.txt.
 
-    python -m analysis.worst_cases --run outputs/robustness --n_muons 1000000000
+    python -m analysis.worst_cases --run outputs/results/robustness --n_muons 1000000000
     python -m analysis.worst_cases --no_sim                                         # surrogate only
 """
 import os

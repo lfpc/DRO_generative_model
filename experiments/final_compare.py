@@ -27,11 +27,11 @@ from analysis.core import branch_jacobian, cached_hits, derivatives, feature_cac
 import cli
 from lcso.models import derivatives_autograd
 from lcso.surrogate import load_members, load_surrogate, muon_inputs
-from paths import EXPERIMENTS, OUTPUTS
+from paths import EXPERIMENTS, figures, checkpoint
 from shield import MuonShield
 from validation.validate import REFS, Reference, as_study, score
 
-FIGS = os.path.join(EXPERIMENTS, 'figs')
+FIGS = figures(EXPERIMENTS)
 
 
 def one(x):
@@ -86,9 +86,9 @@ if __name__ == '__main__':
     names = args.candidates.split(',')
     out, base = {}, None
     for name in names:
-        path = os.path.join(OUTPUTS, f'{name}.pt')
+        path = checkpoint(name)
         model = load_surrogate(path, shield.phi_0, args.device)
-        cached = os.path.join(FIGS, f'final_compare_{name}_scores.json')   # the slow part: kept across runs
+        cached = os.path.join(EXPERIMENTS, f'final_compare_{name}_scores.json')   # the slow part: kept across runs
         if os.path.exists(cached) and os.path.getmtime(cached) > os.path.getmtime(path):
             with open(cached) as f:
                 scores = json.load(f)
@@ -130,8 +130,9 @@ if __name__ == '__main__':
         lines.append(f'{n:12s} {r["H0"]:8.1f} {mg:>18s} {me:>14s} {vb.get("grad_cos", 1):14.3f} {vb.get("eig_cos", 1):6.3f} '
                      f'{vb.get("worst_cos", 1):6.3f} {r["worst_ratio"]:11.3f} {vb.get("worst_ratio_by_base", r["worst_ratio"]):10.3f}')
     os.makedirs(FIGS, exist_ok=True)
-    with open(os.path.join(FIGS, 'final_compare.txt'), 'w') as f:
+    os.makedirs(EXPERIMENTS, exist_ok=True)
+    with open(os.path.join(EXPERIMENTS, 'final_compare.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    with open(os.path.join(FIGS, 'final_compare.json'), 'w') as f:
+    with open(os.path.join(EXPERIMENTS, 'final_compare.json'), 'w') as f:
         json.dump(out, f, default=float)
     print('\n'.join(lines))

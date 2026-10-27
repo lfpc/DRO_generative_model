@@ -1,6 +1,6 @@
 """Every figure and summary table of the surrogate study, from the saved results.
 
-    python experiments/plots.py            # -> outputs/experiments/figs/*.png, *_summary.txt
+    python experiments/plots.py            # -> outputs/figures/experiments/*.png, outputs/results/experiments/*_summary.txt
 
 Each curve is the median over seeds, the band the seed range; one setting varies, the others
 stay at the defaults of run_toys.py / run_shield.py.
@@ -18,12 +18,12 @@ import run_shield
 import run_toys
 
 import cli
-from paths import EXPERIMENTS
+from paths import EXPERIMENTS, figures
 from shield import MuonShield
 from validation import references
 from validation.validate import REFS
 
-FIGS = os.path.join(EXPERIMENTS, 'figs')
+FIGS = figures(EXPERIMENTS)
 # categorical slots in fixed order; the baselines are grey
 COLOR = {'deeponet': '#2a78d6', 'taylor': '#eb6834', 'taylor:8': '#1baf7a', 'taylor-sub:4': '#eda100',
          'taylor-res': '#e87ba4', 'quad': '#008300', 'rsm': '#6250d6', 'fd': '0.45', 'existing': 'k',
@@ -76,6 +76,7 @@ def save(fig, name):
             ax.xaxis.set_major_formatter(matplotlib.ticker.LogFormatterSciNotation())
             ax.xaxis.set_major_locator(matplotlib.ticker.LogLocator(subs=(1.0, 3.0) if name.startswith(('toy_delta', 'toy_latent')) else (1.0,)))
     os.makedirs(FIGS, exist_ok=True)
+    os.makedirs(EXPERIMENTS, exist_ok=True)
     fig.savefig(os.path.join(FIGS, name), dpi=150)
     plt.close(fig)
     print(f'  {name}')
@@ -243,7 +244,7 @@ def toy_summary(rows):
                 if sel:
                     vals = [np.median([r[c] for r in sel]) if c in sel[0] else np.nan for c in cols]
                     lines.append(f'  {LABEL[k]:26s} {b:7.0e} ' + ' '.join(f'{v:9.3g}' for v in vals))
-    with open(os.path.join(FIGS, 'toys_summary.txt'), 'w') as f:
+    with open(os.path.join(EXPERIMENTS, 'toys_summary.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('  toys_summary.txt')
 
@@ -456,7 +457,7 @@ def shield_summary(rows, floor):
         ex = [r for r in rows if r['config']['kind'] == kind]
         if ex:
             lines.append(f'  {LABEL[kind][:26]:26s} {"":7s} ' + ' '.join(f'{ex[0].get(c, np.nan):13.3g}' for c in cols))
-    with open(os.path.join(FIGS, 'shield_summary.txt'), 'w') as f:
+    with open(os.path.join(EXPERIMENTS, 'shield_summary.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('  shield_summary.txt')
 
@@ -467,6 +468,7 @@ if __name__ == '__main__':
                         help='shield figures with the final surrogate only (*_final.png, for the report)')
     args = parser.parse_args()
     os.makedirs(FIGS, exist_ok=True)
+    os.makedirs(EXPERIMENTS, exist_ok=True)
     if args.final_only:
         refs = {t: references.load(t) for t in REFS}
         shield_figures(run_shield.load_results(), refs, final_only=True)

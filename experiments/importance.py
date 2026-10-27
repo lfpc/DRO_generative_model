@@ -18,7 +18,7 @@ gain, follows without new simulation.
 
     python experiments/importance.py --pools outputs/archive/round1_43p_onaxis/surrogate_study/shield_pool
 
-Run in the first analysis, on its pools (outputs/experiments/figs/importance.txt).
+Run in the first analysis, on its pools (outputs/results/experiments/importance.txt).
 """
 import glob
 import os
@@ -27,9 +27,9 @@ import torch
 
 import cli
 from muons import FlowMuons
-from paths import EXPERIMENTS, POOLS
+from paths import EXPERIMENTS, POOLS, figures
 
-FIGS = os.path.join(EXPERIMENTS, 'figs')
+FIGS = figures(EXPERIMENTS)
 BY_T = {1.0: 'T1_d1', 1.5: 'T1.5_d1', 2.0: 'T2_m1e6', 3.0: 'T3_m1e6'}
 
 
@@ -85,6 +85,7 @@ if __name__ == '__main__':
     lines.append('gain: plain nominal sampling needs this many times more simulated muons for the same precision on H; '
                  'ESS / hits: the weighted hits\' effective share')
     os.makedirs(FIGS, exist_ok=True)
-    with open(os.path.join(FIGS, 'importance.txt'), 'w') as f:
+    os.makedirs(EXPERIMENTS, exist_ok=True)
+    with open(os.path.join(EXPERIMENTS, 'importance.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))

@@ -35,7 +35,7 @@ SIM=0 bash run_analysis.sh                                     # the same on the
 2. simulates the reference designs of the validation on stored muons (`validation/references.py`);
 3. trains a first four-seed ensemble (`lcso/train.py`), finds its tolerance-box worst cases and
    simulates an adaptive pool there (`lcso/adaptive_designs.py`);
-4. trains the final ensemble on all pools: `outputs/lcso.pt`;
+4. trains the final ensemble on all pools: `outputs/models/lcso.pt`;
 5. runs the analysis (`run_analysis.sh`) and the validation (`validation/validate.py`).
 
 The settings (muon source, pools, architecture, simulated muons) are at the top of `run_all.sh`.
@@ -62,6 +62,11 @@ quantities are the scatter of the ensemble's members.
 
 ## Results
 
-Under `outputs/` (not tracked): `pools/`, `references/`, `lcso.pt` (and its seeds),
-`robustness/` (the analysis: `*.npz`, `*_report.txt`, `figs/`), `validation/`, `experiments/`,
-`logs/`. The first analysis' outputs are in `outputs/archive/round1_43p_onaxis/`.
+Under `outputs/` (not tracked; `paths.py`):
+
+    models/     the surrogates: lcso.pt and its seeds, lcso_first.pt (the first ensemble)
+    data/       simulations: pools/ (training), references/ (validation), adaptive_designs.npy
+    results/    numbers and text reports: robustness/, robustness_first/, validation/, experiments/
+    figures/    every figure: robustness/, validation/, experiments/, muons/
+    logs/       the launchers' logs
+    archive/    earlier analyses; the first one in round1_43p_onaxis/

@@ -21,13 +21,12 @@ import sys
 import numpy as np
 import torch
 
-from plots import FIGS
 
 from analysis.core import trust_region_max
-from paths import OUTPUTS, REFERENCES
+from paths import EXPERIMENTS, OUTPUTS, REFERENCES
 from validation import references
 
-PATH = os.path.join(FIGS, 'worst_check_designs.npz')
+PATH = os.path.join(EXPERIMENTS, 'worst_check_designs.npz')
 
 
 def box_max(g, H, steps=3000, lr=0.01, seed=0):
@@ -44,7 +43,7 @@ def box_max(g, H, steps=3000, lr=0.01, seed=0):
 
 
 def candidates():
-    chk = np.load(os.path.join(FIGS, 'derivatives_check.npz'))
+    chk = np.load(os.path.join(EXPERIMENTS, 'derivatives_check.npz'))
     names = [str(n) for n in chk['names']]
     g, H = chk['g'], chk['H']
     new = [i for i, n in enumerate(names) if n != 'existing']
@@ -101,6 +100,6 @@ if __name__ == '__main__':
             pred = f'{1 + q(g_c, H_c) / s0:6.3f} / {1 + q(g[names.index("existing")], H[names.index("existing")]) / s0:6.3f}' \
                 if ref == 'T1' else ''
             lines.append(f'  {name:16s} {h:9.0f} {rt:7.3f} +- {rt * np.sqrt(1 / h + (e0 / s0) ** 2):5.3f}  {pred}')
-    with open(os.path.join(FIGS, 'worst_check.txt'), 'w') as f:
+    with open(os.path.join(EXPERIMENTS, 'worst_check.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))

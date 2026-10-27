@@ -1,13 +1,13 @@
 """Every figure of a robustness run, drawn from its saved results (nothing is recomputed).
 
-Reads whichever of these exist in <run> and writes <run>/figs/:
+Reads whichever of these exist in <run> and writes figures/<run name>/ (paths.figures):
   robustness.npz     robustness_{sensitivity,magnets,spectra,directions,walks,summary,calibration,mc,scans,plane}.png
   worst_cases.npz    worst_direction_scaled, worst_parameters, random_tolerances, sim_pz_profiles .png
   <var>_bins.npz     <var>_bins_{overview,sensitivity,alignment,walks,mc}.png
   scan_sim_*.npz     (scan_sim.py) the simulated points of robustness_scans.png
   tolerance_boxes.npz (tolerance_boxes.py) tolerance_boxes, tolerance_allocation .png
 
-    python -m analysis.plots outputs/robustness
+    python -m analysis.plots outputs/results/robustness
 """
 import glob
 import os
@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 
 from analysis.core import BAD, GREY, OK
 import cli
-from paths import RUN
+from paths import RUN, figures
 
 parser = cli.parser(__doc__)
 parser.add_argument('run', nargs='?', default=RUN)
@@ -27,7 +27,7 @@ parser.add_argument('--n_sigma', type=float, default=3.0, help='significance for
 parser.add_argument('--profiles', default='nominal,worst@5%,worst@10%,worst@-10%,box,single4,rand10%_3',
                     help='worst-case designs shown in sim_pz_profiles.png')
 args = parser.parse_args()
-FIGS = os.path.join(args.run, 'figs')
+FIGS = figures(args.run)
 os.makedirs(FIGS, exist_ok=True)
 
 
