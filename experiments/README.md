@@ -4,7 +4,9 @@ The studies that chose and checked the method; none of them is part of the pipel
 (`run_all.sh`). Run from the repository root after `source env.sh`, e.g.
 `python experiments/quadrature.py`. Results go to `outputs/results/experiments/`, figures to
 `outputs/figures/experiments/`. Most ran in the first analysis (43 parameters, muons on axis); their
-results are in `outputs/archive/round1_43p_onaxis/surrogate_study/`.
+results are in `outputs/archive/round1_43p_onaxis/surrogate_study/`. Their large inputs (the
+reference samples and the pools not used by the current surrogate) were deleted, so those
+scripts no longer rerun as they are; their results and figures remain.
 
 ## Integrating over the muons (second analysis)
 
