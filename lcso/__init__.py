@@ -5,7 +5,7 @@ simulated pools of designs and then used for the robustness analysis.
   surrogate.py        the analysis' view of a trained surrogate: tolerance box, save, load, stack
   training.py         the training loop (case-control BCE, early stopping on held-out designs)
   data.py             the training pools: their designs and their rows
-  simulate_pools.py   simulate a pool of designs (simulate_pools.sh: all of them, on several GPUs)
+  simulate_pools.py   simulate a pool of designs (run_all.sh: every pool, on several GPUs)
   adaptive_designs.py designs for an adaptive pool, where the conclusions rest
   train.py            train a surrogate on pools, or stack seeds into one (python -m lcso.train)
 """

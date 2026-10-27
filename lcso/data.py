@@ -1,14 +1,17 @@
 """The training data of the LCSO surrogate: pools of simulated designs (lcso/simulate_pools.py).
 
-A pool is a set of designs, each simulated once with its own fresh flow muons. Every hit is kept
-and a fraction keep_neg of the misses, so the stored rows are a case-control sample: a model
-fitted to them with the logit offset -log(keep_neg) is a model of p(hit | u, x). A pool lives in
-outputs/surrogate_study/shield_pool/<name>/shard_<worker>.pt; its designs are not stored but
-redrawn from its arguments (pool_designs).
+A pool is a set of designs, each simulated once with its own fresh muons. Every hit is kept and a
+fraction keep_neg of the misses, so the stored rows are a case-control sample: a model fitted to
+them with the logit offset -log(keep_neg) is a model of p(hit | u, x). A pool lives in
+paths.POOLS/<name>/shard_<worker>.pt, with its designs (redrawn from its arguments, pool_designs,
+if a shard lacks them) and its raw muons.
 
-    load_pool('A+B')       every row of one or several pools (design ids offset)
-    training_rows(config)  the rows a training run uses (a budget of designs and muons, if given)
-    train_val(config)      those rows split by design into training and validation
+Pools of fewer parameters load too, the missing ones at nominal (u = 0): the first analysis' pools
+had 43 parameters, without the magnet heights (and every muon at x = y = 0, z = -1 m).
+
+    load_pool('A+B', dim)        every row of one or several pools (design ids offset)
+    training_rows(config, dim)   the rows a training run uses (a budget of designs and muons, if given)
+    train_val(config, dim, dev)  those rows split by design into training and validation
 """
 import glob
 import os
@@ -17,21 +20,20 @@ import numpy as np
 import torch
 from scipy.stats import qmc
 
+from paths import POOLS
+
 from .surrogate import muon_inputs
 from .training import Rows, split
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-POOL_DIR = os.path.join(ROOT, 'outputs/surrogate_study/shield_pool')
 
 _cache = {}
 
 
-def pool_designs(n, delta, n_nominal, seed, dim=43, radial=True, designs=None):
+def pool_designs(n, delta, n_nominal, seed, dim, radial=True, designs=None):
     """The designs of a pool, from its arguments: u = delta * (scrambled Sobol in [-1, 1]^dim),
     pulled towards u = 0 by a U(0, 1) factor if radial, the first n_nominal at u = 0; or the
-    designs of a .npy file (relative to the repo)."""
+    designs of a .npy file."""
     if designs:
-        return np.load(os.path.join(ROOT, designs)).astype(np.float32)
+        return np.load(designs).astype(np.float32)
     u = qmc.Sobol(d=dim, scramble=True, seed=seed).random(n) * 2 - 1
     if radial:
         u *= np.random.default_rng(seed).random((n, 1))
@@ -40,16 +42,16 @@ def pool_designs(n, delta, n_nominal, seed, dim=43, radial=True, designs=None):
 
 
 def to_x(mu):
-    """The trunk's input, (px, py, pz, charge), of raw muons (n, 7), float32."""
+    """The trunk's input, (px, py, pz, x, y, z, charge), of raw muons (n, 7), float32."""
     return muon_inputs(torch.as_tensor(mu)).float()
 
 
-def load_pool(name):
-    """All designs simulated so far in a pool, or in several ('A+B+C', design ids offset):
-    dict(U, ids, d, x, y, keep_neg, n_muons) with n_muons the muons simulated per design (M,).
-    Pools are cached; clear_cache() frees them."""
+def load_pool(name, dim):
+    """All designs simulated so far in a pool, or in several ('A+B+C', design ids offset), with
+    dim parameters: dict(U, ids, d, x, y, keep_neg, n_muons) with n_muons the muons simulated per
+    design (M,). Pools are cached; clear_cache() frees them."""
     if '+' in name:
-        parts = [load_pool(p) for p in name.split('+')]
+        parts = [load_pool(p, dim) for p in name.split('+')]
         if len({P['keep_neg'] for P in parts}) > 1:
             raise ValueError(f'{name}: the pools kept different fractions of the misses')
         off = np.cumsum([0] + [len(P['U']) for P in parts])
@@ -58,13 +60,17 @@ def load_pool(name):
                     y=torch.cat([P['y'] for P in parts]), keep_neg=parts[0]['keep_neg'],
                     n_muons=torch.cat([P['n_muons'] for P in parts]))
     if name not in _cache:
-        shards = [torch.load(f, weights_only=False) for f in sorted(glob.glob(os.path.join(POOL_DIR, name, 'shard_*.pt')))]
+        shards = [torch.load(f, weights_only=False) for f in sorted(glob.glob(os.path.join(POOLS, name, 'shard_*.pt')))]
         if not shards:
-            raise FileNotFoundError(f'no shards of pool {name!r} in {POOL_DIR}')
+            raise FileNotFoundError(f'no shards of pool {name!r} in {POOLS}')
         a = shards[0]['args']
-        U = pool_designs(a['n_designs'], a['delta'], a['n_nominal'], a['seed'], radial=a.get('radial', True),
-                         designs=a.get('designs'))
-        _cache[name] = dict(U=torch.as_tensor(U), ids=np.array(sum((s['ids'] for s in shards), [])),
+        U = next((s['U'] for s in shards if 'U' in s), None)
+        if U is None:
+            U = pool_designs(a['n_designs'], a['delta'], a['n_nominal'], a['seed'], dim=a.get('dim', 43),
+                             radial=a.get('radial', True), designs=a.get('designs'))
+        U = torch.as_tensor(np.asarray(U), dtype=torch.float32)
+        U = torch.cat([U, torch.zeros(len(U), dim - U.shape[1])], 1)      # missing parameters at nominal
+        _cache[name] = dict(U=U, ids=np.array(sum((s['ids'] for s in shards), [])),
                             d=torch.cat([t for s in shards for t in s['d']]).long(),
                             x=to_x(torch.cat([t for s in shards for t in s['x']])),
                             y=torch.cat([t for s in shards for t in s['y']]).float(),
@@ -77,10 +83,10 @@ def clear_cache():
     _cache.clear()
 
 
-def training_rows(c):
+def training_rows(c, dim):
     """Rows of budget / n designs of the pool, n muons each (n = None: every design and muon),
     the misses thinned further to keep_neg."""
-    P = load_pool(c['pool'])
+    P = load_pool(c['pool'], dim)
     g = torch.Generator().manual_seed(c['seed'])
     M = len(P['ids']) if c.get('n') is None else int(c['budget'] // c['n'])
     avail = P['ids'][torch.randperm(len(P['ids']), generator=g).numpy()]
@@ -98,10 +104,10 @@ def training_rows(c):
     return Rows(P['U'][sel], new[P['d'][keep]], P['x'][keep], P['y'][keep], -float(np.log(c['keep_neg'])))
 
 
-def train_val(c, dev, val_frac=0.1, max_val_rows=2_000_000):
+def train_val(c, dim, dev, val_frac=0.1, max_val_rows=2_000_000):
     """(train, val) Rows on dev: split by design in host memory, so only the halves go to the GPU;
     the validation designs' rows thinned to at most max_val_rows (hits and misses alike)."""
-    train, val = split(training_rows(c), val_frac, c['seed'])
+    train, val = split(training_rows(c, dim), val_frac, c['seed'])
     if len(val.y) > max_val_rows:
         keep = torch.randperm(len(val.y), generator=torch.Generator().manual_seed(c['seed']))[:max_val_rows]
         val = Rows(val.U, val.d[keep], val.x[keep], val.y[keep], val.offset)

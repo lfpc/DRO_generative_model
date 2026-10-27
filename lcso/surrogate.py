@@ -4,7 +4,8 @@ and a muon x,
     logit(phi, x) = <branch(u), trunk(x)> + bias,   u = phi in the [-1, 1] tolerance box,
 
 where u = 0 is the nominal design and u_i = +-1 puts parameter i at +-delta of its nominal
-value. The trunk sees (px, py, pz, charge): the flow muons all start on axis at z = -1.
+value. The trunk sees (px, py, pz, x, y, z, charge), positions in m (dx = 7); the first analysis'
+models saw (px, py, pz, charge) of muons all on axis at z = -1 m (dx = 4), and still load.
 
   LCSONet         the DeepONet; stack() turns an ensemble of them into one LCSONet.
                   Checkpoints of the earlier 7-input version load too.
@@ -26,9 +27,10 @@ def _mlp(in_dim, hidden, out_dim, act):
                                torch.nn.Linear(hidden, out_dim))
 
 
-def muon_inputs(x):
-    """(px, py, pz, charge) of raw muons (..., 7): px, py, pz, x, y, z, pdg (mu+ = -13)."""
-    return torch.cat([x[..., :3], -torch.sign(x[..., 6:7])], -1)
+def muon_inputs(x, dx=7):
+    """The trunk's input of raw muons (..., 7): px, py, pz, x, y, z, pdg (mu+ = -13) ->
+    (px, py, pz, x, y, z, charge), or (px, py, pz, charge) for dx = 4 (the first analysis)."""
+    return torch.cat([x[..., :6 if dx == 7 else 3], -torch.sign(x[..., 6:7])], -1)
 
 
 class _Box(torch.nn.Module):
@@ -49,7 +51,7 @@ class _Box(torch.nn.Module):
 
     def features(self, x):
         """Trunk features of raw muons (..., 7)."""
-        return self.trunk4(muon_inputs(x))
+        return self.trunk_x(muon_inputs(x, self.dx))
 
     def forward(self, phi, x):
         """Logits (B, N) of PHYSICAL designs phi (B, d) and raw muons x (B, N, 7) or (N, 7)."""
@@ -60,32 +62,33 @@ class _Box(torch.nn.Module):
 
 
 class LCSONet(_Box):
-    def __init__(self, phi_0, hidden=64, p=16, delta=0.1):
+    def __init__(self, phi_0, hidden=64, p=16, delta=0.1, dx=7):
         super().__init__()
         self._box(phi_0, delta)
-        self.hp = {'hidden': hidden, 'p': p}
+        self.hp, self.dx = {'hidden': hidden, 'p': p, 'dx': dx}, dx
         self.branch_net = _mlp(self.dim, hidden, p, torch.nn.SiLU)
-        self.trunk_net = _mlp(4, hidden, p, torch.nn.ReLU)
+        self.trunk_net = _mlp(dx, hidden, p, torch.nn.ReLU)
         self.bias = torch.nn.Parameter(torch.zeros(1))
-        self.register_buffer('x_loc', torch.zeros(4))
-        self.register_buffer('x_scale', torch.ones(4))
+        self.register_buffer('x_loc', torch.zeros(dx))
+        self.register_buffer('x_scale', torch.ones(dx))
 
     @property
     def P(self):
         return self.hp['p']
 
-    def trunk4(self, x4):
-        """Trunk features of (px, py, pz, charge) rows."""
-        return self.trunk_net((x4 - self.x_loc) / self.x_scale)
+    def trunk_x(self, x):
+        """Trunk features of muon_inputs rows."""
+        return self.trunk_net((x - self.x_loc) / self.x_scale)
 
 
 class ModelSurrogate(_Box):
-    """A network of lcso.models (or an Ensemble of them) on (px, py, pz, charge), in the box."""
+    """A network of lcso.models (or an Ensemble of them) on muon_inputs rows, in the box."""
 
     def __init__(self, net, phi_0, delta=0.1, hp=None):
         super().__init__()
         self._box(phi_0, delta)
-        self.net, self.hp = net, dict(hp or {})
+        self.net, self.hp = net, {'dx': 4, **(hp or {})}
+        self.dx = self.hp['dx']
         self.bias = net.bias
 
     @property
@@ -95,8 +98,8 @@ class ModelSurrogate(_Box):
     def branch_net(self, u):
         return self.net.branch(u)
 
-    def trunk4(self, x4):
-        return self.net.trunk(x4)
+    def trunk_x(self, x):
+        return self.net.trunk(x)
 
 
 @torch.no_grad()
@@ -105,7 +108,7 @@ def stack(models):
     trunk features are concatenated, with block-diagonal layers and each trunk's input
     standardization folded into its first layer."""
     K, m0 = len(models), models[0]
-    out = LCSONet(torch.zeros(m0.dim), hidden=K * m0.hp['hidden'], p=K * m0.hp['p'], delta=m0.delta)
+    out = LCSONet(torch.zeros(m0.dim), hidden=K * m0.hp['hidden'], p=K * m0.hp['p'], delta=m0.delta, dx=m0.dx)
     out.lower_bound.copy_(m0.lower_bound)
     out.upper_bound.copy_(m0.upper_bound)
     for name, scale in (('branch_net', 1 / K), ('trunk_net', 1)):        # 1/K: the mean of the K logits
@@ -155,7 +158,7 @@ def _member_nets(obj, D):
     c = obj['config']
     nets = []
     for sd in obj['members']:
-        net = make(c['kind'], D, 4, p=c['p'], hidden=c['hidden'], p_res=c.get('p_res', 16))
+        net = make(c['kind'], D, c.get('dx', 4), p=c['p'], hidden=c['hidden'], p_res=c.get('p_res', 16))
         net.load_state_dict(sd)
         nets.append(net.eval())
     return nets
@@ -170,7 +173,7 @@ def load_surrogate(path, phi_0, device='cpu'):
     state = obj['state_dict']
     if 'muon_mean' in state:
         state = _from_7_inputs(state)
-    model = LCSONet(phi_0, **{k: obj['config'][k] for k in ('hidden', 'p', 'delta')})
+    model = LCSONet(phi_0, **{k: obj['config'][k] for k in ('hidden', 'p', 'delta')}, dx=state['x_loc'].numel())
     model.load_state_dict(state)
     return model.eval().to(device)
 
