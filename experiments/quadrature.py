@@ -15,6 +15,7 @@ and two estimators of it (and of its gradient and Hessian at u = 0) are compared
 The reference is the finest grid with several production points per node (--ref).
 
     python experiments/quadrature.py            # -> outputs/{figures,results}/experiments/quadrature.{png,txt,json}
+    python experiments/quadrature.py --replot   # the table and the figure again, from the .json
 """
 import json
 import os
@@ -29,7 +30,7 @@ import torch
 from analysis.core import branch_jacobian, derivatives
 import cli
 from lcso.surrogate import load_surrogate
-from paths import EXPERIMENTS, figures
+from paths import EXPERIMENTS, figures, save_figure
 from shield import MuonShield
 
 FIGS = figures(EXPERIMENTS)
@@ -82,6 +83,51 @@ def errors(rs, ref):
             np.sqrt(np.mean([np.sum((np.array(r['h']) - h0) ** 2) for r in rs])) / np.linalg.norm(h0))
 
 
+def report(out, name):
+    """The table (results/experiments/<name>.txt) and the figure of a finished comparison."""
+    ref, ref_spec = out['ref'], out.get('ref_spec', '1601x64:4')
+    first_noise = next(iter(out['noise'])).split(':')[0]
+    lines = [f'model {out["model"]}; reference: grid {ref_spec} (n_z x n_phi : production points per node), '
+             f'H0 = {ref["H"]:.4f} hits per 1e9 muons',
+             'errors: relative to the reference; rms over the repeats (Monte Carlo seeds, or position seeds)',
+             f'{"estimator":34s} {"points":>9s} {"H rel. err":>11s} {"grad rel. err":>14s} {"Hess rel. err":>14s}']
+    curves = {'mc': [], 'grid': [], 'noise': []}
+    for size, rs in out['mc'].items():
+        e = errors(rs, ref)
+        curves['mc'].append((rs[0]['points'], *e))
+        lines.append(f'{"mc (" + str(len(rs)) + " seeds)":34s} {rs[0]["points"]:9.1e} ' + ' '.join(f'{v:{w}.2e}' for v, w in zip(e, (11, 14, 14))))
+    for spec, r in out['grid'].items():
+        e = errors([r], ref)
+        curves['grid'].append((r['points'], *e))
+        lines.append(f'{"grid " + spec + ", 1 position":34s} {r["points"]:9.1e} ' + ' '.join(f'{v:{w}.2e}' for v, w in zip(e, (11, 14, 14))))
+    for key, rs in out['noise'].items():
+        e = errors(rs, ref)
+        spec, k = key.split(':')
+        curves['noise'].append((rs[0]['points'], *e, key))
+        lines.append(f'{"grid " + spec + ", " + k + " position" + "s" * (k != "1") + " (" + str(len(rs)) + " seeds)":34s} {rs[0]["points"]:9.1e} '
+                     + ' '.join(f'{v:{w}.2e}' for v, w in zip(e, (11, 14, 14))))
+    with open(os.path.join(EXPERIMENTS, f'{name}.txt'), 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    print('\n'.join(lines))
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), constrained_layout=True)
+    for i, title in enumerate(('expected hits H', 'gradient at u = 0', 'Hessian at u = 0')):
+        ax = axes[i]
+        for kind, color, label in (('mc', '#2a78d6', 'Monte Carlo'), ('grid', '#1baf7a', 'grid, one position per node')):
+            pts = sorted(curves[kind])
+            ax.plot([p[0] for p in pts], [p[i + 1] for p in pts], '-o', color=color, lw=2, ms=4, label=label)
+        for j, p in enumerate(curves['noise']):
+            spec, k = p[4].split(':')
+            ax.plot(p[0], p[i + 1], 's' if k == '1' else 'D', ms=7, mfc='none' if k == '1' else '#1baf7a', mec='#0d6e4b',
+                    label=f'grid, {k} position{"s" if k != "1" else ""} per node (rms over seeds)' if spec == first_noise else None)
+        ax.set(xscale='log', yscale='log', xlabel='points (muons) per estimate', title=title)
+    axes[0].set_ylabel('relative error vs. the reference grid')
+    axes[0].legend(fontsize=7.5)
+    fig.suptitle(f'Integrating the surrogate over the muon flow: sampling vs. the grid (reference: grid {ref_spec})')
+    save_figure(fig, FIGS, name, report_name=name)
+    print(f'saved {name}.png, {name}.txt')
+
+
 if __name__ == '__main__':
     parser = cli.add_common(cli.parser(__doc__))
     parser.add_argument('--sizes', default='1e6,1e7,1e8', help='muons per Monte Carlo estimate')
@@ -91,12 +137,17 @@ if __name__ == '__main__':
     parser.add_argument('--n_pos', default='1,4', help='production points per node of --noise_grids')
     parser.add_argument('--ref', default='1601x64:4', help='reference grid n_z x n_phi : n_pos')
     parser.add_argument('--out', default='quadrature')
+    parser.add_argument('--replot', action='store_true', help='only the table and the figure, from <out>.json')
     args = parser.parse_args()
+    if args.replot:
+        with open(os.path.join(EXPERIMENTS, f'{args.out}.json')) as f:
+            report(json.load(f), args.out)
+        raise SystemExit
     torch.backends.cuda.matmul.allow_tf32 = False
     shield = MuonShield(args.muons)
     model = load_surrogate(args.model, shield.phi_0, args.device)
     J = branch_jacobian(model)
-    out = dict(model=args.model, mc={}, grid={}, noise={})
+    out = dict(model=args.model, ref_spec=args.ref, mc={}, grid={}, noise={})
 
     def run(points):
         t0 = time.time()
@@ -119,47 +170,7 @@ if __name__ == '__main__':
         rs = out['mc'][size] = [run(mc_points(shield, int(float(size)), seed)) for seed in range(args.reps)]
         Hs = [r['H'] for r in rs]
         print(f'mc n = {float(size):.0e}: H = {np.mean(Hs):.3f} +- {np.std(Hs, ddof=1):.3f} (sd over {args.reps})', flush=True)
-    os.makedirs(FIGS, exist_ok=True)
     os.makedirs(EXPERIMENTS, exist_ok=True)
     with open(os.path.join(EXPERIMENTS, f'{args.out}.json'), 'w') as f:
         json.dump(out, f)
-
-    lines = [f'model {args.model}; reference: grid {args.ref} (n_z x n_phi : production points per node), '
-             f'H0 = {ref["H"]:.4f} hits per 1e9 muons',
-             'errors: relative to the reference; rms over the repeats (Monte Carlo seeds, or position seeds)',
-             f'{"estimator":34s} {"points":>9s} {"H rel. err":>11s} {"grad rel. err":>14s} {"Hess rel. err":>14s}']
-    curves = {'mc': [], 'grid': [], 'noise': []}
-    for size, rs in out['mc'].items():
-        e = errors(rs, ref)
-        curves['mc'].append((rs[0]['points'], *e))
-        lines.append(f'{"mc (" + str(len(rs)) + " seeds)":34s} {rs[0]["points"]:9.1e} ' + ' '.join(f'{v:{w}.2e}' for v, w in zip(e, (11, 14, 14))))
-    for spec, r in out['grid'].items():
-        e = errors([r], ref)
-        curves['grid'].append((r['points'], *e))
-        lines.append(f'{"grid " + spec + ", 1 position":34s} {r["points"]:9.1e} ' + ' '.join(f'{v:{w}.2e}' for v, w in zip(e, (11, 14, 14))))
-    for key, rs in out['noise'].items():
-        e = errors(rs, ref)
-        spec, k = key.split(':')
-        curves['noise'].append((rs[0]['points'], *e, key))
-        lines.append(f'{"grid " + spec + ", " + k + " position" + "s" * (k != "1") + " (" + str(len(rs)) + " seeds)":34s} {rs[0]["points"]:9.1e} '
-                     + ' '.join(f'{v:{w}.2e}' for v, w in zip(e, (11, 14, 14))))
-    with open(os.path.join(EXPERIMENTS, f'{args.out}.txt'), 'w') as f:
-        f.write('\n'.join(lines) + '\n')
-    print('\n'.join(lines))
-
-    fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), constrained_layout=True)
-    for i, title in enumerate(('expected hits H', 'gradient at u = 0', 'Hessian at u = 0')):
-        ax = axes[i]
-        for kind, color, label in (('mc', '#2a78d6', 'Monte Carlo'), ('grid', '#1baf7a', 'grid, one position per node')):
-            pts = sorted(curves[kind])
-            ax.plot([p[0] for p in pts], [p[i + 1] for p in pts], '-o', color=color, lw=2, ms=4, label=label)
-        for j, p in enumerate(curves['noise']):
-            spec, k = p[4].split(':')
-            ax.plot(p[0], p[i + 1], 's' if k == '1' else 'D', ms=7, mfc='none' if k == '1' else '#1baf7a', mec='#0d6e4b',
-                    label=f'grid, {k} position{"s" if k != "1" else ""} per node (rms over seeds)' if spec == args.noise_grids.split(',')[0] else None)
-        ax.set(xscale='log', yscale='log', xlabel='points (muons) per estimate', title=title)
-    axes[0].set_ylabel('relative error vs. the reference grid')
-    axes[0].legend(fontsize=7.5)
-    fig.suptitle(f'Integrating the surrogate over the muon flow: sampling vs. the grid (reference: grid {args.ref})')
-    fig.savefig(os.path.join(FIGS, f'{args.out}.png'), dpi=150)
-    print(f'saved {args.out}.png, {args.out}.txt, {args.out}.json')
+    report(out, args.out)

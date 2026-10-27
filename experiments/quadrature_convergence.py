@@ -9,7 +9,8 @@ the running Monte Carlo estimate as muons accumulate (several seeds), and the qu
 increasing resolution. --earlier also draws the values a 1e9-muon Monte Carlo robustness run
 (--run) reported, with its jackknife errors.
 
-    python experiments/quadrature_convergence.py    # -> outputs/figures/experiments/quadrature_convergence.png
+    python experiments/quadrature_convergence.py            # -> outputs/{figures,results}/experiments/quadrature_convergence.{png,json}
+    python experiments/quadrature_convergence.py --replot   # the figure again, from the .json
 """
 import json
 import os
@@ -24,7 +25,7 @@ from quadrature import FIGS, grid_points, mc_points
 
 import cli
 from lcso.surrogate import load_surrogate
-from paths import EXPERIMENTS, RUN
+from paths import EXPERIMENTS, RUN, save_figure
 from shield import MuonShield
 
 QUANTITIES = ['H_0', 'H_0, pz > 300 GeV', 'M7:B at -10%', 'worst direction, |u| = 1']
@@ -53,6 +54,35 @@ def values(S, W):
     return [s[0], s[-1], s[1] / s[0], s[2] / s[0]]
 
 
+def plot(runs, grids, earlier):
+    """Running Monte Carlo estimates (runs), the grids and the --earlier values."""
+    fig, axes = plt.subplots(1, 4, figsize=(16, 3.9), constrained_layout=True)
+    ref = grids[-1][2]
+    for q, ax in enumerate(axes):
+        for j, run in enumerate(runs):
+            ax.plot([n for n, _ in run], [val[q] for _, val in run], color='#2a78d6', lw=1, alpha=0.6,
+                    label='Monte Carlo, running (6 seeds)' if j == 0 else None)
+        ns = [n for n, _ in runs[0]]
+        allv = np.array([[val[q] for _, val in run] for run in runs])
+        ax.fill_between(ns, allv.mean(0) - allv.std(0), allv.mean(0) + allv.std(0), color='#2a78d6', alpha=0.12, lw=0)
+        ax.plot([g[0] for g in grids], [g[2][q] for g in grids], '-o', color='#1baf7a', lw=2, ms=5,
+                label='quadrature grid')
+        ax.axhline(ref[q], color='#1baf7a', ls=':', lw=1)
+        if earlier:
+            e, se = earlier[q]
+            ax.errorbar([1e9], [e], yerr=[0 if np.isnan(se) else se], fmt='s', color='k', ms=6, capsize=3,
+                        label='Monte Carlo run (1e9, jackknife)')
+        ax.set(xscale='log', xlabel='muons / grid points', title=QUANTITIES[q])
+        lo, hi = ref[q] * 0.75, ref[q] * 1.25
+        ax.set_ylim(lo, hi)
+    axes[0].set_ylabel('per 1e9 muons, or H/H_0')
+    axes[0].legend(fontsize=7.5, loc='lower right')
+    fig.suptitle('The surrogate integrated over the muon flow: running Monte Carlo vs. the quadrature grid '
+                 '(dotted: its finest value)')
+    save_figure(fig, FIGS, 'quadrature_convergence', report_name='quadrature_convergence')
+    print('saved quadrature_convergence.png')
+
+
 if __name__ == '__main__':
     parser = cli.add_common(cli.parser(__doc__))
     parser.add_argument('--run', default=RUN,
@@ -61,7 +91,14 @@ if __name__ == '__main__':
     parser.add_argument('--n_max', type=float, default=1e9, help='muons per Monte Carlo run')
     parser.add_argument('--seeds', type=int, default=6)
     parser.add_argument('--grids', default='51x4,101x8,201x16,401x32,801x64,1601x64')
+    parser.add_argument('--replot', action='store_true', help='only the figure, from the .json')
     args = parser.parse_args()
+    saved = os.path.join(EXPERIMENTS, 'quadrature_convergence.json')
+    if args.replot:
+        with open(saved) as f:
+            z = json.load(f)
+        plot(z['runs'], z['grids'], z['earlier'])
+        raise SystemExit
     torch.backends.cuda.matmul.allow_tf32 = False
     shield = MuonShield(args.muons)
     model = load_surrogate(args.model, shield.phi_0, args.device)
@@ -88,32 +125,7 @@ if __name__ == '__main__':
         nz, nphi = map(int, spec.split('x'))
         grids.append((nz * nz * nphi * 2, spec, sums(model, grid_points(shield, spec), U)))
         print(f'grid {spec}: {grids[-1][2]}', flush=True)
-    with open(os.path.join(EXPERIMENTS, 'quadrature_convergence.json'), 'w') as f:
+    with open(saved, 'w') as f:
         json.dump(dict(runs=[[(n, [float(x) for x in val]) for n, val in run] for run in runs],
                        grids=[(n, s, [float(x) for x in val]) for n, s, val in grids], earlier=earlier), f)
-
-    fig, axes = plt.subplots(1, 4, figsize=(16, 3.9), constrained_layout=True)
-    ref = grids[-1][2]
-    for q, ax in enumerate(axes):
-        for j, run in enumerate(runs):
-            ax.plot([n for n, _ in run], [val[q] for _, val in run], color='#2a78d6', lw=1, alpha=0.6,
-                    label='Monte Carlo, running (6 seeds)' if j == 0 else None)
-        ns = [n for n, _ in runs[0]]
-        allv = np.array([[val[q] for _, val in run] for run in runs])
-        ax.fill_between(ns, allv.mean(0) - allv.std(0), allv.mean(0) + allv.std(0), color='#2a78d6', alpha=0.12, lw=0)
-        ax.plot([g[0] for g in grids], [g[2][q] for g in grids], '-o', color='#1baf7a', lw=2, ms=5,
-                label='quadrature grid')
-        ax.axhline(ref[q], color='#1baf7a', ls=':', lw=1)
-        if earlier:
-            e, se = earlier[q]
-            ax.errorbar([1e9], [e], yerr=[0 if np.isnan(se) else se], fmt='s', color='k', ms=6, capsize=3,
-                        label='Monte Carlo run (1e9, jackknife)')
-        ax.set(xscale='log', xlabel='muons / grid points', title=QUANTITIES[q])
-        lo, hi = ref[q] * 0.75, ref[q] * 1.25
-        ax.set_ylim(lo, hi)
-    axes[0].set_ylabel('per 1e9 muons, or H/H_0')
-    axes[0].legend(fontsize=7.5, loc='lower right')
-    fig.suptitle('The surrogate integrated over the muon flow: running Monte Carlo vs. the quadrature grid '
-                 '(dotted: its finest value)')
-    fig.savefig(os.path.join(FIGS, 'quadrature_convergence.png'), dpi=150)
-    print('saved quadrature_convergence.png')
+    plot(runs, grids, earlier)

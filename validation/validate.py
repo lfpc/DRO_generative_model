@@ -27,7 +27,7 @@ import cli
 from lcso.data import to_x
 from lcso.models import derivatives
 from lcso.surrogate import load_surrogate
-from paths import VALIDATION, figures
+from paths import VALIDATION, figures, save_figure
 from shield import MuonShield
 from validation import references
 
@@ -195,7 +195,8 @@ def as_study(model):
     return model.net if hasattr(model, 'net') else Production(model)
 
 
-def plot(refs, preds, cals, labels, out):
+def plot(refs, preds, cals, labels, out, report=False):
+    """The figures, as PNG in out; with report, also the report's as PDF (validation_<name>.pdf)."""
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -211,6 +212,10 @@ def plot(refs, preds, cals, labels, out):
         m, k = f'{R.n:.0e}'.split('e+')
         ax.text(0.04, 0.96, f'{REFS.get(tag, tag)}\n${m}\\times10^{{{int(k)}}}$ muons, {len(R.U)} designs',
                 transform=ax.transAxes, va='top', fontsize=11)
+
+    def save(fig, name):
+        save_figure(fig, out, name, report_name=f'validation_{name}' if report else None, dpi=200)
+        plt.close(fig)
 
     def figure():
         fig = plt.figure(figsize=(6.4, 6.2), layout='constrained')
@@ -239,7 +244,7 @@ def plot(refs, preds, cals, labels, out):
         tag_text(ax, R, tag)
         ax.legend(loc='lower right', fontsize=10, frameon=False)
         fig.colorbar(sc, ax=[ax, rx], shrink=0.8, label=r'distance from nominal $\|u\|_2$  ($u_i = \pm1$: $\pm10\%$)')
-        fig.savefig(os.path.join(out, f'hits_{tag}.png'), dpi=200)
+        save(fig, f'hits_{tag}')
 
     # per reference: per-muon calibration, simulated hit rate against predicted p(hit)
     for tag, cal in cals.items():
@@ -255,7 +260,7 @@ def plot(refs, preds, cals, labels, out):
         log_axes(ax)
         log_axes(rx, 'x')
         tag_text(ax, refs[tag], tag)
-        fig.savefig(os.path.join(out, f'calibration_{tag}.png'), dpi=200)
+        save(fig, f'calibration_{tag}')
 
     tag, R = next(((t, R) for t, R in refs.items() if R.group('oat').any()), (None, None))
     if R is None:
@@ -273,8 +278,7 @@ def plot(refs, preds, cals, labels, out):
     ax.set_xticks(range(D), [labels[i] for i in order], rotation=90, fontsize=6)
     ax.set_ylabel('(H(+10%) - H(-10%)) / 2  [hits]')
     ax.legend(fontsize=7)
-    ax.set_title(f'One parameter at a time, {REFS.get(tag, tag)} ({R.n:.0e} muons): simulator vs. surrogate')
-    fig.savefig(os.path.join(out, 'oat.png'), dpi=150)
+    save(fig, 'oat')
 
 
 if __name__ == '__main__':
@@ -295,7 +299,7 @@ if __name__ == '__main__':
         z = np.load(saved)
         preds = {t: z[f'pred_{t}'] for t in refs}
         cals = {t: tuple(z[f'cal_{t}']) for t in refs if f'cal_{t}' in z}
-        plot(refs, preds, cals, shield.labels, args.figs)
+        plot(refs, preds, cals, shield.labels, args.figs, report=args.figs == figures(VALIDATION))
         raise SystemExit(f'figures redrawn in {args.figs}')
     preds, cals = {}, {}
     for t, R in refs.items():
@@ -316,5 +320,5 @@ if __name__ == '__main__':
     with open(os.path.join(args.out, 'report.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
-    plot(refs, preds, cals, shield.labels, args.figs)
+    plot(refs, preds, cals, shield.labels, args.figs, report=args.figs == figures(VALIDATION))
     print(f'saved {args.out}/scores.json, report.txt, predictions.npz and the figures in {args.figs}')

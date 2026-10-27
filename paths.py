@@ -25,6 +25,9 @@ FIGURES = os.path.join(OUTPUTS, 'figures')
 MODEL = os.path.join(MODELS, 'lcso.pt')                   # the surrogate the analysis uses
 POOLS = os.path.join(DATA, 'pools')                       # training pools: <name>/shard_<worker>.pt
 REFERENCES = os.path.join(DATA, 'references')             # validation designs on stored muons: <name>/
+REPORT = os.path.join(ROOT, 'report', 'muon_shield_robustness.tex')
+REPORT_FIGS = os.path.join(ROOT, 'report', 'figs')        # the report's figures, as PDF (tracked)
+
 RUN = os.path.join(RESULTS, 'robustness')                 # the analysis' results (figures: figures(RUN))
 VALIDATION = os.path.join(RESULTS, 'validation')          # the surrogate scored on the references
 EXPERIMENTS = os.path.join(RESULTS, 'experiments')        # experiments/
@@ -33,6 +36,16 @@ EXPERIMENTS = os.path.join(RESULTS, 'experiments')        # experiments/
 def figures(results):
     """The figure folder of a results folder (or of a name): results/<x> -> figures/<x>."""
     return os.path.join(FIGURES, os.path.basename(os.path.normpath(results)))
+
+
+def save_figure(fig, folder, name, report_name=None, dpi=150):
+    """fig as <folder>/<name>.png, to look at; with report_name, also as report/figs/<report_name>.pdf
+    when the report includes that file (vector; layers drawn with rasterized=True stay pixels)."""
+    os.makedirs(folder, exist_ok=True)
+    fig.savefig(os.path.join(folder, f'{name}.png'), dpi=dpi)
+    if report_name and os.path.exists(REPORT) and f'{{{report_name}.pdf}}' in open(REPORT).read():
+        fig.savefig(os.path.join(REPORT_FIGS, f'{report_name}.pdf'), dpi=2 * dpi)
+        print(f'  -> {REPORT_FIGS}/{report_name}.pdf')
 
 
 def checkpoint(name):

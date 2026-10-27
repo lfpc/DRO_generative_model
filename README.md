@@ -7,8 +7,10 @@ designs; the robustness quantities are read off it (sensitivities, Hessian, acti
 worst directions, the worst design for a given tolerance, a tolerance allocation); and every
 conclusion is checked with the simulator.
 
-The report is `report/muon_shield_robustness.tex` (`bash report/figs.sh`, then
-`latexmk -pdf muon_shield_robustness.tex` in `report/`). The first analysis (43 parameters,
+The report is `report/muon_shield_robustness.tex` (`latexmk -pdf muon_shield_robustness.tex` in
+`report/`). Its figures in `report/figs/` are PDFs that the plotting scripts write there directly
+(`analysis.plots`, `validation.validate`, `experiments/quadrature*.py`, each with a quick redraw
+from saved results); every figure also goes, as PNG, to `outputs/figures/`. The first analysis (43 parameters,
 muons on axis), which this one replaces, is in `old_report/`.
 
 ## Setup

@@ -1,6 +1,7 @@
 """Every figure of a robustness run, drawn from its saved results (nothing is recomputed).
 
-Reads whichever of these exist in <run> and writes figures/<run name>/ (paths.figures):
+Reads whichever of these exist in <run> and writes figures/<run name>/ (paths.figures; the
+main run also writes the report's figures as PDF, paths.save_figure):
   robustness.npz     robustness_{sensitivity,magnets,spectra,directions,walks,summary,calibration,mc,scans,plane}.png
   worst_cases.npz    worst_direction_scaled, worst_parameters, random_tolerances, sim_pz_profiles .png
   <var>_bins.npz     <var>_bins_{overview,sensitivity,alignment,walks,mc}.png
@@ -19,7 +20,7 @@ import matplotlib.pyplot as plt
 
 from analysis.core import BAD, GREY, OK
 import cli
-from paths import RUN, figures
+from paths import RUN, figures, save_figure
 
 parser = cli.parser(__doc__)
 parser.add_argument('run', nargs='?', default=RUN)
@@ -28,13 +29,14 @@ parser.add_argument('--profiles', default='nominal,worst@5%,worst@10%,worst@-10%
                     help='worst-case designs shown in sim_pz_profiles.png')
 args = parser.parse_args()
 FIGS = figures(args.run)
-os.makedirs(FIGS, exist_ok=True)
+MAIN = os.path.abspath(args.run) == os.path.abspath(RUN)       # only the main run feeds the report
 
 
 def save(fig, name):
-    fig.savefig(os.path.join(FIGS, name), dpi=150)
+    name = os.path.splitext(name)[0]
+    save_figure(fig, FIGS, name, report_name=name if MAIN else None)
     plt.close(fig)
-    print(f'saved {FIGS}/{name}')
+    print(f'saved {FIGS}/{name}.png')
 
 
 def poisson_ratio(h, h0):
@@ -231,7 +233,7 @@ def robustness_figures(r):
     fig, ax = plt.subplots(figsize=(7, 5.8), constrained_layout=True)
     lv = np.log10(plane)
     lim = np.abs(lv).max()
-    im = ax.pcolormesh(s, s, lv, cmap='RdBu_r', vmin=-lim, vmax=lim, shading='auto')
+    im = ax.pcolormesh(s, s, lv, cmap='RdBu_r', vmin=-lim, vmax=lim, shading='auto', rasterized=True)
     ax.contour(s, s, plane, levels=[0.5, 1, 2, 4, 8], colors='k', linewidths=0.7)
     fig.colorbar(im, ax=ax, label='$\\log_{10} H/H_0$ (surrogate)')
     if SIM:

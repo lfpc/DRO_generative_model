@@ -208,9 +208,9 @@ OAT curvatures (cosine)         & $9.7\%$  & $12\%$ (0.993) \\
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{validation_oat.png}\\[1ex]
-  \includegraphics[width=0.48\linewidth]{validation_hits_T1.png}\hfill
-  \includegraphics[width=0.48\linewidth]{validation_hits_T1.5.png}
+  \includegraphics[width=\linewidth]{validation_oat.pdf}\\[1ex]
+  \includegraphics[width=0.48\linewidth]{validation_hits_T1.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{validation_hits_T1.5.pdf}
   \caption{Top: every parameter alone at $\pm10\%$, secant $\tfrac12[H(+10\%)-H(-10\%)]$ on the
   check sample: simulator (squares) and surrogate (circles). Bottom: predicted vs.\ simulated hits
   of the reference designs on the nominal muons (left) and the check sample (right), coloured by
@@ -312,7 +312,7 @@ M4:\texttt{Z\_len}     & 224.0 cm & $-0.062$ & $-0.02\pm0.02$ & $+0.18\pm0.03$ \
 
 \begin{figure}[p]
   \centering
-  \includegraphics[width=\linewidth]{robustness_sensitivity.png}
+  \includegraphics[width=\linewidth]{robustness_sensitivity.pdf}
   \caption{Sensitivity of each parameter. Left: gradient per full tolerance. Right: exact
   change with the parameter at $+10\%$ (orange) and $-10\%$ (blue).}
   \label{fig:sensitivity}
@@ -320,14 +320,14 @@ M4:\texttt{Z\_len}     & 224.0 cm & $-0.062$ & $-0.02\pm0.02$ & $+0.18\pm0.03$ \
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.8\linewidth]{robustness_magnets.png}
+  \includegraphics[width=0.8\linewidth]{robustness_magnets.pdf}
   \caption{Per magnet: share of the gradient norm and largest single-parameter effect.}
   \label{fig:magnets}
 \end{figure}
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{robustness_scans.png}
+  \includegraphics[width=\linewidth]{robustness_scans.pdf}
   \caption{One-at-a-time scans of the eight most sensitive parameters: surrogate (blue) and
   simulator at $\pm5\%$ and $\pm10\%$ (orange).}
   \label{fig:scans}
@@ -348,7 +348,7 @@ but the changes largely cancel in the total.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.9\linewidth]{robustness_spectra.png}
+  \includegraphics[width=0.9\linewidth]{robustness_spectra.pdf}
   \caption{Left: Hessian eigenvalues in units of $H_0$. Right: active-subspace eigenvalues
   (blue), their cumulative share (red) and the fraction of the gradient they contain (grey).}
   \label{fig:spectra}
@@ -450,7 +450,7 @@ direction & largest changes & in words \\
 
 \begin{figure}[p]
   \centering
-  \includegraphics[width=\linewidth]{robustness_walks.png}
+  \includegraphics[width=\linewidth]{robustness_walks.pdf}
   \caption{Walks along each direction: surrogate (blue; error bars: the members), simulator
   (orange) and the quadratic model (dotted).}
   \label{fig:walks}
@@ -458,8 +458,8 @@ direction & largest changes & in words \\
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.48\linewidth]{robustness_summary.png}\hfill
-  \includegraphics[width=0.42\linewidth]{robustness_calibration.png}
+  \includegraphics[width=0.48\linewidth]{robustness_summary.pdf}\hfill
+  \includegraphics[width=0.42\linewidth]{robustness_calibration.pdf}
   \caption{Left: $\HH$ at one tolerance unit along each direction. Right: surrogate vs.\
   simulator for all 33 walked designs; the outliers are the box designs of Sec.~\ref{sec:box}.}
   \label{fig:calibration}
@@ -467,7 +467,7 @@ direction & largest changes & in words \\
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.6\linewidth]{robustness_plane.png}
+  \includegraphics[width=0.6\linewidth]{robustness_plane.pdf}
   \caption{The surrogate in the plane of \texttt{worst} ($x$) and the part of \texttt{act1}
   orthogonal to it ($y$); markers: simulated designs with their $\HH$.}
   \label{fig:plane}
@@ -537,7 +537,7 @@ factors multiply.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.7\linewidth]{worst_direction_scaled.png}
+  \includegraphics[width=0.7\linewidth]{worst_direction_scaled.pdf}
   \caption{Hits along the worst direction against the largest change of any parameter:
   simulator and surrogate.}
   \label{fig:scaled}
@@ -545,7 +545,7 @@ factors multiply.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.8\linewidth]{worst_parameters.png}
+  \includegraphics[width=0.8\linewidth]{worst_parameters.pdf}
   \caption{The worst direction at a maximum change of $10\%$, truncated to its largest 1, 3, 5,
   10 changes, and single parameters at their worse limit.}
   \label{fig:attribution}
@@ -588,7 +588,7 @@ $10\%$ & 46 & 3\,701\,210 & $2840\pm80$   & $(1.9\pm1.7)\times10^4$ & $51.0\pm1.
 
 \begin{figure}[!htb]
   \centering
-  \includegraphics[width=0.75\linewidth]{tolerance_boxes.png}
+  \includegraphics[width=0.75\linewidth]{tolerance_boxes.pdf}
   \caption{Worst case for a given tolerance: the worst design within $\pm\varepsilon$ (filled;
   surrogate and simulator) and the worst direction scaled to $\varepsilon$ (open).}
   \label{fig:tolerance}
@@ -663,7 +663,7 @@ worst design: simulator & & $2.20\pm0.07$ & $1.56\pm0.06$ & $1.31\pm0.05$ \\
 
 \begin{figure}[!htbp]
   \centering
-  \includegraphics[width=\linewidth]{tolerance_allocation.png}
+  \includegraphics[width=\linewidth]{tolerance_allocation.pdf}
   \caption{Left: the tolerance allocations for a worst case of at most $3$, $2$ and $1.5\,H_0$
   (surrogate; simulated worst designs in the legend). Right: the greedy path, the worst case of
   the box against the number of parameters tightened.}
@@ -705,7 +705,7 @@ the simulator design by design (median ratio simulator/surrogate $1.00$--$1.08$)
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{random_tolerances.png}
+  \includegraphics[width=\linewidth]{random_tolerances.pdf}
   \caption{Random independent tolerances: surrogate distribution of 4096 designs per level
   (histogram), and the eight simulated designs (solid: simulator, dotted: surrogate).}
   \label{fig:random}
@@ -795,7 +795,7 @@ strongly ($1.24$ vs.\ $0.98$).
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{sim_pz_profiles.png}
+  \includegraphics[width=\linewidth]{sim_pz_profiles.pdf}
   \caption{Simulated hits per $p_z$ range for the nominal design and some designs of
   Table~\ref{tab:concrete}.}
   \label{fig:simpz}
@@ -803,7 +803,7 @@ strongly ($1.24$ vs.\ $0.98$).
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.9\linewidth]{pz_bins_overview.png}
+  \includegraphics[width=0.9\linewidth]{pz_bins_overview.pdf}
   \caption{Per $p_z$ bin (surrogate): share of the muons and of the hits, relative sensitivity
   and curvature along the bin's own worst direction.}
   \label{fig:pz_overview}
@@ -811,7 +811,7 @@ strongly ($1.24$ vs.\ $0.98$).
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.62\linewidth]{pz_bins_alignment.png}
+  \includegraphics[width=0.62\linewidth]{pz_bins_alignment.pdf}
   \caption{Cosine between the worst directions of the $p_z$ bins: the intermediate momenta
   ($30$--$75$\,GeV) want the opposite changes to the high ($>125$\,GeV) and the soft
   ($10$--$30$\,GeV) ones.}
@@ -820,7 +820,7 @@ strongly ($1.24$ vs.\ $0.98$).
 
 \begin{figure}[p]
   \centering
-  \includegraphics[width=\linewidth]{pz_bins_sensitivity.png}
+  \includegraphics[width=\linewidth]{pz_bins_sensitivity.pdf}
   \caption{Sensitivity of each $p_z$ bin to each parameter, relative to the bin's own hits.
   Left: first order. Right: exact one-at-a-time change at the worse of $\pm10\%$.}
   \label{fig:pz_sensitivity}
@@ -828,8 +828,8 @@ strongly ($1.24$ vs.\ $0.98$).
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.49\linewidth]{pt_bins_overview.png}\hfill
-  \includegraphics[width=0.42\linewidth]{pt_bins_alignment.png}
+  \includegraphics[width=0.49\linewidth]{pt_bins_overview.pdf}\hfill
+  \includegraphics[width=0.42\linewidth]{pt_bins_alignment.pdf}
   \caption{Per $p_t$ bin: overview (left) and alignment of the bins' worst directions (right).}
   \label{fig:pt}
 \end{figure}
@@ -953,8 +953,8 @@ hotter sample holds fewer.
 
 \begin{figure}[h]
   \centering
-  \includegraphics[width=\linewidth]{quadrature_convergence.png}\\[1ex]
-  \includegraphics[width=0.85\linewidth]{quadrature.png}
+  \includegraphics[width=\linewidth]{quadrature_convergence.pdf}\\[1ex]
+  \includegraphics[width=0.85\linewidth]{quadrature.pdf}
   \caption{Top: Monte Carlo estimates (six seeds) against the grid at increasing resolution, for
   the nominal hits, the hits above $300$\,GeV, the field of M7 at $-10\%$ and one tolerance unit
   along the worst direction. Bottom: relative error against the reference grid, for Monte Carlo
