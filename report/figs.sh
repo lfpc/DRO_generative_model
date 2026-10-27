@@ -1,5 +1,5 @@
 #!/bin/bash
-# Collect the report's figures into report/figs/ from the results, then build the report:
+# Collect the report's figures into report/figs/ (tracked) from the results, then build the report:
 #     bash report/figs.sh && (cd report && latexmk -pdf muon_shield_robustness.tex)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -12,4 +12,7 @@ cp $O/figures/experiments/quadrature.png $O/figures/experiments/quadrature_conve
 R1=$O/archive/round1_43p_onaxis/report/figs                              # App. C: the first analysis' study
 cp $R1/study_toy_budget.png figs/round1_toy_budget.png
 cp $R1/study_shield_budget_final.png figs/round1_shield_budget.png
-echo "figures in $(pwd)/figs"
+for f in figs/*.png; do                                                  # only what the report shows
+  grep -q "{$(basename $f)}" muon_shield_robustness.tex || rm $f
+done
+echo "$(ls figs | wc -l) figures in $(pwd)/figs"
