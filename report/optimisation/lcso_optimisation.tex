@@ -1,0 +1,490 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage[section]{placeins}
+\graphicspath{{figs/}}
+
+\title{Local optimisation of the SHiP muon shield with per-muon surrogates:\\[0.3ex]
+\large the LCSO surrogates in a trust-region loop on the MuonShieldChallenge}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The per-muon hit surrogates of this repository (DeepONet, full and reduced Taylor, with and
+without residual) are used as the model of a trust-region optimiser that retrains the surrogate
+around the current design after every step, and are compared on the two problems of the
+MuonShieldChallenge at a fixed budget of simulated muons. Four choices make the difference: designs
+sampled in a box wider than the step (radius $0.05$ of the bounds, against steps of
+$0.005$--$0.04$), the per-muon hits of every full simulation reused as training data, an acceptance
+test that allows for the Poisson noise of the hit count, and the full Taylor surrogate (no
+residual) as the model. Letting the trust radius grow beyond the sampling box (the surrogate only supplies
+the gradient and curvature) helps on hard by a further 25\%. On the hard problem (72 parameters, $5\times10^8$ muons per simulation,
+noisy) the result reaches 647 hits (median of 2 seeds, from $\sim$69\,500) with 100 full
+simulations' worth of muons, against 3220 for the best baseline (TuRBO) at the same budget and
+1380 for TuRBO at five times the budget. On the easy problem (30 parameters, $10^7$ muons) it
+reaches 36 hits at budget 50 and 18 at 400 (median of 5 seeds, from 1173), ahead of every
+black-box baseline (45--75 at 400) and of the earlier global LCSO (58), but behind the RL
+methods of the challenge (5--13 at 400).
+\end{abstract}
+
+\tableofcontents
+
+%==============================================================================
+\section{The problems and the budget}
+%==============================================================================
+
+The MuonShieldChallenge defines two problems, both minimising the number of muons reaching the
+sensitive plane over the parameters $u\in[0,1]^D$ (scaled to the bounds) under exact length,
+cost and (hard) cavern constraints:
+\begin{itemize}
+  \item \textbf{easy}: $D=30$, $10^7$ muons per full simulation, fixed simulation seed
+        (deterministic), reference design 1173 hits;
+  \item \textbf{hard}: $D=72$, $5\times10^8$ muons per full simulation, a new seed every
+        simulation (noisy, $\sigma\approx\sqrt f$), cavern walls, reference $\approx69\,500$ hits.
+\end{itemize}
+The budget counts simulated muons, in units of full simulations: simulating 32 designs on
+$2.5\times10^5$ muons each costs $0.8$ on easy. Only full simulations give a best $f$, which is the
+figure of merit at every budget. Infeasible designs are never simulated.
+
+Two properties of the simulator set what an optimiser can do:
+\begin{itemize}
+  \item \emph{A geometry change reshuffles each muon's scattering}: the per-muon hits of two nearby
+        designs are nearly independent draws, even with a fixed seed. The difference of $f$
+        between two designs therefore carries a noise of $\sqrt{f_1+f_2}$, also on the
+        deterministic easy problem, and common random numbers (the same muons for all designs)
+        remove little of it.
+  \item \emph{Hits cannot be predicted from the muons that hit at the reference}: 10--25\% of the
+        hits at nearby designs come from muons that did not even reach the plane at the reference,
+        so simulating only ``near-miss'' muons is not an option.
+\end{itemize}
+
+%==============================================================================
+\section{The optimiser}
+%==============================================================================
+
+\texttt{baselines/lcso\_local.py} in the challenge (method \texttt{lcso\_local}) imports the
+surrogate architectures of \texttt{lcso/models.py} from this repository. Each round:
+\begin{enumerate}
+  \item \textbf{Sample} $n_d=32$ feasible designs in the box $|u-u_\text{inc}|_\infty\le r_s$ around the
+        incumbent (the incumbent first) and simulate each on $m$ muons: $2.5\%$ of the sample
+        ($2.5\times10^5$ on easy, $1.25\times10^7$ on hard). Keep every hit and a fraction $k$ of the
+        misses (case-control; the training logit carries the offset $-\log k$).
+  \item \textbf{Train} the surrogate $p(\text{hit}\mid u,x)$ on the rows of the last $B$ rounds, in
+        coordinates centred on the incumbent, $v=(u-u_\text{inc})/r_s$. A Taylor surrogate therefore
+        expands around the current point, and its gradient and Hessian there are explicit
+        coefficients. The model is warm-started from the previous round (500 Adam steps; 3000 in
+        the first round).
+  \item \textbf{Step} on the predicted hits $F(u)=\tfrac{N}{n}\sum_{x}\sigma(\text{logit}(u,x))$
+        over a fixed random set of $n$ muons ($2\times10^6$ on easy, $5\times10^6$ on hard):
+        a trust-region step of radius $r_t$ within the bounds and the exact constraints, either
+        on the linear model (\texttt{gd}), on the quadratic model from the autograd gradient and
+        Hessian (\texttt{newton}), or minimising $F$ itself with SLSQP (\texttt{surrogate}).
+  \item \textbf{Accept} after a full simulation of the candidate. With the noise-aware test, the step
+        is rejected only if the candidate is worse by more than $\tau\sigma$,
+        $\sigma=\sqrt{f_\text{inc}+f_\text{cand}}$; the trust radius halves only then and doubles if the
+        actual reduction exceeds a fraction $g$ of the predicted one at the boundary
+        ($0.005\le r_t\le r_\text{max}$; $g=0.75$, $r_\text{max}=0.2$ unless stated).
+  \item \textbf{Reuse}: the candidate's full simulation is also training data. Its hits and a
+        fraction $k$ of its misses join the next round's rows.
+\end{enumerate}
+The final configuration, \texttt{C\_follow2}, is the full Taylor surrogate (\texttt{kind='taylor'}:
+the full gradient and a full-rank curvature, no residual), \texttt{surrogate} steps, $r_s=0.05$
+growing as $\max(0.05,\,2r_t)$, $r_t=0.02$ initially, $k=0.05$, $B=5$, $\tau=1$, with reuse. The
+hard runs used an earlier configuration (Newton steps, $k=0.02$, $B=3$, fixed $r_s=0.05$): the easy
+sweeps that improved on it finished after the hard runs had started. The best hard configuration,
+\texttt{HF\_g025}, adds to it a trust radius free to leave the sampling box ($g=0.25$,
+$r_\text{max}=1$, Section~\ref{sec:far}).
+
+%==============================================================================
+\section{What mattered: the easy sweeps}
+%==============================================================================
+
+All settings were tuned on easy, at budget 200 (3 seeds) and then 400 (3--5 seeds), one change
+at a time from the current best. Table~\ref{tab:steps} follows the path from the first version
+(210 hits at budget 200) to the final one (21); Appendix~\ref{app:sweeps} lists every setting
+tried.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lrrrrr}
+\toprule
+best hits (median over seeds) at budget & 10 & 25 & 50 & 100 & 200 \\
+\midrule
+first version: reduced Taylor $r{=}8$ + residual, $r_s=0.02$, Newton (3) & 515 & 418 & 334 & 257 & 210 \\
+$+$ sampling radius $r_s=0.05$ (3) & 378 & 242 & 216 & 90 & 65 \\
+$+$ noise-aware acceptance, $\tau=1$ (3) & 378 & 267 & 136 & 69 & 60 \\
+$+$ full simulations reused as data (3) & 444 & 95 & 63 & 56 & 49 \\
+$+$ full Taylor surrogate (5) & 221 & 72 & 41 & 31 & 31 \\
+$+$ \texttt{surrogate} steps, $k=0.05$, $B=5$ (5) & 103 & 61 & 46 & 33 & 23 \\
+$+$ sampling radius following the trust radius (5, final) & 136 & 61 & 36 & 24 & 21 \\
+\bottomrule
+\end{tabular}
+\caption{Easy: the changes that helped, each added to the previous line (number of seeds in
+brackets).}
+\label{tab:steps}
+\end{table}
+
+\paragraph{Sampling radius.} The single largest gain. With $r_s=0.02$ the designs of a round differ
+by a few hits, comparable with the noise of a design simulated on $2.5\times10^5$ muons, and
+the trust radius collapses to its floor. Too small is much worse than too large: $r_s=0.01$ ends at
+299, $0.02$ at 210, $0.05$ at 65, $0.08$ at 114, $0.1$ at 121 (budget 200). Tying the sampling box
+to the trust radius (\texttt{couple}) brings back the collapse (308). Letting it \emph{grow} with the
+trust radius but never shrink below $0.05$ helps a little (the last line of
+Table~\ref{tab:steps}). Note that this is much smaller than the $\pm10\%$ box of the robustness
+analysis: for optimisation only the local model matters.
+
+\paragraph{The noise floor.} Even with a good model, a step of $r_t=0.005$ predicts reductions of
+5--20 hits at $f\approx200$, below the noise $\sqrt{2f}\approx20$. A strict ratio test
+($\rho=\text{actual}/\text{predicted}\ge0.1$) then rejects most good steps, shrinks the radius, and
+the run stalls (the first version spent 60 rounds at $f=257$). The noise-aware test accepts a
+step unless it is significantly worse, so the incumbent keeps moving along the predicted descent.
+$\tau=1$ and $\tau=2$ give the same result.
+
+\paragraph{Reusing the full simulations.} Every round pays a full simulation for the acceptance
+test: $10^7$ muons at the candidate, more than the $8\times10^6$ of the 32 sampled designs.
+Keeping its per-muon hits as training data costs nothing and halved the hits at budget 25.
+
+\paragraph{The muons per design and the number of designs.} With the budget fixed, $2.5\times10^5$
+muons per design (2.5\% of the sample) beats $5\times10^4$, $10^5$ and $10^6$; 32 designs per
+round beat 16 and 64. Fewer designs per round means more steps, but the model needs about $D$
+designs to see every direction. Sampling new designs only every 2--4 rounds (training in between
+on the reused full simulations alone) did not help.
+
+\paragraph{Training.} Warm-starting from the previous round, cold restarts, a buffer of 1--8 rounds
+and 200--1500 steps per round all end within the scatter of the seeds. Keeping 5\% of the misses
+instead of 2\% helps slightly.
+
+\paragraph{What did not help.}
+\begin{itemize}
+  \item \emph{Common random numbers} (the same muons for every design of a round): no consistent
+        effect. Without them the first version is better (110 against 210 at budget 200), the
+        $r_s=0.05$ one worse (100 against 65). The geometry reshuffles the scattering, so a shared
+        muon set removes little of the noise of the comparisons.
+  \item \emph{Importance sampling of the muons} by the surrogate's hit probability (with weights
+        $1/(Nq)$ in the loss), and \emph{acceptance on a subset} of $10^6$ muons with a full
+        simulation every third accepted step. Both give cheaper rounds but noisier models and
+        decisions: at best equal (\texttt{is05\_eval1e6}: 103 against 65 for the same base).
+  \item \emph{Gradient steps}: gd ends at 82 against 65 for Newton (budget 200), 27 against 24 with
+        the full Taylor surrogate (budget 400). Minimising the whole surrogate (\texttt{surrogate})
+        is the best start (103--127 at budget 10) and ends level with Newton.
+\end{itemize}
+
+%==============================================================================
+\section{Which surrogate}
+%==============================================================================
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.8\linewidth]{easy_kinds.png}
+\caption{Easy: the surrogate kinds in the same optimiser (sampling radius 0.05, noise-aware
+acceptance, reuse, Newton steps). Median over 5 seeds and the range of the seeds.}
+\label{fig:kinds}
+\end{figure}
+
+\begin{table}[h]\centering\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+best hits at budget & 10 & 25 & 50 & 100 & 200 & 400 \\
+\midrule
+\multicolumn{7}{l}{\emph{easy, median of 5 seeds}} \\
+full Taylor & 221 & 72 & 41 & 31 & 31 & 24 \\
+reduced Taylor $r=16$ + residual & 200 & 67 & 58 & 55 & 43 & 29 \\
+DeepONet & 138 & 65 & 51 & 41 & 34 & 34 \\
+reduced Taylor $r=8$ + residual & 444 & 125 & 105 & 59 & 45 & 34 \\
+reduced Taylor $r=8$ & 240 & 78 & 61 & 57 & 37 & 35 \\
+\multicolumn{7}{l}{\emph{easy, budget 200 only, 3 seeds, without reuse}} \\
+reduced Taylor $r=2$ / $r=4$ + residual & 576 / 467 & 576 / 367 & 405 / 132 & 379 / 114 & 355 / 114 & -- \\
+full Taylor + residual & 230 & 127 & 101 & 96 & 96 & -- \\
+\midrule
+\multicolumn{7}{l}{\emph{hard, median of 2 seeds}} \\
+full Taylor & 14\,520 & 3892 & 1034 & 859 & -- & -- \\
+DeepONet & 18\,540 & 7443 & 1976 & 1226 & -- & -- \\
+reduced Taylor $r=8$ + residual & 39\,570 & 30\,980 & 25\,770 & 14\,130 & -- & -- \\
+\bottomrule
+\end{tabular}
+\caption{The surrogate kinds in the same optimiser (hard: column 100 is the end of the runs,
+budget 99).}
+\label{tab:kinds}
+\end{table}
+
+The full Taylor surrogate (a full gradient and a full-rank curvature around the incumbent, no
+residual) is the best model for this loop on both problems (Table~\ref{tab:kinds},
+Fig.~\ref{fig:kinds}). The reason is the shape of the loop: the surrogate only has to be right
+within $r_s=0.05$ of the incumbent, where a quadratic logit is enough, and the step only uses its
+value, gradient and curvature there. The residual adds capacity that this small box does not need
+and data that 32 designs per round cannot pin down: with the residual the full Taylor surrogate
+ends at 96 instead of 77 (budget 200, without reuse).
+
+The rank of the reduced Taylor surrogate matters a lot. Rank 2 and 4 are too few for 30
+parameters (355 and 114). Rank 8 works on easy but not on hard, where with 72 parameters it is
+the only kind that fails (20\,192 and 7897 hits, one seed stuck for 35 rounds on a plateau at
+40\,000--48\,000). Rank 16 is as good as the full one at budget 400 on easy. The DeepONet is the best
+start (138 at budget 10), as on the toy problems of the comparison report, where it reached a
+moderate accuracy with the fewest samples. It then falls behind the full Taylor surrogate, and is
+second on hard.
+
+%==============================================================================
+\section{Results against the baselines}
+%==============================================================================
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.85\linewidth]{hard_curves.png}
+\caption{Hard: best hits against the muons simulated. Median over the seeds (number in brackets);
+ the DeepONet and reduced Taylor runs use $g=0.75$, $r_\text{max}=0.2$;
+the bands are the range of the local LCSO seeds.}
+\label{fig:hard}
+\end{figure}
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.85\linewidth]{easy_curves.png}
+\caption{Easy: best hits against the muons simulated, for the final configuration, the same
+optimiser with the DeepONet, the first version, and the challenge's baselines.}
+\label{fig:easy}
+\end{figure}
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lrrrrrr}
+\toprule
+best hits (median over seeds) at budget & 10 & 25 & 50 & 75 & 100 & 500 \\
+\midrule
+\textbf{local LCSO, full Taylor, far steps} (2) & \textbf{13\,060} & \textbf{4010} & \textbf{1010} & \textbf{675} & \textbf{647} & -- \\
+local LCSO, DeepONet (2) & 18\,540 & 7443 & 1976 & 1352 & 1226 & -- \\
+TuRBO (3) & 55\,350 & 21\,450 & 9710 & 5391 & 3220 & 1380 \\
+LCSO global (old), Newton (3) & 69\,540 & 37\,490 & 21\,590 & 9177 & 5093 & 2933 \\
+BO (3) & 69\,640 & 33\,750 & 33\,750 & 12\,520 & 8160 & 2669 \\
+CMA-ES (3) & 69\,210 & 69\,210 & 69\,200 & 36\,770 & 36\,770 & 3201 \\
+GA (3) & 69\,620 & 69\,500 & 46\,650 & 46\,650 & 26\,470 & 3517 \\
+\bottomrule
+\end{tabular}
+\caption{Hard. The local LCSO runs end at budget 100 (shown at 99).}
+\label{tab:hard}
+\end{table}
+
+\paragraph{Hard.} Local LCSO with the full Taylor surrogate and far steps is the best method at
+every budget (Table~\ref{tab:hard}, Fig.~\ref{fig:hard}). At budget 25 it is where TuRBO is at
+100. At budget 50 it already beats every baseline at budget 500. Its two seeds end at 619 and 675
+hits. With the DeepONet in the same loop (and $g=0.75$, $r_\text{max}=0.2$) the runs end at 944 and
+1509. The hard runs used Newton steps; the easy setting with \texttt{surrogate} steps and a
+growing sampling box was not run on hard. Each hard run takes 3.5--5 hours on one GPU.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lrrrrrr}
+\toprule
+best hits (median over seeds) at budget & 10 & 25 & 50 & 100 & 200 & 400 \\
+\midrule
+RL flow (3) & 60 & 33 & 19 & 10 & 5 & 5 \\
+RL, model-based (3) & 176 & 43 & 22 & 22 & 20 & 13 \\
+\textbf{local LCSO, full Taylor, final} (5) & \textbf{136} & \textbf{61} & \textbf{36} & \textbf{24} & \textbf{21} & \textbf{18} \\
+local LCSO, DeepONet (5) & 138 & 65 & 51 & 41 & 34 & 34 \\
+GA (3) & 1173 & 411 & 156 & 126 & 85 & 45 \\
+CMA-ES (3) & 1163 & 390 & 390 & 164 & 83 & 53 \\
+LCSO global (old), Newton (2) & 892 & 112 & 96 & 96 & 92 & 58 \\
+TuRBO (3) & 1173 & 1085 & 317 & 130 & 72 & 67 \\
+BO (3) & 1173 & 750 & 425 & 141 & 75 & 75 \\
+\bottomrule
+\end{tabular}
+\caption{Easy. The black-box baselines whose runs end just short of budget 400 are shown at 399.}
+\label{tab:easy}
+\end{table}
+
+\paragraph{Easy.} The final configuration beats every black-box baseline and the earlier global
+LCSO at every budget (Table~\ref{tab:easy}, Fig.~\ref{fig:easy}): 36 hits at budget 50, where
+TuRBO, CMA-ES, GA and BO are at 156--425, and 18 at 400 against 45--75. The RL methods of the
+challenge are better: RL flow reaches 19 at 50 and 5 at 200, the model-based RL 22 at 50 and 13 at
+400. They learn a policy over designs with partial simulations, and are not local.
+The relative gain of local LCSO is larger on hard (more parameters, more muons per simulation),
+where the RL methods have not been run.
+
+%==============================================================================
+\section{Letting the step leave the training box}\label{sec:far}
+%==============================================================================
+
+The surrogate is trained on designs within $r_s=0.05$ of the incumbent, but a Newton step only uses
+its gradient and Hessian there. Whether the step is good is decided by the full simulation, so
+nothing prevents the trust radius from growing beyond the training box when the steps keep paying
+off. Two parameters control this: the cap $r_\text{max}$ and the growth threshold $g$ (the radius
+doubles when a step at the boundary achieves at least $g$ of the predicted reduction).
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lrrrrrr}
+\toprule
+best hits (median over seeds) at budget & 10 & 25 & 50 & 75/100 & 99/200 & 400 \\
+\midrule
+\multicolumn{7}{l}{\emph{easy, Newton steps}} \\
+$g=0.75$, $r_\text{max}=0.2$ (10) & 138 & 65 & 47 & 34 & 25 & 21 \\
+$g=0.75$, $r_\text{max}=1$ (5) & \multicolumn{6}{c}{identical to the line above: $r_t$ never reaches 0.2} \\
+$g=0.5$, $r_\text{max}=1$ (5) & 183 & 81 & 48 & 29 & 22 & 17 \\
+$g=0.5$, $r_\text{max}=1$, $r_t=0.1$ initially (5) & 182 & 62 & 45 & 30 & 26 & 21 \\
+$g=0.25$, $r_\text{max}=1$ (10) & 170 & 59 & 40 & 32 & 22 & 19 \\
+\multicolumn{7}{l}{\emph{easy, final configuration (\texttt{surrogate} steps, following box)}} \\
+$g=0.75$, $r_\text{max}=0.2$ (5) & 136 & 61 & 36 & 24 & 21 & 18 \\
+$g=0.25$, $r_\text{max}=1$ (5) & 138 & 77 & 55 & 36 & 29 & 21 \\
+\midrule
+\multicolumn{7}{l}{\emph{hard, Newton steps (columns 75 and 99)}} \\
+$g=0.75$, $r_\text{max}=0.2$ (2) & 14\,520 & 3892 & 1034 & 889 & 859 & -- \\
+$g=0.5$, $r_\text{max}=1$ (2) & 17\,610 & 4572 & 1269 & 824 & 735 & -- \\
+$g=0.25$, $r_\text{max}=1$ (2) & 13\,060 & 4010 & 1010 & 675 & 647 & -- \\
+\bottomrule
+\end{tabular}
+\caption{A trust radius free to grow beyond the sampling box $r_s=0.05$. Easy columns are budgets
+10--400; hard columns 10, 25, 50, 75, 99.}
+\label{tab:far}
+\end{table}
+
+Table~\ref{tab:far} gives the results.
+\begin{itemize}
+  \item \emph{The cap was never the limit.} With the default $g=0.75$ the radius never reaches 0.2,
+        and raising the cap changes nothing. What keeps the steps short is the growth test.
+  \item \emph{With a lower threshold the steps do leave the box,} but not far. With $g=0.25$
+        every easy seed reaches $r_t=0.16$. Between 4 and 23 steps per run go beyond $0.05$, and
+        about half of them improve $f$. On hard with $g=0.5$, one seed takes 18 of its 52 steps at
+        $0.08$, and 15 of them improve. No run goes beyond 0.2: away from the box the model
+        overpredicts the reduction (one hard step predicted $-844$ hits and gave $+49$), so the
+        radius stops doubling.
+  \item \emph{Hard: a consistent gain.} All four hard runs with $r_\text{max}=1$ (619--753) end below
+        both runs without it (767, 950), a 25\% lower median with $g=0.25$.
+  \item \emph{Easy: within the scatter.} With 10 seeds, Newton with $g=0.25$ ends at 19 against 21
+        (means 17.7 and 20.3), but starts worse (170 against 138 at budget 10). On top of the final
+        configuration it does not help (21 against 18): there the sampling box already follows the
+        trust radius, $r_s=\max(0.05,2r_t)$, so a longer step also widens the training box and
+        thins out the data near the incumbent.
+\end{itemize}
+On easy, the runs end in the noise-dominated regime of Section~\ref{sec:disc}, where longer steps
+cannot help much. On hard, the curvature of the surrogate stays useful well beyond the box it was
+trained in.
+
+%==============================================================================
+\section{Discussion}\label{sec:disc}
+%==============================================================================
+
+\paragraph{Why it works.} A per-muon surrogate turns each simulated design into thousands of
+labelled rows. 32 designs on $2.5\times10^5$ muons pin down a 30-parameter gradient and
+curvature that 32 values of $f$ never could. Retraining around the incumbent keeps the model in
+the regime where it is accurate, so the trust region is set by the noise of the simulator, not by
+model error. On hard, a design simulated on $1.25\times10^7$ muons has $\sim1700$ hits, and the
+model sees the local landscape with little noise.
+
+\paragraph{Where it stops.} On easy the runs end in a noise-dominated regime: at $f\approx20$ the
+noise of a comparison is $\sqrt{40}\approx6$ hits, and a step of the minimum radius predicts
+reductions of a few hits. A single local run then cannot tell its moves apart. Lower values would
+need either more muons per decision (larger budgets) or larger moves (a global component). The RL
+methods' advantage on easy probably comes from the latter.
+
+\paragraph{Caveats.} The settings were tuned on easy with 3 seeds and the top ones confirmed with 5;
+differences of $\lesssim30\%$ between settings are within the scatter of the seeds (the range of
+the seeds is shown in the figures). The hard comparison has 2 seeds per surrogate. On the
+deterministic easy problem a lucky design counts as much as a genuinely good one. Every method
+benefits from this equally, through the same best-$f$ metric.
+
+%==============================================================================
+\section{Reproducing}
+%==============================================================================
+
+{\sloppy In the MuonShieldChallenge, with the simulator environment of \texttt{Robustness\_MS/env.sh}
+(set \texttt{ROBUSTNESS\_MS\_DIR} if this repository is not next to it):\par}
+{\footnotesize
+\begin{verbatim}
+python baselines/run.py lcso_local configs/easy.json --budget 400 --seed 0 --options \
+  '{"kind":"taylor","step":"surrogate","sample_radius":0.05,"follow":2,"keep_neg":0.05,
+    "buffer_rounds":5,"noise_tol":1,"reuse_full":true}'
+python baselines/run.py lcso_local configs/hard.json --budget 100 --seed 0 --options \
+  '{"kind":"taylor","sample_radius":0.05,"noise_tol":1,"reuse_full":true,
+    "muons_per_design":12500000,"n_eval":5000000,"trust_max":1,"grow_ratio":0.25}'
+# a sweep of option sets x seeds on GPUs 0 and 1, and the table of best f against the budget
+python baselines/sweep_lcso_local.py sets.json configs/easy.json --budget 400 --gpus 0 1
+python baselines/budget_table.py results/baselines/easy.json results/lcso_local*/*/easy.json
+\end{verbatim}}
+\texttt{report/optimisation/plots.py} makes the figures. On hard a full simulation is run in
+chunks of $5\times10^7$ muons (\texttt{Evaluator.\_hits}): the same distribution of $f$, with
+28\,GB of host memory instead of 57.
+
+\appendix
+%==============================================================================
+\section{Every setting tried on easy}
+\label{app:sweeps}
+%==============================================================================
+
+Median best hits over 3 seeds unless stated. Changes are relative to the base of each block.
+
+\begin{table}[h]\centering\footnotesize
+\resizebox{\linewidth}{!}{\begin{tabular}{llrrrrr}
+\toprule
+setting & change & @10 & @25 & @50 & @100 & @199 \\
+\midrule
+\multicolumn{7}{l}{\emph{block 1: base = reduced Taylor $r{=}8$ + residual, Newton, $r_s=r_t=0.02$, 32 designs, $2.5\times10^5$ muons, CRN, $k=0.02$, $B=3$}} \\
+base & & 515 & 418 & 334 & 257 & 210 \\
+s01 / s05 / s10 & $r_s=0.01$ / $0.05$ / $0.1$ & 794 / 378 / 549 & 566 / 242 / 267 & 524 / 216 / 174 & 299 / 90 / 161 & 299 / 65 / 121 \\
+t05 & $r_t=0.05$ & 558 & 416 & 372 & 201 & 140 \\
+couple & $r_s=r_t$ & 892 & 593 & 488 & 352 & 308 \\
+mpd5e4 / 1e5 / 1e6 & muons per design & 965 / 675 / 1070 & 621 / 463 / 628 & 573 / 330 / 136 & 303 / 291 / 123 & 192 / 227 / 102 \\
+nd16 / nd64 & designs per round & 480 / 673 & 283 / 384 & 271 / 317 & 265 / 284 & 262 / 130 \\
+first64\_nd16 & 64 then 16 & 523 & 341 & 321 & 293 & 293 \\
+nocrn & no CRN & 654 & 233 & 188 & 117 & 110 \\
+steps200 / 1500 & training steps & 584 / 575 & 411 / 343 & 229 / 327 & 145 / 307 & 102 / 204 \\
+buf1 / buf8 & buffer rounds & 752 / 546 & 534 / 388 & 426 / 258 & 185 / 215 & 154 / 165 \\
+cold & no warm start & 520 & 221 & 158 & 152 & 151 \\
+gd / surr & step & 516 / 474 & 305 / 312 & 232 / 289 & 213 / 212 & 194 / 149 \\
+is05 / is09 & importance 0.5 / 0.9 & 571 / 455 & 338 / 297 & 255 / 274 & 151 / 206 & 108 / 168 \\
+eval1e6 & accept on $10^6$ muons & 808 & 340 & 308 & 181 & 108 \\
+is05\_eval1e6 & both & 364 & 305 & 213 & 115 & 103 \\
+\midrule
+\multicolumn{7}{l}{\emph{block 2: base = s05}} \\
+nt1 / nt2 & noise-aware, $\tau=1$ / 2 & 378 / 378 & 267 / 218 & 136 / 95 & 69 / 78 & 60 / 53 \\
+reuse & full simulations as data & 444 & 95 & 82 & 72 & 72 \\
+reuse\_nt1 & both & 444 & 95 & 63 & 56 & 49 \\
+s08 & $r_s=0.08$ & 604 & 328 & 162 & 134 & 114 \\
+t05 & $r_t=0.05$, floor 0.01 & 428 & 221 & 116 & 75 & 69 \\
+nocrn / cold / steps200 & & 475 / 389 / 481 & 214 / 318 / 326 & 165 / 224 / 209 & 103 / 155 / 145 & 100 / 107 / 108 \\
+mpd1e6 & & 524 & 315 & 217 & 80 & 75 \\
+is05\_eval & & 547 & 186 & 165 & 101 & 89 \\
+gd & & 412 & 338 & 159 & 102 & 82 \\
+kinds & DeepONet / full Taylor / full Taylor + res. & 196 / 243 / 230 & 88 / 94 / 127 & 74 / 86 / 101 & 74 / 77 / 96 & 67 / 77 / 96 \\
+kinds & reduced $r{=}8$ / $r{=}2,4,16$ + res. & 233 / 576, 467, 347 & 144 / 576, 367, 165 & 84 / 405, 132, 144 & 59 / 379, 114, 70 & 59 / 355, 114, 63 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[h]\centering\footnotesize
+\resizebox{\linewidth}{!}{\begin{tabular}{llrrrrrr}
+\toprule
+setting & change & @10 & @25 & @50 & @100 & @200 & @399 \\
+\midrule
+\multicolumn{8}{l}{\emph{block 3: base R = reuse\_nt1, budget 400}} \\
+R (5 seeds) & & 444 & 125 & 105 & 59 & 45 & 34 \\
+kinds (5 seeds) & full Taylor & 221 & 72 & 41 & 31 & 31 & 24 \\
+ & DeepONet & 138 & 65 & 51 & 41 & 34 & 34 \\
+ & reduced $r{=}16$ + res. & 200 & 67 & 58 & 55 & 43 & 29 \\
+ & reduced $r{=}8$ & 240 & 78 & 61 & 57 & 37 & 35 \\
+nt2 & $\tau=2$ & 444 & 95 & 50 & 50 & 50 & 41 \\
+s03 / s07 & $r_s$ & 332 / 360 & 86 / 170 & 79 / 80 & 67 / 50 & 54 / 42 & 54 / 40 \\
+t05 & $r_t=0.05$, floor 0.01 & 401 & 182 & 115 & 72 & 59 & 47 \\
+nd16 & & 366 & 84 & 77 & 77 & 64 & 52 \\
+tmin0025 & floor 0.0025 & 444 & 95 & 63 & 55 & 46 & 40 \\
+\midrule
+\multicolumn{8}{l}{\emph{block 4: base T = R with the full Taylor surrogate}} \\
+kn05 / kn01 & $k=0.05$ / 0.01 & 154 / 250 & 65 / 69 & 52 / 44 & 35 / 26 & 31 / 24 & 20 / 23 \\
+buf5 & $B=5$ & 195 & 66 & 45 & 33 & 27 & 22 \\
+follow2 & $r_s=\max(0.05,2r_t)$ & 220 & 69 & 42 & 38 & 22 & 22 \\
+surr / gd & step & 127 / 218 & 65 / 76 & 37 / 47 & 33 / 37 & 25 / 37 & 22 / 27 \\
+nd64 & 64 designs, $1.25\times10^5$ muons & 213 & 89 & 49 & 40 & 32 & 23 \\
+t04 & $r_t=0.04$ & 196 & 68 & 51 & 47 & 31 & 31 \\
+steps200 & & 169 & 60 & 51 & 46 & 36 & 28 \\
+de2 / de3 / de4 & designs every 2 / 3 / 4 rounds & 239 / 306 / 255 & 81 / 90 / 70 & 53 / 53 / 53 & 39 / 34 / 46 & 30 / 29 / 33 & 28 / 21 / 29 \\
+de2\_t04 & & 215 & 71 & 42 & 36 & 30 & 22 \\
+D\_de2 & DeepONet, de2 & 138 & 78 & 47 & 38 & 32 & 29 \\
+\midrule
+\multicolumn{8}{l}{\emph{block 5: combinations, 5 seeds}} \\
+C & surr, $k=0.05$, $B=5$ & 103 & 61 & 46 & 33 & 23 & 22 \\
+C\_newton & Newton, $k=0.05$, $B=5$ & 152 & 63 & 45 & 32 & 25 & 20 \\
+C\_follow2 (final) & C + follow2 & 136 & 61 & 36 & 24 & 21 & 18 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\end{document}
