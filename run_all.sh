@@ -7,7 +7,8 @@
 #
 # Everything is set in the block below: the muon source (MUONS: the flow, another flow
 # checkpoint, or stored muons), the pools, the surrogate, the number of simulated muons. The run
-# of 2026-10-26 (50 parameters, the flow's muons with their production points) took 12.5 h:
+# of 2026-10-26 (50 parameters, the flow's muons with their production points) took 12.5 h; with
+# 65 parameters the references only add the new designs (step 2: --stage extend, ~5 h):
 #   1  pools                                                         GPUs 0, 1   2.9 h
 #   2  references                                                    GPU 1       4.3 h
 #      first ensemble -> its tolerance boxes -> adaptive pool        GPU 0       1.3 h
@@ -23,12 +24,14 @@ GPU_A=${GPU_A:-0}; GPU_B=${GPU_B:-1}
 export MUONS=${MUONS:-flow}                 # muon source: flow | flow:<checkpoint> | file:<muons.npy>
 N=1000000000                                # simulated muons of the analysis
 ARCH="--hidden 128 --p 32"                  # the surrogate (python -m lcso.train --help)
-# pools: name, momentum temperature, region half-width (u), designs, seed, muons per design
-POOLS_A="T2_m1e6 2.0 1 24000 10 1000000
-T2_d2_m1e6 2.0 2 4000 11 1000000
-T1.5_d1 1.5 1 1024 12 10000000"
-ADAPT="T1.5_adapt 1.5 1 0 13 10000000"      # simulated at the first ensemble's worst cases
-EXTRA=r1_T2_m1e6+r1_T1.5_d1                 # pools of the first analysis (43 parameters), reused; empty: none
+# pools: name, momentum temperature, region half-width (u), designs, seed, muons per design (the
+# seed also draws the muons: the 50-parameter pools had 10-13)
+POOLS_A="T2_m1e6 2.0 1 24000 20 1000000
+T2_d2_m1e6 2.0 2 4000 21 1000000
+T1.5_d1 1.5 1 1024 22 10000000"
+ADAPT="T1.5_adapt 1.5 1 0 23 10000000"      # simulated at the first ensemble's worst cases
+EXTRA=r2_T2_m1e6+r2_T2_d2_m1e6+r2_T1.5_d1+r2_T1.5_adapt   # the 50-parameter pools, the rest nominal; empty: none
+# (the first analysis' r1_* would also load, but with them a training run holds ~75 GB of host memory)
 
 L=outputs/logs/run_all
 mkdir -p $L outputs/logs/pools
@@ -90,6 +93,9 @@ step "2. references | first ensemble, adaptive pool"
   R="python -W ignore -m validation.references --muons $MUONS"
   [ -f outputs/data/references/T1.5/meta.pt ] || $R --name T1.5 --stage sample --temperature 1.5 --n_muons 400000000 --oat > $L/ref_sample_T1.5.log 2>&1
   [ -f outputs/data/references/T1/meta.pt ] || $R --name T1 --stage sample --temperature 1 --n_muons 600000000 > $L/ref_sample_T1.log 2>&1
+  for t in T1.5 T1; do        # references of fewer parameters: the same muons, new designs appended
+    $R --name $t --stage extend --n_random 8 >> $L/ref_extend_$t.log 2>&1
+  done
   for t in T1.5 T1; do
     for try in 1 2 3; do $R --name $t --stage simulate >> $L/ref_sim_$t.log 2>&1 && break; done
   done

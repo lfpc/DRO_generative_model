@@ -1,7 +1,8 @@
 # Robustness of the SHiP muon shield
 
-How much do the muon hits change when the 50 free parameters of the optimised muon shield (the
-height of each magnet included) deviate from their nominal values? A surrogate of the per-muon
+How much do the muon hits change when the 65 free parameters of the optimised muon shield (the
+hadron absorber M0 and magnets M1-M7, with their heights and yoke heights) deviate from their
+nominal values? A surrogate of the per-muon
 hit probability, LCSO (`p(hit | design, muon)`, a DeepONet), is trained once on simulated
 designs; the robustness quantities are read off it (sensitivities, Hessian, active subspace,
 worst directions, the worst design for a given tolerance, a tolerance allocation); and every
@@ -45,7 +46,7 @@ The settings (muon source, pools, architecture, simulated muons) are at the top 
 
 | path | contents |
 |---|---|
-| `shield.py` | the design problem: the 50 free parameters, the tolerance box (`u_i = +-1` is +-10%), the simulator call |
+| `shield.py` | the design problem: the 65 free parameters, the tolerance box (`u_i = +-1` is +-10%), the simulator call |
 | `muons.py` | muon sources: the generative flow (sampled, or as a quadrature grid), or stored muons (`--muons file:<muons.npy>`); another generator plugs in as a class with `sample()` |
 | `paths.py`, `cli.py` | where things are; the shared command-line options (`--model`, `--muons`, `--device`) |
 | `lcso/` | the surrogate: architectures (`models.py`), the trained model as the analysis sees it (`surrogate.py`), training (`training.py`, `train.py`), the pools (`data.py`, `simulate_pools.py`, `adaptive_designs.py`) |
@@ -70,3 +71,7 @@ Under `outputs/` (not tracked; `paths.py`):
     results/    numbers and text reports: robustness/, robustness_first/, validation/, experiments/
     figures/    every figure: robustness/, validation/, experiments/, muons/
     logs/       the launchers' logs
+
+The products of the 50-parameter analysis (the one in the report) carry the suffix `_p50`
+(`models/lcso_p50.pt`, `results/robustness_p50/`, ...); its pools are `data/pools/r2_*`, those of
+the first analysis (43 parameters) `r1_*`.

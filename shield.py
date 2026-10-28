@@ -1,4 +1,4 @@
-"""The SHiP muon shield as a design problem: 50 free parameters -> hits on the sensitive plane.
+"""The SHiP muon shield as a design problem: 65 free parameters -> hits on the sensitive plane.
 
 The design u is normalized to the tolerance box: u = 0 is the nominal design, u_i = +-1 puts
 parameter i at +-DELTA (10%) of its nominal value. The muons come from a muon source (muons.py,
@@ -30,12 +30,15 @@ NOMINAL = torch.tensor([
     [15.0001, 168.0000, 20.0000, 30.0000, 40.0000, 40.0000, 24.9153, 9.3875, 97.1824, 102.7103, 33.0000, 33.0000, 0.0000, 0.0000, -1.2000],
     [15.0000, 193.0909, 37.9502, 67.8055, 47.7714, 47.7714, 8.0002, 8.0000, 124.7799, 94.9248, 74.5861, 74.5861, 0.0000, 0.0000, -1.9000]])
 
-# the free parameters, as (magnet, column): the 43 of the first analysis, then the height dY of
-# magnets 1-7 (dYOut = dYIn), so a 43-parameter design is the first 43 with the heights nominal
-_rect = [0, 1, 2, 6, 8, 14]                    # magnets 1-4 are rectangular: In = Out
+# the free parameters, as (magnet, column), in the order they were added, so a design of an earlier
+# analysis is a prefix with the rest nominal: the 43 of the first analysis (magnets 1-7); the height
+# dY of magnets 1-7 (dYOut = dYIn; 50, the second); the hadron absorber M0, the gap before M1 and
+# the yoke height dY_yoke of every magnet (dY_yokeOut = dY_yokeIn; 65, the third)
+_rect = [0, 1, 2, 6, 8, 14]                    # magnets 0-4: no Out parameters (full_design)
 _free = [0, 1, 2, 3, 6, 7, 8, 9, 14]
 FREE = ([(1, c) for c in [1, 2, 6, 8, 14]] + [(m, c) for m in (2, 3, 4) for c in _rect]
-        + [(5, 0), (5, 1)] + [(m, c) for m in (6, 7) for c in _free] + [(m, 4) for m in range(1, 8)])
+        + [(5, 0), (5, 1)] + [(m, c) for m in (6, 7) for c in _free] + [(m, 4) for m in range(1, 8)]
+        + [(0, c) for c in [1, 2, 6, 8, 14, 4]] + [(1, 0)] + [(m, 10) for m in range(8)])
 
 
 class MuonShield:
@@ -49,7 +52,7 @@ class MuonShield:
         self.muons = make_muons(muons) if isinstance(muons, str) else muons
         self.uniform_fields = uniform_fields
         self.idx = torch.tensor(FREE)
-        self.phi_0 = NOMINAL[self.idx[:, 0], self.idx[:, 1]].clone()      # (50,)
+        self.phi_0 = NOMINAL[self.idx[:, 0], self.idx[:, 1]].clone()      # (65,)
         self.dim = len(FREE)
         self.labels = [f'M{m}:{COLUMNS[c]}' for m, c in FREE]
         self.units = [UNITS[COLUMNS[c]] for _, c in FREE]
@@ -64,20 +67,21 @@ class MuonShield:
 
     # ---- simulation ---------------------------------------------------------
     def full_design(self, phi):
-        """50 free parameters (or the first analysis' 43, the heights nominal) -> the (8, 15) design,
-        with the tied columns filled."""
+        """65 free parameters (or a prefix of them, an earlier analysis' design, the rest nominal) ->
+        the (8, 15) design, with the tied columns filled."""
         full = NOMINAL.clone()
         phi = torch.as_tensor(phi, dtype=full.dtype).cpu()
         idx = self.idx[:len(phi)]
         full[idx[:, 0], idx[:, 1]] = phi
-        full[0, 3], full[0, 5] = full[0, 2], full[0, 4]      # magnet 0: Out = In
         full[:, 13] = full[:, 12]                            # XmgapOut = XmgapIn
         full[:, 5] = full[:, 4]                              # dYOut = dYIn (one height per magnet)
-        full[:4, 3], full[:4, 7], full[:4, 9] = full[:4, 2], full[:4, 6], full[:4, 8]   # rectangular
+        full[:, 11] = full[:, 10]                            # dY_yokeOut = dY_yokeIn
+        full[:4, 3], full[:4, 7], full[:4, 9] = full[:4, 2], full[:4, 6], full[:4, 8]   # M0-M3 rectangular;
+        # M4's exit (dXOut, gapOut, dXYokeOut) stays nominal, as in every simulation so far
         return full
 
     def __call__(self, phi, muons):
-        """Per-muon hit flag (bool) of the physical design phi (50 free parameters) for muons (n, 7)."""
+        """Per-muon hit flag (bool) of the physical design phi (65 free parameters) for muons (n, 7)."""
         from cuda_muons_ship import run_from_params
         out = run_from_params(
             self.full_design(phi).numpy(), muons,

@@ -6,8 +6,9 @@ them with the logit offset -log(keep_neg) is a model of p(hit | u, x). A pool li
 paths.POOLS/<name>/shard_<worker>.pt, with its designs (redrawn from its arguments, pool_designs,
 if a shard lacks them) and its raw muons.
 
-Pools of fewer parameters load too, the missing ones at nominal (u = 0): the first analysis' pools
-had 43 parameters, without the magnet heights (and every muon at x = y = 0, z = -1 m).
+Pools of fewer parameters load too, the missing ones at nominal (u = 0), shield.FREE being ordered
+so: the first analysis' pools (r1_*) had 43 parameters, without the magnet heights (and every muon
+at x = y = 0, z = -1 m), the second's (r2_*) 50, without the hadron absorber and the yoke heights.
 
     load_pool('A+B', dim)        every row of one or several pools (design ids offset)
     training_rows(config, dim)   the rows a training run uses (a budget of designs and muons, if given)

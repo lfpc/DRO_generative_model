@@ -9,8 +9,14 @@ with --oat, every parameter alone at +-1. Two references are used: 'T1', the nom
 'T1.5', a hot check sample drawn like the T = 1.5 pools (many more hits per design, so the
 one-at-a-time secants and curvatures are measured on it).
 
+When the shield gains parameters (shield.FREE), --stage extend keeps the stored muons and the
+designs simulated so far (the new parameters at nominal) and appends --n_random new designs per
+region in all the parameters and, if the reference has them, the new parameters one at a time;
+--stage simulate then simulates only those (with the same --n_workers as before).
+
     python -m validation.references --name T1 --stage sample --temperature 1 --n_muons 600000000
     python -m validation.references --name T1 --stage simulate --worker 0 --n_workers 2
+    python -m validation.references --name T1 --stage extend --n_random 8
     python -m validation.references --name T1 --stage simulate --designs extra.npz --tag worst   # other designs
 """
 import glob
@@ -33,6 +39,20 @@ def ref_designs(n_nominal, n_random, oat, D, seed=5):
         names += [f'oat{s}{i}' for i in range(D) for s in '+-']
         U.append(np.concatenate([[s * np.eye(D)[i] for s in (1, -1)] for i in range(D)]))
     return names, np.concatenate(U).astype(np.float32)
+
+
+def extend_designs(names, U, D, n_random, seed=6):
+    """names and U (m, D) of a reference's designs U (m, d < D) with the parameters d..D-1 added:
+    the old designs with them at nominal, then n_random new designs per region in all D, then, if
+    the old designs include the one-at-a-time ones, the new parameters alone at +-1."""
+    rng, d = np.random.default_rng(seed), U.shape[1]
+    nh, nb = (sum(n.startswith(g) for n in names) for g in ('half', 'box'))
+    names = list(names) + [f'half{nh + i}' for i in range(n_random)] + [f'box{nb + i}' for i in range(n_random)]
+    new = [np.pad(U, ((0, 0), (0, D - d))), rng.uniform(-0.5, 0.5, (n_random, D)), rng.uniform(-1, 1, (n_random, D))]
+    if any(n.startswith('oat') for n in names):
+        names += [f'oat{s}{i}' for i in range(d, D) for s in '+-']
+        new.append(np.concatenate([[s * np.eye(D)[i] for s in (1, -1)] for i in range(d, D)]))
+    return names, np.concatenate(new).astype(np.float32)
 
 
 def read_muons(path, lo, n):
@@ -67,11 +87,11 @@ def hit_index(name):
 if __name__ == '__main__':
     parser = cli.add_common(cli.parser(__doc__), model=False)
     parser.add_argument('--name', required=True, help='the reference: paths.REFERENCES/<name>/')
-    parser.add_argument('--stage', choices=('sample', 'simulate'), required=True)
+    parser.add_argument('--stage', choices=('sample', 'extend', 'simulate'), required=True)
     parser.add_argument('--temperature', type=float, default=1.0)
     parser.add_argument('--n_muons', type=int, default=int(1e9))
     parser.add_argument('--n_nominal', type=int, default=4)
-    parser.add_argument('--n_random', type=int, default=16, help='per region (half box, box)')
+    parser.add_argument('--n_random', type=int, default=16, help='per region (half box, box); with extend, the new ones')
     parser.add_argument('--oat', action='store_true', help='also every parameter alone at +-10%%')
     parser.add_argument('--block', type=int, default=25_000_000)
     parser.add_argument('--seed', type=int, default=0)
@@ -101,6 +121,19 @@ if __name__ == '__main__':
         raise SystemExit
 
     meta = torch.load(os.path.join(d, 'meta.pt'), weights_only=False)
+    if args.stage == 'extend':
+        d0 = meta['U'].shape[1]
+        if d0 >= shield.dim:
+            print(f'{d}: the designs already have {d0} parameters')
+            raise SystemExit
+        meta['names'], meta['U'] = extend_designs(meta['names'], meta['U'], shield.dim, args.n_random)
+        meta.setdefault('extended', []).append(dict(from_dim=d0, to_dim=shield.dim, n_random=args.n_random))
+        torch.save(meta, os.path.join(d, 'meta.pt.tmp'))
+        os.replace(os.path.join(d, 'meta.pt.tmp'), os.path.join(d, 'meta.pt'))
+        print(f'{d}: {d0} -> {shield.dim} parameters, {len(meta["names"])} designs')
+        raise SystemExit
+    if meta['U'].shape[1] != shield.dim:
+        raise SystemExit(f'{d}: designs of {meta["U"].shape[1]} parameters, the shield has {shield.dim} (--stage extend)')
     path = os.path.join(d, f'shard_{args.worker}.pt')
     if args.designs:
         extra = np.load(args.designs)

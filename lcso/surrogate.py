@@ -185,6 +185,7 @@ def load_members(path, phi_0, device='cpu'):
         nets = _member_nets(obj, len(phi_0))
         return ([ModelSurrogate(n, phi_0, obj['config']['delta'], obj['config']).eval().to(device) for n in nets]
                 if len(nets) > 1 else [])
-    root = os.path.dirname(os.path.dirname(os.path.abspath(path)))   # member paths are stored relative to the repo root
-    return [load_surrogate(p if os.path.exists(p) else os.path.join(root, p), phi_0, device)
+    here = os.path.dirname(os.path.abspath(path))       # member paths: as given to --stack, or next to the ensemble
+    return [load_surrogate(next((q for q in (p, os.path.join(os.path.dirname(here), p), os.path.join(here, os.path.basename(p)))
+                                 if os.path.exists(q)), p), phi_0, device)
             for p in obj.get('stacked', [])]
