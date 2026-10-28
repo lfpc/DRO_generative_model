@@ -27,7 +27,7 @@ import numpy as np
 import torch
 
 import cli
-from paths import REFERENCES
+from paths import FIELD_MAPS, REFERENCES
 from shield import MuonShield
 
 
@@ -69,6 +69,8 @@ def load(name):
     d = os.path.join(REFERENCES, name)
     shards = [torch.load(f, weights_only=False) for f in sorted(glob.glob(os.path.join(d, 'shard_[0-9]*.pt')))]
     meta = torch.load(os.path.join(d, 'meta.pt'), weights_only=False)
+    if len({s.get('fields', 'uniform') for s in shards}) > 1:
+        raise ValueError(f'{d}: shards simulated in different fields (shield.MuonShield fields)')
     hits = np.full(len(meta['names']), np.nan)
     for s in shards:
         for i, h in s['hits'].items():
@@ -99,10 +101,12 @@ if __name__ == '__main__':
     parser.add_argument('--tag', default=None, help='with --designs: written to shard_<tag>_<worker>.pt')
     parser.add_argument('--worker', type=int, default=0)
     parser.add_argument('--n_workers', type=int, default=1)
+    parser.add_argument('--map_workers', type=int, default=2, help='field maps computed at once (8 CPU cores each)')
     args = parser.parse_args()
     d = os.path.join(REFERENCES, args.name)
     os.makedirs(d, exist_ok=True)
-    shield = MuonShield(args.muons)
+    shield = MuonShield(args.muons, fields=args.fields, map_workers=args.map_workers,
+                        map_dir=os.path.join(FIELD_MAPS, f'ref_{args.name}_{args.worker}'))
     shield.muons.load()
 
     if args.stage == 'sample':
@@ -139,19 +143,23 @@ if __name__ == '__main__':
         extra = np.load(args.designs)
         meta.update(names=[str(n) for n in extra['names']], U=extra['U'].astype(np.float32))
         path = os.path.join(d, f'shard_{args.tag}_{args.worker}.pt')
-    shard = torch.load(path, weights_only=False) if os.path.exists(path) else dict(hits={}, hit_idx={})
+    shard = torch.load(path, weights_only=False) if os.path.exists(path) else dict(hits={}, hit_idx={}, fields=args.fields)
+    if shard.get('fields', 'uniform') != args.fields:
+        raise SystemExit(f'{path} has hits in {shard.get("fields", "uniform")} fields, not {args.fields}')
     B = meta['block']
     muons = read_muons(os.path.join(d, 'muons.npy'), 0, meta['n_muons'])      # into RAM, once
     mine = [i for i in range(len(meta['names'])) if i % args.n_workers == args.worker and i not in shard['hits']]
     print(f'{len(mine)} designs to simulate on {meta["n_muons"]:,} muons')
     for k, i in enumerate(mine):
         t0 = time.time()
+        shield.prefetch([shield.phi(meta['U'][j]) for j in mine[k:k + 2 * args.map_workers]])
         phi = shield.phi(meta['U'][i])
         per_block, idx = [], []
         for lo in range(0, meta['n_muons'], B):
             h = shield(phi, torch.from_numpy(muons[lo:lo + B])).cpu()
             per_block.append(int(h.sum()))
             idx.append(lo + torch.nonzero(h)[:, 0].numpy())
+        shield.drop_map(phi)
         shard['hits'][i] = np.array(per_block)
         shard['hit_idx'][i] = np.concatenate(idx)
         torch.save(shard, path + '.tmp')

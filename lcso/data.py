@@ -57,11 +57,13 @@ def load_pool(name, dim):
         parts = [load_pool(p, dim) for p in name.split('+')]
         if len({P['keep_neg'] for P in parts}) > 1:
             raise ValueError(f'{name}: the pools kept different fractions of the misses')
+        if len({P['fields'] for P in parts}) > 1:
+            raise ValueError(f'{name}: the pools were simulated in different fields (field map, uniform)')
         off = np.cumsum([0] + [len(P['U']) for P in parts])
         return dict(U=torch.cat([P['U'] for P in parts]), ids=np.concatenate([P['ids'] + o for P, o in zip(parts, off)]),
                     d=torch.cat([P['d'] + int(o) for P, o in zip(parts, off)]), x=torch.cat([P['x'] for P in parts]),
                     y=torch.cat([P['y'] for P in parts]), keep_neg=parts[0]['keep_neg'],
-                    n_muons=torch.cat([P['n_muons'] for P in parts]))
+                    n_muons=torch.cat([P['n_muons'] for P in parts]), fields=parts[0]['fields'])
     if name not in _cache:
         shards = [torch.load(f, weights_only=False) for f in sorted(glob.glob(os.path.join(POOLS, name, 'shard_*.pt')))]
         if not shards:
@@ -77,7 +79,8 @@ def load_pool(name, dim):
                             d=torch.cat([t for s in shards for t in s['d']]).long(),
                             x=to_x(torch.cat([t for s in shards for t in s['x']])),
                             y=torch.cat([t for s in shards for t in s['y']]).float(),
-                            keep_neg=a['keep_neg'], n_muons=torch.full((len(U),), float(a['n_muons'])))
+                            keep_neg=a['keep_neg'], n_muons=torch.full((len(U),), float(a['n_muons'])),
+                            fields=a.get('fields', 'uniform'))
     return _cache[name]
 
 

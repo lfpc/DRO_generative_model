@@ -33,7 +33,7 @@ def setup(args):
     """(shield, surrogate) of the --muons and --model of cli.add_common. The muon source is built
     here, before any seeding, because building the flow draws from the global RNG."""
     torch.backends.cuda.matmul.allow_tf32 = False   # too coarse for the curvature
-    shield = MuonShield(args.muons)
+    shield = MuonShield(args.muons, fields=args.fields)
     model = load_surrogate(args.model, shield.phi_0, args.device)
     shield.muons.load()
     return shield, model
@@ -133,6 +133,7 @@ def simulate(model, shield, blocks, U, group, G):
     phis = model.denormalize_phi(torch.as_tensor(np.asarray(U), dtype=torch.float32,
                                                  device=model.bias.device)).cpu()
     sim = np.zeros((len(U), G))
+    shield.prefetch(phis)                        # the field maps, while the first ones are simulated
     for _, raw in blocks:
         groups = group(raw)
         for i in range(len(U)):

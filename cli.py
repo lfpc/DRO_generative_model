@@ -15,9 +15,11 @@ def parser(doc):
 
 
 def add_common(p, model=True):
-    """--model (the surrogate), --muons (muons.make_muons) and --device."""
+    """--model (the surrogate), --muons (muons.make_muons), --fields (shield.MuonShield) and --device."""
     if model:
         p.add_argument('--model', default=MODEL, help='surrogate checkpoint (lcso/train.py)')
     p.add_argument('--muons', default='flow', help="muon source: 'flow', 'flow:<checkpoint>' or 'file:<muons.npy>'")
+    p.add_argument('--fields', default='map', choices=['map', 'uniform'],
+                   help="the simulator's magnetic field: snoopy's FEM map of each design, or uniform per iron block")
     p.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     return p

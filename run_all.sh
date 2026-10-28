@@ -16,6 +16,9 @@
 #   3  final ensemble (4 seeds; a seed > 10% above the median validation loss is replaced)  1 h
 #   4  the analysis (run_analysis.sh's steps, split over both GPUs)                       5.1 h
 #   5  the validation on the references                                                   minutes
+# Those times are for uniform fields. The simulator now runs in snoopy's field map of each design
+# (shield.py), ~20 s per map on 8 CPU cores, MAP_WORKERS maps at once beside each pool worker:
+# ~2.7 s per pool design with 8, so the pools (~41000 designs on 2 workers) take ~15 h.
 set -uo pipefail
 cd "$(dirname "$0")"
 source env.sh
@@ -25,6 +28,7 @@ GPU_A=${GPU_A:-0}; GPU_B=${GPU_B:-1}
 export MUONS=${MUONS:-flow}                 # muon source: flow | flow:<checkpoint> | file:<muons.npy>
 N=1000000000                                # simulated muons of the analysis
 ARCH="--hidden 128 --p 32"                  # the surrogate (python -m lcso.train --help)
+MAP_WORKERS=${MAP_WORKERS:-8}               # field maps computed at once per pool worker (8 CPU cores each)
 # pools: name, momentum temperature, region half-width (u), designs, seed, muons per design (the
 # seed also draws the muons: the 50-parameter pools had 10-13)
 POOLS_A="T2_m1e6 2.0 1 36000 20 1000000
@@ -45,7 +49,7 @@ pool() {  # GPU worker n_workers name T delta n seed muons [extra]: restarted af
   for try in $(seq 1 100); do
     grep -q "^done" $log 2>/dev/null && return 0
     CUDA_VISIBLE_DEVICES=$gpu python -W ignore -m lcso.simulate_pools --muons $MUONS --name $name --temperature $T \
-      --delta $delta --n_designs $n --seed $seed --n_muons $mu --worker $w --n_workers $nw "$@" 2>&1 \
+      --delta $delta --n_designs $n --seed $seed --n_muons $mu --worker $w --n_workers $nw --map_workers $MAP_WORKERS "$@" 2>&1 \
       | grep --line-buffered -E "^design|^done|^resuming|^skipping|Error|error" >> $log
   done
   grep -q "^done" $log

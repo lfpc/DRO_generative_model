@@ -81,7 +81,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     torch.backends.cuda.matmul.allow_tf32 = False
     grid, cgrid = args.grid, args.cache_grid
-    shield = MuonShield(args.muons)
+    shield = MuonShield(args.muons, fields=args.fields)
     refs = {t: Reference(t) for t in REFS}
     names = args.candidates.split(',')
     out, base = {}, None

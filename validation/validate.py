@@ -291,7 +291,7 @@ if __name__ == '__main__':
     torch.backends.cuda.matmul.allow_tf32 = False
     for d in (args.out, args.figs):
         os.makedirs(d, exist_ok=True)
-    shield = MuonShield(args.muons)
+    shield = MuonShield(args.muons, fields=args.fields)
     model = as_study(load_surrogate(args.model, shield.phi_0, args.device))
     refs = {t: Reference(t) for t in args.refs.split(',')}
     saved = os.path.join(args.out, 'predictions.npz')

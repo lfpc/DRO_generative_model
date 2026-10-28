@@ -21,6 +21,12 @@ generative flow of `~/projects/generator_muons`. Locations are set in `paths.py`
 changed with environment variables (`RMS_OUTPUTS`, `PROJECTS_DIR`, `MUON_FLOW`). Every script
 takes `--help`, which lists each flag with its default.
 
+The simulator runs in the magnetic field map of each design, from snoopy's FEM (`--fields map`,
+the default; `--fields uniform`: a uniform field per iron block). A map takes ~20 s on 8 CPU cores,
+in a separate process, and is computed in the background while the GPU simulates the previous
+designs. The analysis keeps the maps in `outputs/data/field_maps/` (delete them when snoopy
+changes); pools and references delete each map after use.
+
 ## Running
 
 ```bash
@@ -46,7 +52,7 @@ The settings (muon source, pools, architecture, simulated muons) are at the top 
 
 | path | contents |
 |---|---|
-| `shield.py` | the design problem: the 65 free parameters, the tolerance box (`u_i = +-1` is +-10%), the simulator call |
+| `shield.py` | the design problem: the 65 free parameters, the tolerance box (`u_i = +-1` is +-10%), the field maps, the simulator call |
 | `muons.py` | muon sources: the generative flow (sampled, or as a quadrature grid), or stored muons (`--muons file:<muons.npy>`); another generator plugs in as a class with `sample()` |
 | `paths.py`, `cli.py` | where things are; the shared command-line options (`--model`, `--muons`, `--device`) |
 | `lcso/` | the surrogate: architectures (`models.py`), the trained model as the analysis sees it (`surrogate.py`), training (`training.py`, `train.py`), the pools (`data.py`, `simulate_pools.py`, `adaptive_designs.py`) |
@@ -67,7 +73,8 @@ quantities are the scatter of the ensemble's members.
 Under `outputs/` (not tracked; `paths.py`):
 
     models/     the surrogates: lcso.pt and its seeds, lcso_first.pt (the first ensemble)
-    data/       simulations: pools/ (training), references/ (validation), adaptive_designs.npy
+    data/       simulations: pools/ (training), references/ (validation), adaptive_designs.npy,
+                field_maps/ (one folder per design)
     results/    numbers and text reports: robustness/, robustness_first/, validation/, experiments/
     figures/    every figure: robustness/, validation/, experiments/, muons/
     logs/       the launchers' logs

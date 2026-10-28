@@ -80,7 +80,7 @@ if __name__ == '__main__':
     parser.add_argument('--T0', type=float, default=2.0, help='temperature of the rest of the mixture')
     args = parser.parse_args()
     torch.set_num_threads(16)
-    shield = MuonShield(args.muons)
+    shield = MuonShield(args.muons, fields=args.fields)
     model = load_surrogate(args.model, shield.phi_0, args.device)
     shield.muons.load()
     Z, dA, pz, pt, ok = latent_grid(shield.muons, args.n_z, args.L)

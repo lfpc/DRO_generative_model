@@ -144,7 +144,7 @@ if __name__ == '__main__':
             report(json.load(f), args.out)
         raise SystemExit
     torch.backends.cuda.matmul.allow_tf32 = False
-    shield = MuonShield(args.muons)
+    shield = MuonShield(args.muons, fields=args.fields)
     model = load_surrogate(args.model, shield.phi_0, args.device)
     J = branch_jacobian(model)
     out = dict(model=args.model, ref_spec=args.ref, mc={}, grid={}, noise={})

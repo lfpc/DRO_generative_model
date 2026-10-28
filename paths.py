@@ -24,6 +24,7 @@ FIGURES = os.path.join(OUTPUTS, 'figures')
 MODEL = os.path.join(MODELS, 'lcso.pt')                   # the surrogate the analysis uses
 POOLS = os.path.join(DATA, 'pools')                       # training pools: <name>/shard_<worker>.pt
 REFERENCES = os.path.join(DATA, 'references')             # validation designs on stored muons: <name>/
+FIELD_MAPS = os.path.join(DATA, 'field_maps')             # snoopy's field map of each design: <hash>/field.h5
 REPORT = os.path.join(ROOT, 'report', 'muon_shield_robustness.tex')
 REPORT_FIGS = os.path.join(ROOT, 'report', 'figs')        # the report's figures, as PDF (tracked)
 

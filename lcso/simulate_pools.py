@@ -23,7 +23,7 @@ import time
 import torch
 
 import cli
-from paths import POOLS
+from paths import FIELD_MAPS, POOLS
 from shield import MuonShield
 
 from .data import pool_designs
@@ -44,9 +44,11 @@ if __name__ == '__main__':
     parser.add_argument('--n_workers', type=int, default=1)
     parser.add_argument('--save_every', type=float, default=600, help='seconds between saves of the shard')
     parser.add_argument('--max_attempts', type=int, default=2, help='tries per design before it is skipped')
+    parser.add_argument('--map_workers', type=int, default=4, help='field maps computed at once (8 CPU cores each)')
     args = parser.parse_args()
 
-    shield = MuonShield(args.muons)
+    shield = MuonShield(args.muons, fields=args.fields, map_workers=args.map_workers,
+                        map_dir=os.path.join(FIELD_MAPS, f'pool_{args.name}_{args.worker}'))
     shield.muons.load()
     out_dir = os.path.join(POOLS, args.name)
     os.makedirs(out_dir, exist_ok=True)
@@ -77,11 +79,13 @@ if __name__ == '__main__':
 
     t0 = t_save = time.time()
     for k, i in enumerate(todo):
+        shield.prefetch([shield.phi(U[j]) for j in todo[k:k + 2 * args.map_workers]])   # the next field maps
         attempts[str(i)] = attempts.get(str(i), 0) + 1
         save_attempts()
         torch.manual_seed(1_000_003 * args.seed + i)
         mu = shield.sample(args.n_muons, args.temperature, device=args.device)
         hit = shield(shield.phi(U[i]), mu).to(mu.device)
+        shield.drop_map(shield.phi(U[i]))
         keep = hit | (torch.rand(len(mu), device=mu.device) < args.keep_neg)
         del attempts[str(i)]                          # it ran: only designs that crash are counted
         shard['ids'].append(i)

@@ -2,17 +2,26 @@
 
 The design u is normalized to the tolerance box: u = 0 is the nominal design, u_i = +-1 puts
 parameter i at +-DELTA (10%) of its nominal value. The muons come from a muon source (muons.py,
-by default the generative flow); the transport is cuda_muons_ship (MuonsAndMatter, GPU).
+by default the generative flow); the transport is cuda_muons_ship (MuonsAndMatter, GPU), in the
+field map of snoopy's FEM (fields='map', the default) or a uniform field per iron block
+(fields='uniform'). A design's map is computed once, on the CPU, and kept in paths.FIELD_MAPS
+(one folder per design; delete them when snoopy changes).
 
     python shield.py --n_muons 100000000        # hits of the nominal design
 """
+import hashlib
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
 
 from muons import make_muons
-from paths import PROJECTS_DIR
+from paths import FIELD_MAPS, PROJECTS_DIR, ROOT
 
 # columns of one magnet's row; with NI_from_B the NI column is the field target B, in tesla
 COLUMNS = ['Z_gap', 'Z_len', 'dXIn', 'dXOut', 'dYIn', 'dYOut', 'gapIn', 'gapOut',
@@ -40,6 +49,15 @@ FREE = ([(1, c) for c in [1, 2, 6, 8, 14]] + [(m, c) for m in (2, 3, 4) for c in
         + [(5, 0), (5, 1)] + [(m, c) for m in (6, 7) for c in _free] + [(m, 4) for m in range(1, 8)]
         + [(0, c) for c in [1, 2, 6, 8, 14, 4]] + [(1, 0)] + [(m, 10) for m in range(8)])
 
+USE_DILUTED = True            # snoopy's yoke with diluted steel (its non-diluted FEM fails on M5)
+# a field map, in a fresh process: snoopy's process pool hangs in one that already runs CUDA
+_WRITE_MAP = ("import os, sys, numpy as np\n"
+              "from utils_cuda_muons.get_magnetic_field import get_magnetic_field_from_params\n"
+              "d = sys.argv[1]\n"
+              "get_magnetic_field_from_params(np.load(os.path.join(d, 'design.npy')), field_mode='simulate',\n"
+              "    field_map_file=os.path.join(d, 'field.h5'), fSC_mag=False, NI_from_B=True,\n"
+              f"    use_diluted={USE_DILUTED}, cores_field=int(sys.argv[2]))\n")
+
 
 class MuonShield:
     """The design problem: its free parameters (phi_0, labels, units), the simulator (__call__)
@@ -48,9 +66,14 @@ class MuonShield:
               {'dz': 0.01, 'dx': 4, 'dy': 6, 'position': 91}]      # a hit is a muon inside the last
     DELTA = 0.1                                                    # u_i = +-1 is +-10%
 
-    def __init__(self, muons='flow', uniform_fields=True):
+    def __init__(self, muons='flow', fields='map', map_dir=FIELD_MAPS, map_workers=4, map_cores=8):
+        if fields not in ('map', 'uniform'):
+            raise ValueError(f"fields must be 'map' or 'uniform', not {fields!r}")
         self.muons = make_muons(muons) if isinstance(muons, str) else muons
-        self.uniform_fields = uniform_fields
+        self.fields = fields
+        self.map_dir, self.map_cores = map_dir, map_cores       # map_workers maps at once, map_cores each
+        self._maps = ThreadPoolExecutor(map_workers)
+        self._pending = {}                                      # map file -> its future (prefetch)
         self.idx = torch.tensor(FREE)
         self.phi_0 = NOMINAL[self.idx[:, 0], self.idx[:, 1]].clone()      # (65,)
         self.dim = len(FREE)
@@ -65,7 +88,7 @@ class MuonShield:
         """The physical design of a normalized one."""
         return self.phi_0.numpy() * (1 + self.DELTA * np.asarray(u))
 
-    # ---- simulation ---------------------------------------------------------
+    # ---- designs ------------------------------------------------------------
     def full_design(self, phi):
         """65 free parameters (or a prefix of them, an earlier analysis' design, the rest nominal) ->
         the (8, 15) design, with the tied columns filled."""
@@ -80,16 +103,64 @@ class MuonShield:
         # (before the 65-parameter analysis only M0-M3, around 'try_opt': the r1_, r2_ pools)
         return full
 
+    # ---- field maps ---------------------------------------------------------
+    def map_file(self, phi):
+        """Where the field map of design phi is (or will be): a folder per design (the design as
+        the simulator sees it, rounded to 0.01)."""
+        full = np.round(self.full_design(phi).numpy().astype(np.float64), 2) + 0.0     # no -0.0
+        return os.path.join(self.map_dir, hashlib.sha1(full.tobytes()).hexdigest()[:20], 'field.h5')
+
+    def prefetch(self, phis):
+        """Start computing, in the background, the field maps of designs phis that are not there
+        yet; field_map() then waits for them."""
+        if self.fields != 'map':
+            return
+        for phi in phis:
+            path = self.map_file(phi)
+            if path not in self._pending and not os.path.exists(path):
+                self._pending[path] = self._maps.submit(self._make_map, self.full_design(phi).numpy(), path)
+
+    def field_map(self, phi):
+        """The field map file of design phi, computed if it is not there yet."""
+        path = self.map_file(phi)
+        if path in self._pending:
+            self._pending.pop(path).result()
+        if not os.path.exists(path):
+            self._make_map(self.full_design(phi).numpy(), path)
+        return path
+
+    def drop_map(self, phi):
+        """Delete the field map of design phi (a pool's designs are simulated once)."""
+        shutil.rmtree(os.path.dirname(self.map_file(phi)), ignore_errors=True)
+
+    def _make_map(self, full, path):
+        os.makedirs(self.map_dir, exist_ok=True)
+        tmp = tempfile.mkdtemp(dir=self.map_dir, prefix='tmp_')
+        try:
+            np.save(os.path.join(tmp, 'design.npy'), full)
+            r = subprocess.run([sys.executable, '-c', _WRITE_MAP, tmp, str(self.map_cores)], cwd=ROOT,
+                               env=os.environ | {'CUDA_VISIBLE_DEVICES': ''}, capture_output=True, text=True)
+            if r.returncode or not os.path.exists(os.path.join(tmp, 'field.h5')):
+                raise RuntimeError(f'the field map of\n{full}\nfailed:\n{r.stdout[-3000:]}\n{r.stderr[-3000:]}')
+            try:
+                os.rename(tmp, os.path.dirname(path))
+            except OSError:                       # another process wrote it meanwhile
+                pass
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- simulation ---------------------------------------------------------
     def __call__(self, phi, muons):
         """Per-muon hit flag (bool) of the physical design phi (65 free parameters) for muons (n, 7)."""
         from cuda_muons_ship import run_from_params
+        field_map = self.field_map(phi) if self.fields == 'map' else None
         out = run_from_params(
             self.full_design(phi).numpy(), muons,
             sensitive_plane=self.PLANES,
             n_steps=max(5000, int(np.ceil(self.PLANES[0]['position'] / 0.02)) + 100),
             fSC_mag=False,
-            field_mode='uniform' if self.uniform_fields else 'simulate',
-            field_map_file=None, NI_from_B=True, use_diluted=True, add_cavern=True, SND=False,
+            field_mode='read_file' if field_map else 'uniform',
+            field_map_file=field_map, NI_from_B=True, use_diluted=USE_DILUTED, add_cavern=True, SND=False,
             return_all=True,
             histogram_dir=os.path.join(PROJECTS_DIR, 'MuonsAndMatter/cuda_muons/data'),
             seed=None)
@@ -104,8 +175,9 @@ if __name__ == '__main__':
     parser.add_argument('--n_muons', type=int, default=int(1e8))
     parser.add_argument('--temperature', type=float, default=1.0)
     parser.add_argument('--muons', default='flow', help='muon source (muons.make_muons)')
-    parser.add_argument('--field_map', action='store_true', help='simulate the field map instead of uniform fields')
+    parser.add_argument('--fields', default='map', choices=['map', 'uniform'],
+                        help="snoopy's FEM field map, or a uniform field per iron block")
     args = parser.parse_args()
-    shield = MuonShield(args.muons, uniform_fields=not args.field_map)
+    shield = MuonShield(args.muons, fields=args.fields)
     hits = shield(shield.phi_0, shield.sample(args.n_muons, args.temperature))
     print(f'nominal design: {int(hits.sum())} hits over {args.n_muons:,} muons')

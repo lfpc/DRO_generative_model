@@ -100,7 +100,7 @@ if __name__ == '__main__':
         plot(z['runs'], z['grids'], z['earlier'])
         raise SystemExit
     torch.backends.cuda.matmul.allow_tf32 = False
-    shield = MuonShield(args.muons)
+    shield = MuonShield(args.muons, fields=args.fields)
     model = load_surrogate(args.model, shield.phi_0, args.device)
     r = np.load(os.path.join(args.run, 'robustness.npz'), allow_pickle=True)
     labels, names = [str(s) for s in r['labels']], [str(s) for s in r['dir_names']]
