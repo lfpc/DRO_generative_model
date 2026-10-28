@@ -10,8 +10,7 @@ conclusion is checked with the simulator.
 The report is `report/muon_shield_robustness.tex` (`latexmk -pdf muon_shield_robustness.tex` in
 `report/`). Its figures in `report/figs/` are PDFs that the plotting scripts write there directly
 (`analysis.plots`, `validation.validate`, `experiments/quadrature*.py`, each with a quick redraw
-from saved results); every figure also goes, as PNG, to `outputs/figures/`. The first analysis (43 parameters,
-muons on axis), which this one replaces, is in `old_report/`.
+from saved results); every figure also goes, as PNG, to `outputs/figures/`.
 
 ## Setup
 
@@ -53,7 +52,7 @@ The settings (muon source, pools, architecture, simulated muons) are at the top 
 | `analysis/` | the robustness analysis (`python -m analysis.<script>`): `robustness`, `worst_cases`, `bins`, `tolerance_boxes`, `scan_sim`, `plots`; shared machinery in `core.py` |
 | `validation/` | reference designs simulated on stored muons, and the surrogate scored on them |
 | `experiments/` | the studies that chose and checked the method (quadrature vs. sampling, architectures, training settings, derivative convergence) |
-| `report/`, `old_report/` | the report; the first analysis' reports |
+| `report/` | the report |
 | `DRO/` | the earlier latent-space DRO / LCSO project (toy problems, paper), independent of the above |
 
 The surrogate is integrated over the muons on a quadrature grid (the flow's momentum latent x
@@ -71,4 +70,3 @@ Under `outputs/` (not tracked; `paths.py`):
     results/    numbers and text reports: robustness/, robustness_first/, validation/, experiments/
     figures/    every figure: robustness/, validation/, experiments/, muons/
     logs/       the launchers' logs
-    archive/    earlier analyses; the first one in round1_43p_onaxis/

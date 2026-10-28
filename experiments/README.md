@@ -3,10 +3,9 @@
 The studies that chose and checked the method; none of them is part of the pipeline
 (`run_all.sh`). Run from the repository root after `source env.sh`, e.g.
 `python experiments/quadrature.py`. Results go to `outputs/results/experiments/`, figures to
-`outputs/figures/experiments/`. Most ran in the first analysis (43 parameters, muons on axis); their
-results are in `outputs/archive/round1_43p_onaxis/surrogate_study/`. Their large inputs (the
-reference samples and the pools not used by the current surrogate) were deleted, so those
-scripts no longer rerun as they are; their results and figures remain.
+`outputs/figures/experiments/`. Most ran in the first analysis (43 parameters, muons on axis); its models, inputs and results
+were deleted (the report's appendix keeps its conclusions), so those scripts no longer rerun as
+they are. Its two pools that the current surrogate is trained on are `outputs/data/pools/r1_*`.
 
 ## Integrating over the muons (second analysis)
 
@@ -31,7 +30,7 @@ response surface, MLP).
 | `plots.py` | the figures and summaries of both (`--final_only`: the versions in the report's App. C) |
 | `final_compare.py`, `final_compare.sh` | candidate production surrogates at the final setup |
 | `member_scores.py` | every seed of an ensemble scored alone (the seed-to-seed scatter) |
-| `derivative_check.py`, `worst_check.py` | which parts of the gradient and Hessian are determined; the worst directions of different surrogates, simulated |
+| `derivative_check.py` | which parts of the gradient and Hessian are determined |
 | `flow_vs_model.py` | why a gradient changed between two versions: the flow or the surrogate |
 
 What they found (the choices of `run_all.sh`):

@@ -5,7 +5,6 @@
                    data/      simulations: training pools, reference designs, adaptive designs
                    results/   numbers and text reports, one folder per stage
                    figures/   every figure, one folder per stage
-                   archive/   earlier analyses
   PROJECTS_DIR   the folder holding generator_muons and MuonsAndMatter (default: ~/projects)
   MUON_FLOW      the generative flow of the muons (default: generator_muons/outputs/muon_flow.pt)
 """

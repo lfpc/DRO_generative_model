@@ -16,9 +16,9 @@ Every hit at the nominal design is stored in the pools (lcso/simulate_pools.py; 
 the first --n_nominal of each pool), with its muon, so the latent of every hit, and with it the
 gain, follows without new simulation.
 
-    python experiments/importance.py --pools outputs/archive/round1_43p_onaxis/surrogate_study/shield_pool
+    python experiments/importance.py
 
-Run in the first analysis, on its pools (outputs/results/experiments/importance.txt).
+Run in the first analysis, on its pools (T1_d1 and T3_m1e6 since deleted).
 """
 import glob
 import os
