@@ -17,8 +17,9 @@
 #   4  the analysis (run_analysis.sh's steps, split over both GPUs)                       5.1 h
 #   5  the validation on the references                                                   minutes
 # Those times are for uniform fields. The simulator now runs in snoopy's field map of each design
-# (shield.py), ~20 s per map on 8 CPU cores, MAP_WORKERS maps at once beside each pool worker:
-# ~2.7 s per pool design with 8, so the pools (~41000 designs on 2 workers) take ~15 h.
+# (shield.py), ~20 s per map on 8 CPU cores and ~3.4 GB of RAM, MAP_WORKERS maps at once beside
+# each pool worker: ~2 s per pool design with 6 on each of the 2 workers (~41 GB of RAM), so the
+# pools (~41000 designs) take ~22 h.
 set -uo pipefail
 cd "$(dirname "$0")"
 source env.sh
@@ -28,7 +29,7 @@ GPU_A=${GPU_A:-0}; GPU_B=${GPU_B:-1}
 export MUONS=${MUONS:-flow}                 # muon source: flow | flow:<checkpoint> | file:<muons.npy>
 N=1000000000                                # simulated muons of the analysis
 ARCH="--hidden 128 --p 32"                  # the surrogate (python -m lcso.train --help)
-MAP_WORKERS=${MAP_WORKERS:-8}               # field maps computed at once per pool worker (8 CPU cores each)
+MAP_WORKERS=${MAP_WORKERS:-6}               # field maps computed at once per pool worker (8 CPU cores, ~3.4 GB each)
 # pools: name, momentum temperature, region half-width (u), designs, seed, muons per design (the
 # seed also draws the muons: the 50-parameter pools had 10-13)
 POOLS_A="T2_m1e6 2.0 1 36000 20 1000000
