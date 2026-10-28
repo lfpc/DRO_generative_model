@@ -74,4 +74,6 @@ Under `outputs/` (not tracked; `paths.py`):
 
 The products of the 50-parameter analysis (the one in the report) carry the suffix `_p50`
 (`models/lcso_p50.pt`, `results/robustness_p50/`, ...); its pools are `data/pools/r2_*`, those of
-the first analysis (43 parameters) `r1_*`.
+the first analysis (43 parameters) `r1_*`. Both were simulated with M4's exit at nominal (M4 tapered
+when its entrance moved); from the 65-parameter analysis on M4 is rectangular, so they are not
+trained on, and the references' hits of that geometry are kept as `shard_p50_*.pt`.

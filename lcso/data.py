@@ -9,6 +9,8 @@ if a shard lacks them) and its raw muons.
 Pools of fewer parameters load too, the missing ones at nominal (u = 0), shield.FREE being ordered
 so: the first analysis' pools (r1_*) had 43 parameters, without the magnet heights (and every muon
 at x = y = 0, z = -1 m), the second's (r2_*) 50, without the hadron absorber and the yoke heights.
+Both were simulated with M4's exit (dXOut, gapOut, dXYokeOut) at nominal, which shield.full_design
+no longer does (M4 is rectangular): they are not the current shield and are not trained on.
 
     load_pool('A+B', dim)        every row of one or several pools (design ids offset)
     training_rows(config, dim)   the rows a training run uses (a budget of designs and muons, if given)

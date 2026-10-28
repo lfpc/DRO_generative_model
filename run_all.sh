@@ -8,7 +8,8 @@
 # Everything is set in the block below: the muon source (MUONS: the flow, another flow
 # checkpoint, or stored muons), the pools, the surrogate, the number of simulated muons. The run
 # of 2026-10-26 (50 parameters, the flow's muons with their production points) took 12.5 h; with
-# 65 parameters the references only add the new designs (step 2: --stage extend, ~5 h):
+# 65 parameters (and M4 rectangular, so no earlier simulation is reused) the pools take ~4 h and
+# the references, on their stored muons, ~6 h:
 #   1  pools                                                         GPUs 0, 1   2.9 h
 #   2  references                                                    GPU 1       4.3 h
 #      first ensemble -> its tolerance boxes -> adaptive pool        GPU 0       1.3 h
@@ -26,12 +27,11 @@ N=1000000000                                # simulated muons of the analysis
 ARCH="--hidden 128 --p 32"                  # the surrogate (python -m lcso.train --help)
 # pools: name, momentum temperature, region half-width (u), designs, seed, muons per design (the
 # seed also draws the muons: the 50-parameter pools had 10-13)
-POOLS_A="T2_m1e6 2.0 1 24000 20 1000000
+POOLS_A="T2_m1e6 2.0 1 36000 20 1000000
 T2_d2_m1e6 2.0 2 4000 21 1000000
 T1.5_d1 1.5 1 1024 22 10000000"
 ADAPT="T1.5_adapt 1.5 1 0 23 10000000"      # simulated at the first ensemble's worst cases
-EXTRA=r2_T2_m1e6+r2_T2_d2_m1e6+r2_T1.5_d1+r2_T1.5_adapt   # the 50-parameter pools, the rest nominal; empty: none
-# (the first analysis' r1_* would also load, but with them a training run holds ~75 GB of host memory)
+EXTRA=                                      # earlier pools to train on too ('A+B'); the r1_, r2_ ones had M4 tapered
 
 L=outputs/logs/run_all
 mkdir -p $L outputs/logs/pools

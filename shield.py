@@ -76,8 +76,8 @@ class MuonShield:
         full[:, 13] = full[:, 12]                            # XmgapOut = XmgapIn
         full[:, 5] = full[:, 4]                              # dYOut = dYIn (one height per magnet)
         full[:, 11] = full[:, 10]                            # dY_yokeOut = dY_yokeIn
-        full[:4, 3], full[:4, 7], full[:4, 9] = full[:4, 2], full[:4, 6], full[:4, 8]   # M0-M3 rectangular;
-        # M4's exit (dXOut, gapOut, dXYokeOut) stays nominal, as in every simulation so far
+        full[:5, 3], full[:5, 7], full[:5, 9] = full[:5, 2], full[:5, 6], full[:5, 8]   # M0-M4 rectangular
+        # (before the 65-parameter analysis only M0-M3: M4's exit stayed nominal in the r1_, r2_ pools)
         return full
 
     def __call__(self, phi, muons):

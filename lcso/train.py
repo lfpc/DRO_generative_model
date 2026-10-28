@@ -13,7 +13,7 @@
 production surrogates are four seeds stacked; a seed whose validation loss is more than 10% above
 the median of the others is replaced by a new seed.
 
-    P=T2_m1e6+T2_d2_m1e6+T1.5_d1+T1.5_adapt+r2_T2_m1e6+r2_T2_d2_m1e6+r2_T1.5_d1+r2_T1.5_adapt   # r2_: 50 parameters
+    P=T2_m1e6+T2_d2_m1e6+T1.5_d1+T1.5_adapt
     python -m lcso.train --pool $P --hidden 128 --p 32 --seed 0 --name lcso_s0
     python -m lcso.train --pool $P --hidden 128 --p 32 --p_res 32 --kind taylor-res4:8 --near 0.3 --seed 0 --name taylor_s0
     python -m lcso.train --stack outputs/models/lcso_s{0,1,2,3}.pt --name lcso
