@@ -95,7 +95,7 @@ wait $A && wait $B && step "1. pools done" || { step "1. a pool failed"; exit 1;
 step "2. references | first ensemble, adaptive pool"
 (
   export CUDA_VISIBLE_DEVICES=$GPU_B
-  R="python -W ignore -m validation.references --muons $MUONS"
+  R="python -W ignore -m validation.references --muons $MUONS --map_workers 1"   # its maps: ~3.4 GB each
   [ -f outputs/data/references/T1.5/meta.pt ] || $R --name T1.5 --stage sample --temperature 1.5 --n_muons 400000000 --oat > $L/ref_sample_T1.5.log 2>&1
   [ -f outputs/data/references/T1/meta.pt ] || $R --name T1 --stage sample --temperature 1 --n_muons 600000000 > $L/ref_sample_T1.log 2>&1
   for t in T1.5 T1; do        # references of fewer parameters: the same muons, new designs appended
