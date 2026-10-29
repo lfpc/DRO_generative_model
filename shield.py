@@ -50,8 +50,15 @@ FREE = ([(1, c) for c in [1, 2, 6, 8, 14]] + [(m, c) for m in (2, 3, 4) for c in
         + [(0, c) for c in [1, 2, 6, 8, 14, 4]] + [(1, 0)] + [(m, 10) for m in range(8)])
 
 USE_DILUTED = True            # snoopy's yoke with diluted steel (its non-diluted FEM fails on M5)
-# a field map, in a fresh process: snoopy's process pool hangs in one that already runs CUDA
-_WRITE_MAP = ("import os, sys, numpy as np\n"
+# a field map, in a fresh process: snoopy's process pool hangs in one that already runs CUDA. It is
+# the leader of its own process group (start_new_session) and takes the group, snoopy's workers
+# included, down with it when the simulation that asked for it dies (a CUDA crash, a kill)
+_WRITE_MAP = ("import ctypes, os, signal, sys, numpy as np\n"
+              "def die(*_):     # the leader takes its group down; snoopy's workers (Pool.terminate) just exit\n"
+              "    os.killpg(0, signal.SIGKILL) if os.getpid() == os.getpgid(0) else os._exit(143)\n"
+              "signal.signal(signal.SIGTERM, die)\n"
+              "ctypes.CDLL('libc.so.6').prctl(1, signal.SIGTERM)      # PR_SET_PDEATHSIG\n"
+              "if os.getppid() != int(sys.argv[3]): os.killpg(0, signal.SIGKILL)   # it died already\n"
               "from utils_cuda_muons.get_magnetic_field import get_magnetic_field_from_params\n"
               "d = sys.argv[1]\n"
               "get_magnetic_field_from_params(np.load(os.path.join(d, 'design.npy')), field_mode='simulate',\n"
@@ -138,8 +145,9 @@ class MuonShield:
         tmp = tempfile.mkdtemp(dir=self.map_dir, prefix='tmp_')
         try:
             np.save(os.path.join(tmp, 'design.npy'), full)
-            r = subprocess.run([sys.executable, '-c', _WRITE_MAP, tmp, str(self.map_cores)], cwd=ROOT,
-                               env=os.environ | {'CUDA_VISIBLE_DEVICES': ''}, capture_output=True, text=True)
+            r = subprocess.run([sys.executable, '-c', _WRITE_MAP, tmp, str(self.map_cores), str(os.getpid())],
+                               cwd=ROOT, env=os.environ | {'CUDA_VISIBLE_DEVICES': ''}, capture_output=True,
+                               text=True, start_new_session=True)
             if r.returncode or not os.path.exists(os.path.join(tmp, 'field.h5')):
                 raise RuntimeError(f'the field map of\n{full}\nfailed:\n{r.stdout[-3000:]}\n{r.stderr[-3000:]}')
             try:
