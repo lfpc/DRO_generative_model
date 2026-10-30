@@ -276,7 +276,7 @@ def plot(refs, preds, cals, labels, out, report=False):
     ax.plot(np.arange(D), hat[order], 'o', mfc='none', mec=color, ms=6, mew=1.5, label='surrogate')
     ax.axhline(0, color='0.7', lw=0.8)
     ax.set_xticks(range(D), [labels[i] for i in order], rotation=90, fontsize=6)
-    ax.set_ylabel('(H(+10%) - H(-10%)) / 2  [hits]')
+    ax.set_ylabel('(Y(+10%) - Y(-10%)) / 2  [hits]')
     ax.legend(fontsize=7)
     save(fig, 'oat')
 
@@ -292,7 +292,6 @@ if __name__ == '__main__':
     for d in (args.out, args.figs):
         os.makedirs(d, exist_ok=True)
     shield = MuonShield(args.muons, fields=args.fields)
-    model = as_study(load_surrogate(args.model, shield.phi_0, args.device))
     refs = {t: Reference(t) for t in args.refs.split(',')}
     saved = os.path.join(args.out, 'predictions.npz')
     if args.replot:
@@ -301,6 +300,7 @@ if __name__ == '__main__':
         cals = {t: tuple(z[f'cal_{t}']) for t in refs if f'cal_{t}' in z}
         plot(refs, preds, cals, shield.labels, args.figs, report=args.figs == figures(VALIDATION))
         raise SystemExit(f'figures redrawn in {args.figs}')
+    model = as_study(load_surrogate(args.model, shield.phi_0, args.device))
     preds, cals = {}, {}
     for t, R in refs.items():
         if model.separable:

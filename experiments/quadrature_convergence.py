@@ -1,10 +1,10 @@
 """Monte Carlo vs. the quadrature grid, as the analysis reports them: running estimates.
 
 For four quantities of the robustness analysis (final surrogate, per 1e9 nominal muons):
-  H_0                   the nominal hits
-  H_0, pz > 300 GeV     the nominal hits of the sparse high-momentum muons
-  M7:B at -10%          H/H_0 with the field of M7 alone lowered by 10%
-  worst, |u| = 1        H/H_0 one tolerance unit along the worst direction
+  Y_0                   the nominal hits
+  Y_0, pz > 300 GeV     the nominal hits of the sparse high-momentum muons
+  M7:B at -10%          Y/Y_0 with the field of M7 alone lowered by 10%
+  worst, |u| = 1        Y/Y_0 one tolerance unit along the worst direction
 the running Monte Carlo estimate as muons accumulate (several seeds), and the quadrature grid at
 increasing resolution. --earlier also draws the values a 1e9-muon Monte Carlo robustness run
 (--run) reported, with its jackknife errors.
@@ -28,7 +28,7 @@ from lcso.surrogate import load_surrogate
 from paths import EXPERIMENTS, RUN, save_figure
 from shield import MuonShield
 
-QUANTITIES = ['H_0', 'H_0, pz > 300 GeV', 'M7:B at -10%', 'worst direction, |u| = 1']
+QUANTITIES = ['$Y_0$', '$Y_0$, pz > 300 GeV', 'M7:B at -10%', 'worst direction, $|u| = 1$']
 
 
 @torch.no_grad()
@@ -75,7 +75,7 @@ def plot(runs, grids, earlier):
         ax.set(xscale='log', xlabel='muons / grid points', title=QUANTITIES[q])
         lo, hi = ref[q] * 0.75, ref[q] * 1.25
         ax.set_ylim(lo, hi)
-    axes[0].set_ylabel('per 1e9 muons, or H/H_0')
+    axes[0].set_ylabel('per 1e9 muons, or $Y/Y_0$')
     axes[0].legend(fontsize=7.5, loc='lower right')
     fig.suptitle('The surrogate integrated over the muon flow: running Monte Carlo vs. the quadrature grid '
                  '(dotted: its finest value)')

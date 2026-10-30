@@ -111,7 +111,7 @@ def report(out, name):
     print('\n'.join(lines))
 
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), constrained_layout=True)
-    for i, title in enumerate(('expected hits H', 'gradient at u = 0', 'Hessian at u = 0')):
+    for i, title in enumerate(('expected hits Y', 'gradient at u = 0', 'Hessian at u = 0')):
         ax = axes[i]
         for kind, color, label in (('mc', '#2a78d6', 'Monte Carlo'), ('grid', '#1baf7a', 'grid, one position per node')):
             pts = sorted(curves[kind])

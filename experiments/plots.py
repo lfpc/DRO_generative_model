@@ -32,7 +32,7 @@ LABEL = {'deeponet': 'DeepONet', 'taylor': 'Taylor, full rank', 'taylor:8': 'Tay
          'taylor-sub:4': 'Taylor on a 4-d subspace', 'taylor-res': 'Taylor + residual',
          'quad': 'full quadratic', 'rsm': 'response surface (no x)', 'fd': 'finite differences',
          'existing': 'lcso_deeponet.pt (earlier)', 'final': 'lcso.pt (final: 4 x 128/32, all pools)'}
-TOY_METRICS = [('pred_box', r'$H$ in the box: median $|\log \hat H / H|$', 'log'),
+TOY_METRICS = [('pred_box', r'$Y$ in the box: median $|\log \hat Y / Y|$', 'log'),
                ('grad_err', r'gradient: $|\hat g - g| / |g|$', 'log'),
                ('hess_err', r'Hessian: $|\hat H - H|_F / |H|_F$', 'log'),
                ('worst', 'worst case found (true rise / max)', 'linear')]
@@ -433,7 +433,7 @@ def shield_figures(rows, refs, final_only=False):
         ax.plot(np.arange(Dm), s[order], 'o', mfc='none', mec=COLOR[k], ms=6, mew=1.5, label=LABEL[k])
     ax.axhline(0, color='0.7', lw=0.8)
     ax.set_xticks(range(Dm), [labels[i] for i in order], rotation=90, fontsize=6)
-    ax.set_ylabel('(H(+10%) - H(-10%)) / 2  [hits]')
+    ax.set_ylabel('(Y(+10%) - Y(-10%)) / 2  [hits]')
     ax.legend(fontsize=7)
     ax.set_title(f'One parameter at a time, hot check sample ({n:.0e} muons): simulator vs. '
                  + ('surrogate' if final_only else 'surrogates'))

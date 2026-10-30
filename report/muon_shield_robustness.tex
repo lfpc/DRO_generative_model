@@ -9,7 +9,7 @@
 \usepackage{caption}
 \usepackage[section]{placeins}
 \graphicspath{{figs/}}
-\newcommand{\HH}{H/H_0}
+\newcommand{\HH}{Y/Y_0}
 
 \title{Robustness of the SHiP muon shield to parameter tolerances}
 \author{}
@@ -67,7 +67,7 @@ M6 and M7 have negative fields, so a negative change of their $B$ lowers $|B|$.
 Muons are drawn from the generative flow of \texttt{generator\_muons} (the physical flux): the
 momentum and charge, then the production point given them. They start where they are produced,
 along the target ($z$ from $-2.14$ to $0$\,m before the shield, median $-1.68$\,m) and around the
-beam axis (median radius $5$\,cm). The figure of merit $H$ is the number of muons crossing the
+beam axis (median radius $5$\,cm). The figure of merit $Y$ is the number of muons crossing the
 last sensitive plane per $10^9$ muons. At the nominal design, five simulator runs on the muons of
 the analysis give $1194$--$1304$ (each $\pm35$; the transport is stochastic) and four runs on
 independent muons $1220$--$1268$, a hit rate of $1.25\times10^{-6}$; the surrogate gives $1251$.
@@ -92,7 +92,7 @@ The surrogate (LCSO) models the hit probability of each muon $x$ for a design $u
   p(\text{hit}\mid x,u) = \sigma\!\big(b(u)\cdot t(x) + c\big),
 \end{equation}
 a DeepONet with a branch network $b$ for the design and a trunk network $t$ for the muon
-($p_x$, $p_y$, $p_z$, its production point $x$, $y$, $z$, and charge). The hits $H(u)$ are the
+($p_x$, $p_y$, $p_z$, its production point $x$, $y$, $z$, and charge). The hits $Y(u)$ are the
 integral of $p$ over the muons, a smooth function of $u$ with exact derivatives. Four DeepONets
 (two hidden layers of 128 units, 32 features) are trained with different seeds and their logits
 averaged; the average is itself a DeepONet with concatenated features. A seed whose final
@@ -171,7 +171,7 @@ A muon's momentum, azimuth and charge are independent in the flow: $(p_z,p_t)$ i
 therefore computed on a quadrature grid (latent $\times$ azimuth $\times$ charge,
 App.~\ref{app:quadrature}) instead of by sampling muons, with one production point per grid node
 drawn from the flow once, from a fixed seed. The grid reproduces a much finer one to
-$4\times10^{-4}$ in $H$ and $2\times10^{-3}$ in the derivatives, where $10^9$ sampled muons leave
+$4\times10^{-4}$ in $Y$ and $2\times10^{-3}$ in the derivatives, where $10^9$ sampled muons leave
 $1$--$2\%$ of noise. Only the simulator uses sampled muons.
 
 \subsection{Validation against the simulator}
@@ -188,7 +188,7 @@ Table~\ref{tab:val} and Fig.~\ref{fig:val} compare the surrogate with the simula
 \centering
 \caption{Surrogate vs.\ simulator on the reference designs: median $|\log(\text{pred}/\text{sim})|$
 (signed for the nominal design), and the relative vector errors of the 50 one-at-a-time (OAT)
-secants $\tfrac12[H(+e_i)-H(-e_i)]$ and curvatures $H(+e_i)+H(-e_i)-2H_0$ on the check sample.
+secants $\tfrac12[Y(+e_i)-Y(-e_i)]$ and curvatures $Y(+e_i)+Y(-e_i)-2Y_0$ on the check sample.
 ``Noise'': what a perfect model would score, from the simulator's Poisson noise.}
 \label{tab:val}
 \begin{tabular}{lcc}
@@ -211,7 +211,7 @@ OAT curvatures (cosine)         & $9.7\%$  & $12\%$ (0.993) \\
   \includegraphics[width=\linewidth]{validation_oat.pdf}\\[1ex]
   \includegraphics[width=0.48\linewidth]{validation_hits_T1.pdf}\hfill
   \includegraphics[width=0.48\linewidth]{validation_hits_T1.5.pdf}
-  \caption{Top: every parameter alone at $\pm10\%$, secant $\tfrac12[H(+10\%)-H(-10\%)]$ on the
+  \caption{Top: every parameter alone at $\pm10\%$, secant $\tfrac12[Y(+10\%)-Y(-10\%)]$ on the
   check sample: simulator (squares) and surrogate (circles). Bottom: predicted vs.\ simulated hits
   of the reference designs on the nominal muons (left) and the check sample (right), coloured by
   their distance from the nominal design; lower panels: the ratio, grey band $\pm10\%$.}
@@ -235,13 +235,13 @@ summarised in App.~\ref{app:study}.
 
 From the surrogate we compute
 \begin{itemize}
-  \item the gradient $g=\nabla_u H$ and Hessian $\nabla^2_u H$ at $u=0$, and the exact
-        one-at-a-time change $H(\pm e_i)/H_0-1$ of each parameter at its limit;
+  \item the gradient $g=\nabla_u Y$ and Hessian $\nabla^2_u Y$ at $u=0$, and the exact
+        one-at-a-time change $Y(\pm e_i)/Y_0-1$ of each parameter at its limit;
   \item the active subspace, the eigenvectors of $C=\mathbb{E}_x[\nabla_u p\,\nabla_u p^\top]$:
         the directions in which the hit probability of individual muons changes most;
   \item candidate worst directions, each of unit length:
     \texttt{ascent} ($v\propto g$),
-    \texttt{worst} (maximiser of the quadratic model $g\cdot v+\tfrac12 v^\top\nabla^2H\,v$ on
+    \texttt{worst} (maximiser of the quadratic model $g\cdot v+\tfrac12 v^\top\nabla^2Y\,v$ on
     $\|v\|=1$),
     \texttt{hess1} (top Hessian eigenvector), \texttt{act1}, \texttt{act2} (top active
     directions), \texttt{corner} ($v\propto\operatorname{sign} g$: every parameter moved by the
@@ -284,12 +284,12 @@ the surrogate is too smooth: M2's entrance width ($2.51$ simulated vs.\ $2.30$),
 
 \begin{table}[t]
 \centering
-\caption{The most sensitive parameters (surrogate): first-order sensitivity $g_i/H_0$ per full
+\caption{The most sensitive parameters (surrogate): first-order sensitivity $g_i/Y_0$ per full
 tolerance, and the exact change at $\pm10\%$ (errors: the members' standard error).}
 \label{tab:oat}
 \begin{tabular}{lrrrr}
 \toprule
-parameter & nominal & $g_i/H_0$ & $H/H_0-1$ at $+10\%$ & at $-10\%$ \\
+parameter & nominal & $g_i/Y_0$ & $Y/Y_0-1$ at $+10\%$ & at $-10\%$ \\
 \midrule
 M2:\texttt{dXIn}       & 68.04 cm & $-0.507$ & $-0.01\pm0.06$ & $+1.30\pm0.07$ \\
 M7:$B$                 & $-1.9$ T & $-0.457$ & $-0.24\pm0.02$ & $+0.92\pm0.06$ \\
@@ -335,10 +335,10 @@ M4:\texttt{Z\_len}     & 224.0 cm & $-0.062$ & $-0.02\pm0.02$ & $+0.18\pm0.03$ \
 
 \subsection{Curvature and active subspace}
 
-One Hessian eigenvalue dominates (Fig.~\ref{fig:spectra}): $3.76\pm0.16\,H_0$ per unit$^2$, then
-$0.90$, $0.59$ and $\lesssim0.17\,H_0$; 18 are negative, none below $-0.18\,H_0$. Along the
+One Hessian eigenvalue dominates (Fig.~\ref{fig:spectra}): $3.76\pm0.16\,Y_0$ per unit$^2$, then
+$0.90$, $0.59$ and $\lesssim0.17\,Y_0$; 18 are negative, none below $-0.18\,Y_0$. Along the
 gradient the second-order term already exceeds the first-order one at one tolerance unit
-($1.55\,H_0$ vs.\ $1.08\,H_0$): the response is strongly non-linear at that scale.
+($1.55\,Y_0$ vs.\ $1.08\,Y_0$): the response is strongly non-linear at that scale.
 
 The active subspace is effectively one-dimensional ($98.4\%$ of $\mathbb{E}[\|\nabla_u p\|^2]$).
 Its direction \texttt{act1} lengthens M1--M4 and raises their fields together, i.e.\ it changes
@@ -349,7 +349,7 @@ but the changes largely cancel in the total.
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.9\linewidth]{robustness_spectra.pdf}
-  \caption{Left: Hessian eigenvalues in units of $H_0$. Right: active-subspace eigenvalues
+  \caption{Left: Hessian eigenvalues in units of $Y_0$. Right: active-subspace eigenvalues
   (blue), their cumulative share (red) and the fraction of the gradient they contain (grey).}
   \label{fig:spectra}
 \end{figure}
@@ -558,7 +558,7 @@ factors multiply.
 
 \paragraph{Method.} If every parameter may be off by up to $\varepsilon$, the designs allowed
 form the box $|u_i|\le\varepsilon/10\%$. Its worst design is found on the surrogate, by
-projected-gradient ascent of $\log H$ over the box from 16 starting points (the sign of the
+projected-gradient ascent of $\log Y$ over the box from 16 starting points (the sign of the
 gradient, the scaled worst direction and random corners; 300 Adam steps each, all batched,
 seconds per box), and then simulated on $10^9$ muons. The simulated values are real designs
 within the tolerances, so the true worst case is at least as bad; the search is as good as the
@@ -617,8 +617,8 @@ measured.
 
 \paragraph{Method.} Which tolerances keep the worst case below a target? Greedily: start with
 every parameter at $\pm10\%$; find the box's worst design $u^*$ as above; tighten the two
-parameters that contribute most to it (the largest first-order shares of $\log H$,
-$u^*_i\,\partial\log H/\partial u_i$) by a factor $0.8$, down to a floor of $\pm0.5\%$; repeat
+parameters that contribute most to it (the largest first-order shares of $\log Y$,
+$u^*_i\,\partial\log Y/\partial u_i$) by a factor $0.8$, down to a floor of $\pm0.5\%$; repeat
 until the worst case is below the target. The first box that meets each target is its
 allocation, and its worst design is simulated. This is a heuristic, not an optimum: other
 allocations may loosen some parameters for the same target.
@@ -632,7 +632,7 @@ worst design of each allocation is simulated in the last row.}
 \small
 \begin{tabular}{lrccc}
 \toprule
-parameter & nominal & $\le3H_0$ & $\le2H_0$ & $\le1.5H_0$ \\
+parameter & nominal & $\le3Y_0$ & $\le2Y_0$ & $\le1.5Y_0$ \\
 \midrule
 M2:\texttt{dXIn}         & 68.04 cm & 0.50 & 0.50 & 0.50 \\
 M7:$B$                   & 1.9 T    & 0.55 & 0.50 & 0.50 \\
@@ -664,7 +664,7 @@ worst design: simulator & & $2.20\pm0.07$ & $1.56\pm0.06$ & $1.31\pm0.05$ \\
 \begin{figure}[!htbp]
   \centering
   \includegraphics[width=\linewidth]{tolerance_allocation.pdf}
-  \caption{Left: the tolerance allocations for a worst case of at most $3$, $2$ and $1.5\,H_0$
+  \caption{Left: the tolerance allocations for a worst case of at most $3$, $2$ and $1.5\,Y_0$
   (surrogate; simulated worst designs in the legend). Right: the greedy path, the worst case of
   the box against the number of parameters tightened.}
   \label{fig:allocation}
@@ -689,7 +689,7 @@ each simulated, and 4096 per level from the surrogate (Fig.~\ref{fig:random}).
 \small
 \begin{tabular}{lcccc}
 \toprule
-tolerance & simulated $\HH$ (8 designs) & surr.\ median & surr.\ 5--95\% & $P(H>H_0)$ \\
+tolerance & simulated $\HH$ (8 designs) & surr.\ median & surr.\ 5--95\% & $P(Y>Y_0)$ \\
 \midrule
 $\pm2\%$  & 0.85, 0.91, 0.91, 1.00, 1.07, 1.09, 1.14, 1.15 & 1.02 & 0.86--1.29 & $57\%$ \\
 $\pm5\%$  & 0.92, 0.93, 0.94, 1.17, 1.31, 1.44, 1.66, 1.76 & 1.17 & 0.81--2.21 & $73\%$ \\
@@ -715,7 +715,7 @@ the simulator design by design (median ratio simulator/surrogate $1.00$--$1.08$)
 \label{sec:momentum}
 
 The muons are split into bins of $p_z$ (and separately $p_t$ and charge), and each bin's hits
-$H_b$ get their own gradient, one-at-a-time effects and worst direction (Fig.~\ref{fig:pz_overview}).
+$Y_b$ get their own gradient, one-at-a-time effects and worst direction (Fig.~\ref{fig:pz_overview}).
 Below $75$\,GeV the per-bin magnitudes carry the surrogate's larger uncertainty there
 (Sec.~\ref{sec:validation}), so the directions and signs are the robust part; the simulated hits
 per $p_z$ range (Fig.~\ref{fig:simpz}) confirm them.
@@ -735,12 +735,12 @@ $45$--$75$\,GeV ($+81\%$) and above $300$\,GeV ($+75\%$), least at $75$--$175$\,
 \begin{table}[t]
 \centering
 \caption{Per $p_z$ bin at the nominal design (surrogate): share of the muons and of the hits, hit
-rate, relative sensitivity $|\nabla H_b|/H_b$ per tolerance unit, and the cosine between the
+rate, relative sensitivity $|\nabla Y_b|/Y_b$ per tolerance unit, and the cosine between the
 bin's gradient and that of the total.}
 \label{tab:pz}
 \begin{tabular}{lrrrrr}
 \toprule
-$p_z$ [GeV] & muons & share of hits & hit rate & $|\nabla H_b|/H_b$ & $\cos(g_b, g)$ \\
+$p_z$ [GeV] & muons & share of hits & hit rate & $|\nabla Y_b|/Y_b$ & $\cos(g_b, g)$ \\
 \midrule
 10--20   & $1.7\%$   & $0.0\%$  & $1.3\times10^{-8}$ & 1.92 & $-0.40$ \\
 20--30   & $48.4\%$  & $5.2\%$  & $1.3\times10^{-7}$ & 2.19 & $-0.55$ \\
@@ -928,7 +928,7 @@ M7 & 15.0  & 193.1 & 37.95 & 67.81 & 47.77 & 8.000 & 8.000 & 124.8 & 94.92  & $-
 
 With $A(z)$ the kinematic envelope of the sampled muons and $N=10^9$,
 \begin{equation}
-  H(u) = \frac{N}{\int\!\mathrm{d}^2z\,\mathcal{N}(z)A(z)}\sum_{q=\pm1}P(q)\int\!\mathrm{d}^2z\,
+  Y(u) = \frac{N}{\int\!\mathrm{d}^2z\,\mathcal{N}(z)A(z)}\sum_{q=\pm1}P(q)\int\!\mathrm{d}^2z\,
   \mathcal{N}(z)\,A(z)\int_0^{2\pi}\!\frac{\mathrm{d}\varphi}{2\pi}\,
   \mathbb{E}_{r\mid z,q}\,p\big(\text{hit}\mid u, x(z,\varphi,q,r)\big),
 \end{equation}
@@ -941,11 +941,11 @@ production point is drawn once per grid node from a fixed seed, so the grid is a
 muons; these draws are its only noise.
 
 Against a reference grid of $1601^2\times64\times2$ nodes with four production points each
-(Fig.~\ref{fig:quadrature}), the derivative grid is off by $4\times10^{-4}$ in $H$,
+(Fig.~\ref{fig:quadrature}), the derivative grid is off by $4\times10^{-4}$ in $Y$,
 $1.6\times10^{-3}$ in the gradient and $1.3\times10^{-3}$ in the Hessian, and the cached grid by
 $2.5\times10^{-3}$, $5.6\times10^{-3}$ and $4.2\times10^{-3}$ (rms over eight position seeds); four
 production points per node would halve the cached grid's errors. $10^9$ sampled muons scatter by
-$0.7\%$ in $H_0$ and $2\%$ above $300$\,GeV, and $10^8$ by $3\%$ in $H$, gradient and Hessian
+$0.7\%$ in $Y_0$ and $2\%$ above $300$\,GeV, and $10^8$ by $3\%$ in $Y$, gradient and Hessian
 alike. With on-axis muons (the first analysis) the grid was exact to $10^{-5}$, and quasi-Monte
 Carlo helped sampling only by a factor two. Importance-sampling the simulator at a raised
 temperature does not help either: the hits that matter are at intermediate momenta, of which a
@@ -979,7 +979,7 @@ known probability; 10--43 parameters) and the shield against its reference desig
         designs at once beat a rolling buffer; the designs must cover the region where the
         derivatives are read. A hotter momentum temperature ($T=2$) is much better than $T=1$ or
         $1.5$, and $T=3$ no better than $T=2$. A tailored training proposal (the provably best one
-        for the error on $H$) would give at most $1.7\times$ the effective training muons of
+        for the error on $Y$) would give at most $1.7\times$ the effective training muons of
         $T=2$, so the temperature is kept. Adding designs far from the nominal one helped only
         with an adaptive pool: a pool uniform in the box alone did not lower the box error on the
         nominal muons, with the adaptive pool it fell by a fifth (four seeds each, scored on the

@@ -74,12 +74,12 @@ def robustness_figures(r):
     ax[0].barh(y, lin[o], color=[(BAD if v > 0 else OK) if res else GREY for v, res in zip(lin[o], resolved[o])])
     ax[0].set_yticks(y, [labels[k] for k in o], fontsize=7)
     ax[0].axvline(0, color='k', lw=0.8)
-    ax[0].set(xlabel='$(\\partial H/\\partial u_i)\\,/\\,H_0$   (per full tolerance)', title='First-order sensitivity')
+    ax[0].set(xlabel='$(\\partial Y/\\partial u_i)\\,/\\,Y_0$   (per full tolerance)', title='First-order sensitivity')
     ax[1].hlines(y, om[o], op[o], color=GREY, lw=1)
     ax[1].errorbar(op[o], y, xerr=op_se[o], fmt='o', ms=4, color=BAD, lw=0.8, label='$u_i = +1$')
     ax[1].errorbar(om[o], y, xerr=om_se[o], fmt='o', ms=4, color=OK, lw=0.8, label='$u_i = -1$')
     ax[1].axvline(0, color='k', lw=0.8)
-    ax[1].set(xlabel='$H/H_0 - 1$', title='Exact one-at-a-time, $\\pm$10%')
+    ax[1].set(xlabel='$Y/Y_0 - 1$', title='Exact one-at-a-time, $\\pm$10%')
     ax[1].legend()
     fig.suptitle(f'Parameter sensitivity of the hit count; grey = not resolved at {args.n_sigma:g}$\\sigma$  '
                  f'({resolved.sum()}/{D} resolved)')
@@ -90,9 +90,9 @@ def robustness_figures(r):
     mags = np.unique(magnet)
     fig, ax = plt.subplots(1, 2, figsize=(10, 3.8), constrained_layout=True)
     ax[0].bar([f'M{m}' for m in mags], [np.linalg.norm(lin[magnet == m]) / np.linalg.norm(lin) for m in mags], color=OK)
-    ax[0].set(ylabel='$\\|\\nabla_{\\mathrm{magnet}} H\\| / \\|\\nabla H\\|$', title='Share of the gradient per magnet')
+    ax[0].set(ylabel='$\\|\\nabla_{\\mathrm{magnet}} Y\\| / \\|\\nabla Y\\|$', title='Share of the gradient per magnet')
     ax[1].bar([f'M{m}' for m in mags], [np.abs(worse[magnet == m]).max() for m in mags], color=BAD)
-    ax[1].set(ylabel='max $|H/H_0 - 1|$', title='Largest single-parameter effect per magnet')
+    ax[1].set(ylabel='max $|Y/Y_0 - 1|$', title='Largest single-parameter effect per magnet')
     save(fig, 'robustness_magnets.png')
 
     # --- spectra
@@ -100,7 +100,7 @@ def robustness_figures(r):
     fig, ax = plt.subplots(1, 2, figsize=(11, 4.5), constrained_layout=True)
     ax[0].axhline(0, color='k', lw=0.8)
     ax[0].errorbar(np.arange(1, D + 1), mu / H0, yerr=mu_se / H0, fmt='o-', ms=4, color=OK, lw=1, capsize=2)
-    ax[0].set(xlabel='index (most positive first)', ylabel='eigenvalue $/H_0$', title='Hessian at the nominal design')
+    ax[0].set(xlabel='index (most positive first)', ylabel='eigenvalue $/Y_0$', title='Hessian at the nominal design')
     ax[0].set_yscale('symlog', linthresh=max(1e-3, np.abs(mu / H0).max() * 1e-3))
     pos = np.arange(1, (nu > nu.max() * 1e-12).sum() + 1)
     ax[1].semilogy(pos, nu[:len(pos)], 'o-', ms=4, color=OK)
@@ -109,7 +109,7 @@ def robustness_figures(r):
     tw.plot(pos, (np.cumsum(nu) / nu.sum())[:len(pos)], 's--', ms=3, color=BAD)
     tw.plot(pos, np.cumsum((r['act_eigvecs'].T @ r['grad'] / np.linalg.norm(r['grad'])) ** 2)[:len(pos)],
             '^:', ms=3, color='0.3')
-    tw.set_ylabel('cumulative share (red) / of $\\nabla H$ (grey)', color=BAD)
+    tw.set_ylabel('cumulative share (red) / of $\\nabla Y$ (grey)', color=BAD)
     tw.set_ylim(0, 1.02)
     fig.suptitle('Curvature and active directions')
     save(fig, 'robustness_spectra.png')
@@ -142,7 +142,7 @@ def robustness_figures(r):
             curves.append(sr[idx])
         a.axvline(0, color=GREY, lw=1, ls='--')
         a.axhline(1, color=GREY, lw=0.8, ls=':')
-        a.set(title=nm, xlabel='step $t$ along $v$ (normalized units)', ylabel='$H(t)\\,/\\,H_0$')
+        a.set(title=nm, xlabel='step $t$ along $v$ (normalized units)', ylabel='$Y(t)\\,/\\,Y_0$')
         log_ylim(a, *curves)
     axes[0, 0].legend(fontsize=8)
     fig.suptitle('Surrogate vs. simulator along the robustness directions')
@@ -159,7 +159,7 @@ def robustness_figures(r):
                label='simulator', capsize=2)
     ax.axhline(1, color='k', lw=0.8, ls=':')
     ax.set_xticks(x, [nm for nm, _ in unit])
-    ax.set(ylabel='$H/H_0$ at $\\|u\\| = 1$', title='One tolerance unit along each direction (= one parameter at its $\\pm$10% face)')
+    ax.set(ylabel='$Y/Y_0$ at $\\|u\\| = 1$', title='One tolerance unit along each direction (= one parameter at its $\\pm$10% face)')
     ax.legend()
     save(fig, 'robustness_summary.png')
 
@@ -172,8 +172,8 @@ def robustness_figures(r):
                         color=plt.cm.tab10(j % 10), label=nm, capsize=2)
         lo, hi = 0.5 * min(sr[sr > 0].min(), r['ratio'].min()), 2 * max(sr.max(), r['ratio'].max())
         ax.plot([lo, hi], [lo, hi], 'k--', lw=0.8)
-        ax.set(xscale='log', yscale='log', xlim=(lo, hi), ylim=(lo, hi), xlabel='simulator $H/H_0$',
-               ylabel='surrogate $H/H_0$',
+        ax.set(xscale='log', yscale='log', xlim=(lo, hi), ylim=(lo, hi), xlabel='simulator $Y/Y_0$',
+               ylabel='surrogate $Y/Y_0$',
                title=f'Every walked design (nominal: surrogate {r["pred"][0]:.0f}, simulator {sim[0]:.0f} hits)')
         ax.legend(fontsize=8)
         save(fig, 'robustness_calibration.png')
@@ -192,7 +192,7 @@ def robustness_figures(r):
     if SIM and 'pga' in NAMES:
         i = r['dir_idx'][NAMES.index('pga')][-1]
         ax.axvline(sr[i], color=BAD, lw=1.5, ls='--', label=f'same design, simulated ({sr[i]:.1f})')
-    ax.set(xlabel='$H/H_0$ (surrogate)', ylabel='designs', title=f'{len(mc):,} designs uniform in the $\\pm$10% box')
+    ax.set(xlabel='$Y/Y_0$ (surrogate)', ylabel='designs', title=f'{len(mc):,} designs uniform in the $\\pm$10% box')
     ax.legend(fontsize=8)
     save(fig, 'robustness_mc.png')
 
@@ -216,7 +216,7 @@ def robustness_figures(r):
         ax.axvline(0, color=GREY, lw=0.8, ls='--')
         ax.set_title(labels[k], fontsize=10)
         if j % axes.shape[1] == 0:
-            ax.set_ylabel('$H/H_0$')
+            ax.set_ylabel('$Y/Y_0$')
         if j >= axes.shape[1]:
             ax.set_xlabel('change (% of nominal)')
     for ax in axes.flat[n:]:
@@ -235,7 +235,7 @@ def robustness_figures(r):
     lim = np.abs(lv).max()
     im = ax.pcolormesh(s, s, lv, cmap='RdBu_r', vmin=-lim, vmax=lim, shading='auto', rasterized=True)
     ax.contour(s, s, plane, levels=[0.5, 1, 2, 4, 8], colors='k', linewidths=0.7)
-    fig.colorbar(im, ax=ax, label='$\\log_{10} H/H_0$ (surrogate)')
+    fig.colorbar(im, ax=ax, label='$\\log_{10} Y/Y_0$ (surrogate)')
     if SIM:
         for nm, marker in ((a_name, 's'), (b_name, 'o')):
             k = NAMES.index(nm)
@@ -291,7 +291,7 @@ def worst_case_figures(w):
             ax.annotate(f'x{s:.2f}', (xi, s), textcoords='offset points', xytext=(6, -12), fontsize=8)
     ax.axhline(1, color='k', lw=0.8, ls=':')
     ax.set_yscale('log')
-    ax.set(xlabel='largest change of any parameter along the worst direction (% of nominal)', ylabel='$H/H_0$',
+    ax.set(xlabel='largest change of any parameter along the worst direction (% of nominal)', ylabel='$Y/Y_0$',
            title=f'Worst direction, {int((v != 0).sum())} parameters moved together')
     ax.legend()
     save(fig, 'worst_direction_scaled.png')
@@ -309,7 +309,7 @@ def worst_case_figures(w):
     ax.axvline(1, color='k', lw=0.8, ls=':')
     ax.set_yticks(y, [describe(nm).replace('worst, max 10%', f'worst, all {int((v != 0).sum())} parameters (max 10%)')
                       for nm in groups], fontsize=8)
-    ax.set(xlabel='$H/H_0$', title='How much of the worst case each parameter (or group) accounts for')
+    ax.set(xlabel='$Y/Y_0$', title='How much of the worst case each parameter (or group) accounts for')
     ax.legend(loc='lower right')
     save(fig, 'worst_parameters.png')
 
@@ -325,7 +325,7 @@ def worst_case_figures(w):
             if SIM:
                 a.axvline(S[d], color=BAD, lw=1.5, label='simulator' if j == 0 else '_')
         a.axvline(1, color='k', lw=1, ls='--')
-        a.set(xscale='log', xlabel='$H/H_0$', ylabel='designs', title=f'every parameter uniform in $\\pm${x:g}%')
+        a.set(xscale='log', xlabel='$Y/Y_0$', ylabel='designs', title=f'every parameter uniform in $\\pm${x:g}%')
         a.legend(fontsize=7)
     fig.suptitle('Random independent tolerances')
     save(fig, 'random_tolerances.png')
@@ -369,10 +369,10 @@ def bin_figures(b):
     ax[0, 1].bar(xb, H_b / H_b.sum(), color=COL)
     ax[0, 1].set(ylabel='share of the hits', title='Where the hits come from')
     ax[1, 0].bar(xb, gn / Hn, color=COL)
-    ax[1, 0].set(ylabel='$|\\nabla H_b| / H_b$', title='Relative sensitivity')
+    ax[1, 0].set(ylabel='$|\\nabla Y_b| / Y_b$', title='Relative sensitivity')
     ax[1, 1].bar(xb, curv / Hn, color=[BAD if c > 0 else OK for c in curv])
     ax[1, 1].axhline(0, color='k', lw=0.8)
-    ax[1, 1].set(ylabel='$v^T \\nabla^2 H_b v / H_b$ along its own $v$', title='Curvature')
+    ax[1, 1].set(ylabel='$v^T \\nabla^2 Y_b v / Y_b$ along its own $v$', title='Curvature')
     for a in ax.ravel():
         a.set_xticks(xb, SHORT, rotation=30, ha='right', fontsize=8)
     fig.suptitle(f'Muon regions in {var}')
@@ -381,7 +381,7 @@ def bin_figures(b):
     rel = b['grad_b'] / Hn[:, None]
     o = np.argsort(-np.abs(rel).max(0))[::-1]
     fig, ax = plt.subplots(1, 2, figsize=(4 + 0.9 * B, 10), constrained_layout=True, sharey=True)
-    for a, M, title in ((ax[0], rel[:, o].T, 'First order: $(\\partial H_b/\\partial u_i)/H_b$'),
+    for a, M, title in ((ax[0], rel[:, o].T, 'First order: $(\\partial Y_b/\\partial u_i)/Y_b$'),
                         (ax[1], np.maximum(b['oat_plus'], b['oat_minus'])[o], 'Exact one-at-a-time (worse side)')):
         lim = np.abs(M).max()
         fig.colorbar(a.imshow(M, cmap='RdBu_r', vmin=-lim, vmax=lim, aspect='auto'), ax=a)
@@ -419,7 +419,7 @@ def bin_figures(b):
         a.axvline(0, color=GREY, lw=1, ls='--')
         a.axhline(1, color=GREY, lw=0.8, ls=':')
         a.set_yscale('log')
-        a.set(title=nm, xlabel='step $t$ along $v$ (normalized units)', ylabel='$H_b(t)\\,/\\,H_b(0)$')
+        a.set(title=nm, xlabel='step $t$ along $v$ (normalized units)', ylabel='$Y_b(t)\\,/\\,Y_b(0)$')
     axes[0, 0].legend(fontsize=7, ncol=2)
     fig.suptitle(f'Response by muon region along each direction ({var}); lines: surrogate'
                  + (', squares: simulator' if SIM else ''))
@@ -431,7 +431,7 @@ def bin_figures(b):
     for k in range(B):
         ax.hist(np.clip(mc[:, k], edges[0], edges[-1]), bins=edges, histtype='step', lw=1.6, color=COL[k], label=SHORT[k])
     ax.axvline(1.0, color='k', lw=1.2, ls='--', label='nominal')
-    ax.set(xscale='log', xlabel='$H_b/H_b(0)$', ylabel='designs', title=f'{len(mc):,} designs uniform in the $\\pm$10% box, by region')
+    ax.set(xscale='log', xlabel='$Y_b/Y_b(0)$', ylabel='designs', title=f'{len(mc):,} designs uniform in the $\\pm$10% box, by region')
     ax.legend(fontsize=8, ncol=2)
     save(fig, f'{var}_bins_mc.png')
 
@@ -459,7 +459,7 @@ def tolerance_figures(t, ev):
         ax.plot(ev['wc_pcts'], ev['wc'][:, 0], 'o--', color=OK, mfc='white', ms=6, label='scaled worst direction: surrogate')
         ax.plot(ev['wc_pcts'], ev['wc'][:, 1], 's--', color=BAD, mfc='white', ms=6, label='scaled worst direction: simulator')
     ax.axhline(1, color='k', lw=0.8, ls=':')
-    ax.set(yscale='log', xlabel='tolerance X (every parameter within $\\pm$X%)', ylabel='worst $H/H_0$',
+    ax.set(yscale='log', xlabel='tolerance X (every parameter within $\\pm$X%)', ylabel='worst $Y/Y_0$',
            title='Worst case for a given tolerance')
     ax.legend(fontsize=8)
     save(fig, 'tolerance_boxes.png')
@@ -479,7 +479,7 @@ def tolerance_figures(t, ev):
     cmap = plt.get_cmap('viridis')
     for j, (nm, st) in enumerate(zip(alloc, steps)):
         i = names.index(nm)
-        lab = f'worst $\\leq$ {nm[5:]} $H_0$ (surr. {pred[i]:.2f}' + (f', sim. {sim[i] / S0:.2f})' if SIM[i] else ')')
+        lab = f'worst $\\leq$ {nm[5:]} $Y_0$ (surr. {pred[i]:.2f}' + (f', sim. {sim[i] / S0:.2f})' if SIM[i] else ')')
         ax.barh(y + 0.4 - (j + 0.5) * h, 10 * path_e[st][tight], h, color=cmap(j / max(1, len(alloc) - 1)), label=lab)
     ax.axvline(10, color='k', lw=0.8, ls=':')
     ax.set_yticks(y, [labels[k] for k in tight], fontsize=8)
@@ -489,7 +489,7 @@ def tolerance_figures(t, ev):
     bx.plot((path_e < 1).sum(1), path_h, '-', color=OK)
     for j, (nm, st) in enumerate(zip(alloc, steps)):
         bx.plot((path_e[st] < 1).sum(), path_h[st], 'o', color=cmap(j / max(1, len(alloc) - 1)), ms=7)
-    bx.set(yscale='log', xlabel='parameters tightened', ylabel='worst $H/H_0$ in the box (surrogate)',
+    bx.set(yscale='log', xlabel='parameters tightened', ylabel='worst $Y/Y_0$ in the box (surrogate)',
            title='Greedy path')
     save(fig, 'tolerance_allocation.png')
 
