@@ -40,6 +40,8 @@ parser.add_argument('--name', default='lcso', help='checkpoint: paths.MODELS/<na
 parser.add_argument('--kind', default='deeponet', help="architecture (lcso/models.py), e.g. 'taylor-res4:8'")
 parser.add_argument('--n', type=int, default=None, help='muons per design to use (default: all of them)')
 parser.add_argument('--keep_neg', type=float, default=None, help='thin the stored misses to this fraction (default: as stored)')
+parser.add_argument('--thin_pz', default=None,
+                    help="'cut,frac': keep only frac of the rows of muons with p_z > cut GeV (data.training_rows)")
 parser.add_argument('--hidden', type=int, default=64)
 parser.add_argument('--p', type=int, default=16, help='branch/trunk feature dimension (DeepONet)')
 parser.add_argument('--p_res', type=int, default=16, help='features of the gated residual (taylor-*-res)')
@@ -82,6 +84,7 @@ with open(os.path.join(MODELS, '.pool_load.lock'), 'w') as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
     pool = data.load_pool(args.pool, len(phi_0))
     c = dict(pool=args.pool, seed=args.seed, n=args.n, keep_neg=args.keep_neg,
+             thin_pz=[float(v) for v in args.thin_pz.split(',')] if args.thin_pz else None,
              budget=(args.n or 0) * len(pool['ids']))
     train, val = data.train_val(c, len(phi_0), args.device)
     del pool

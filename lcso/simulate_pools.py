@@ -4,9 +4,9 @@ Designs: u = delta * (scrambled Sobol in [-1, 1]^D) * U(0, 1) (the radial pull t
 nominal design; --no_radial: uniform in the region), the first --n_nominal of them at u = 0;
 u = +-1 is a parameter at +-10%. --designs takes them from a .npy file (n, D) instead.
 Each design gets its own --n_muons fresh muons from --muons, the momentum at --temperature;
-with --pz_band, --n_muons muons with p_z in a range (the model is of p(hit | u, x) for each
-muon, so choosing the muons by x biases nothing: it puts the simulation where the training data
-is thin; the flow draws the production point only for those).
+with --pz_band and/or --pt_max, --n_muons muons with p_z in a range and p_t below a cut (the
+model is of p(hit | u, x) for each muon, so choosing the muons by x biases nothing: it puts the
+simulation where the training data is thin; the flow draws the production point only for those).
 --sparse K moves only 1 to K parameters per design (data.pool_designs).
 Every hit is kept and a miss with probability --keep_neg, so the stored rows are a case-control
 sample: a model fitted to them with the logit offset -log(keep_neg) is a model of p(hit | u, x).
@@ -42,6 +42,7 @@ if __name__ == '__main__':
     parser.add_argument('--no_radial', dest='radial', action='store_false', help='designs uniform in the region')
     parser.add_argument('--sparse', type=int, default=0, help='move only 1 to K parameters per design (0: all)')
     parser.add_argument('--pz_band', default=None, help="'lo,hi' (GeV): simulate only the muons with p_z in it")
+    parser.add_argument('--pt_max', type=float, default=None, help='GeV: simulate only the muons with p_t below it')
     parser.add_argument('--designs', default=None, help='.npy of designs (n, D); overrides the draw')
     parser.add_argument('--n_muons', type=int, default=int(1e7), help='per design (in the --pz_band, if given)')
     parser.add_argument('--keep_neg', type=float, default=4e-3, help='fraction of misses kept')
@@ -94,7 +95,8 @@ if __name__ == '__main__':
         torch.manual_seed(1_000_003 * args.seed + i)
         mus, hits = [], []
         for lo in range(0, args.n_muons, args.block):
-            mu = shield.sample(min(args.block, args.n_muons - lo), args.temperature, device=args.device, pz_band=band)
+            mu = shield.sample(min(args.block, args.n_muons - lo), args.temperature, device=args.device, pz_band=band,
+                                pt_max=args.pt_max)
             mus.append(mu)
             hits.append(shield(shield.phi(U[i]), mu).to(mu.device))
         mu, hit = torch.cat(mus), torch.cat(hits)

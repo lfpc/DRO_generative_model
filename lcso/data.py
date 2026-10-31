@@ -99,7 +99,9 @@ def clear_cache():
 def training_rows(c, dim):
     """Rows of budget / n designs of the pool, n muons each (n = None: every design and muon),
     the misses thinned further to keep_neg where more were kept (keep_neg None: as stored). The
-    offset is per row if the designs kept different fractions."""
+    offset is per row if the designs kept different fractions. thin_pz = (cut, frac): only a
+    fraction frac of the rows (hits and misses alike) of muons with p_z > cut, which leaves
+    p(hit | u, x) as it is and gives the rest of the muons more weight in the loss."""
     P = load_pool(c['pool'], dim)
     g = torch.Generator().manual_seed(c['seed'])
     M = len(P['ids']) if c.get('n') is None else int(c['budget'] // c['n'])
@@ -112,6 +114,9 @@ def training_rows(c, dim):
     keep = member[P['d']]
     if c.get('n') is not None:                                                    # n muons per design
         keep &= torch.rand(len(P['y']), generator=g) < c['n'] / P['n_muons'][P['d']]
+    if c.get('thin_pz'):
+        cut, frac = c['thin_pz']
+        keep &= (P['x'][:, 2] <= cut) | (torch.rand(len(P['y']), generator=g) < frac)
     q = P['keep_neg'] if c.get('keep_neg') is None else P['keep_neg'].clamp(max=c['keep_neg'])   # per design
     keep &= (P['y'] > 0) | (torch.rand(len(P['y']), generator=g) < (q / P['keep_neg'])[P['d']])   # thin the misses
     new = torch.full((len(P['U']),), -1, dtype=torch.long)
