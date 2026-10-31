@@ -8,7 +8,8 @@
 #     SIM=0 bash run_analysis.sh       # the surrogate alone, no simulation (minutes)
 #     FAST=1 bash run_analysis.sh      # 3e8 simulated muons and fewer concrete designs (< 1 h)
 #
-# Two lanes, one per GPU (one after the other on one GPU):
+# Two lanes, one per GPU (one after the other on one GPU, or when both are the same GPU: a
+# simulation takes most of its memory):
 #   A  robustness (derivatives, directions, simulated walks; ~3 h for 1e9 muons), worst_cases
 #      (concrete designs, simulated), scans (the one-at-a-time scans simulated, shared with B)
 #   B  bins (the sensitivity split by p_z, p_t and charge; surrogate only), tolerance_boxes (the box
@@ -51,7 +52,7 @@ lane_b() {
   [ -n "$NOSIM" ] || [ -f $RUN/tolerance_sim_0.npz ] || py analysis.tolerance_boxes $M --run $RUN --sim --n_muons $N
   [ -n "$NOSIM" ] || [ $W == 1 ] || [ -f $RUN/scan_sim_1.npz ] || py analysis.scan_sim $M --run $RUN --n_muons $N --worker 1 --n_workers 2
 }
-if [ $W == 1 ]; then
+if [ $W == 1 ] || [ "${GPUS[0]}" == "${GPUS[$((W - 1))]}" ]; then
   lane_a && lane_b
 else
   lane_a & A=$!; lane_b & B=$!
