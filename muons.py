@@ -30,7 +30,7 @@ from paths import GENERATOR_DIR, MUON_FLOW
 class Muons:
     device = 'cpu'
 
-    def sample(self, n, temperature=1.0, device='cpu'):
+    def sample(self, n, temperature=1.0, device='cpu', pz_band=None):
         raise NotImplementedError
 
     def load(self):
@@ -120,13 +120,37 @@ class FlowMuons(Muons):
         x, y, z = self.position(s[:, 2:5], phi_p)
         return torch.stack([pt * torch.cos(phi_p), pt * torch.sin(phi_p), pz, x, y, z, -13 * q], 1).float()
 
-    def sample(self, n, temperature=1.0, device='cpu'):
-        """n muons inside the kinematic envelope."""
+    @torch.no_grad()
+    def _draw_band(self, n, temperature, pz_band):
+        """The muons of n momentum draws that fall in the envelope and have p_z in pz_band, as in
+        _draw: the momentum from the tempered latent (it does not depend on the charge), then the
+        production point from the position flow given (momentum, charge), for the kept ones only."""
+        gen, dev = self.gen, self.device
+        y, pz, pt = self.latent_momentum(torch.randn(n, 2, device=dev, dtype=torch.float64) * temperature)
+        ok = self.in_envelope((pz ** 2 + pt ** 2).sqrt(), pt, pz) & (pz > pz_band[0]) & (pz < pz_band[1])
+        y, pz, pt = y[ok], pz[ok], pt[ok]
+        m = len(pz)
+        q = torch.where(torch.rand(m, device=dev) < gen.mu_plus, 1.0, -1.0).double()
+        phi_p = torch.rand(m, device=dev, dtype=torch.float64) * 2 * np.pi
+        if self.on_axis:
+            x, y_, z = (torch.zeros_like(pz),) * 2 + (torch.full_like(pz, -1.0),)
+        else:
+            ctx = torch.cat([y, ((q - gen.mean[5]) / gen.std[5]).float()[:, None]], 1)
+            abc = gen.flow.position.sample(0, context=ctx).double()
+            x, y_, z = self.position(self._std(abc, slice(2, 5)), phi_p)
+        return torch.stack([pt * torch.cos(phi_p), pt * torch.sin(phi_p), pz, x, y_, z, -13 * q], 1).float()
+
+    def sample(self, n, temperature=1.0, device='cpu', pz_band=None):
+        """n muons inside the kinematic envelope; with pz_band (lo, hi), n muons with p_z in it
+        (drawn by _draw_band: the production point only for those)."""
         self.load()
         parts, got = [], 0
         while got < n:
-            x = self._draw(int(1.02 * (n - got)) + 16, temperature)
-            x = x[self.in_envelope(x[:, :3].norm(dim=1), x[:, :2].norm(dim=1), x[:, 2])][:n - got]
+            if pz_band:
+                x = self._draw_band(int(1.02 * (n - got)) + 16, temperature, pz_band)[:n - got]
+            else:
+                x = self._draw(int(1.02 * (n - got)) + 16, temperature)
+                x = x[self.in_envelope(x[:, :3].norm(dim=1), x[:, :2].norm(dim=1), x[:, 2])][:n - got]
             if self.on_axis:
                 x[:, 3:5], x[:, 5] = 0.0, -1.0
             parts.append(x.to(device))
@@ -192,9 +216,9 @@ class FileMuons(Muons):
         if self.x is None:
             self.x = torch.from_numpy(np.load(self.path, mmap_mode='r')[:].astype(np.float32))
 
-    def sample(self, n, temperature=1.0, device='cpu'):
-        if temperature != 1:
-            raise ValueError('stored muons have no temperature')
+    def sample(self, n, temperature=1.0, device='cpu', pz_band=None):
+        if temperature != 1 or pz_band:
+            raise ValueError('stored muons have no temperature or p_z band')
         self.load()
         return self.x[torch.randint(len(self.x), (n,))].to(device)
 

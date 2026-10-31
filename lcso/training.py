@@ -2,7 +2,8 @@
 
 Rows hold the designs U (M, D) and, per row, its design index d, sample x and hit y. offset is
 added to every logit in the loss: -log(keep_neg) when only a fraction keep_neg of the misses
-were kept (case-control), so that the model itself is of p(hit | u, x).
+were kept (case-control), so that the model itself is of p(hit | u, x); a tensor (R,), one per
+row, when the rows come from pools that kept different fractions.
 
 Schemes, over the same rows:
   fixed    every training design from the start. The learning rate drops 3x whenever the
@@ -28,7 +29,11 @@ class Rows:
     d: torch.Tensor          # (R,) long
     x: torch.Tensor          # (R, dx)
     y: torch.Tensor          # (R,) float
-    offset: float = 0.0
+    offset: float | torch.Tensor = 0.0
+
+    def off(self, idx):
+        """The logit offset of rows idx."""
+        return self.offset[idx] if torch.is_tensor(self.offset) else self.offset
 
     def take(self, ids):
         """The rows of designs ids, re-indexed."""
@@ -36,10 +41,11 @@ class Rows:
         new = torch.full((self.U.shape[0],), -1, dtype=torch.long, device=self.d.device)
         new[ids] = torch.arange(len(ids), device=self.d.device)
         m = new[self.d] >= 0
-        return Rows(self.U[ids], new[self.d[m]], self.x[m], self.y[m], self.offset)
+        return Rows(self.U[ids], new[self.d[m]], self.x[m], self.y[m], self.off(m))
 
     def to(self, dev):
-        return Rows(self.U.to(dev), self.d.to(dev), self.x.to(dev), self.y.to(dev), self.offset)
+        off = self.offset.to(dev) if torch.is_tensor(self.offset) else self.offset
+        return Rows(self.U.to(dev), self.d.to(dev), self.x.to(dev), self.y.to(dev), off)
 
 
 def draw_designs(M, D, delta=1.0, radial=True, seed=0):
@@ -62,7 +68,7 @@ def split(rows, val_frac, seed):
 
 
 def bce(model, rows, idx):
-    z = model.logit_rows(rows.U, rows.d[idx], rows.x[idx]) + rows.offset
+    z = model.logit_rows(rows.U, rows.d[idx], rows.x[idx]) + rows.off(idx)
     return torch.nn.functional.binary_cross_entropy_with_logits(z, rows.y[idx])
 
 

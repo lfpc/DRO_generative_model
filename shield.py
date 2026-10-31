@@ -87,9 +87,9 @@ class MuonShield:
         self.labels = [f'M{m}:{COLUMNS[c]}' for m, c in FREE]
         self.units = [UNITS[COLUMNS[c]] for _, c in FREE]
 
-    def sample(self, n, temperature=1.0, device='cpu'):
-        """n muons from the shield's source."""
-        return self.muons.sample(n, temperature, device=device)
+    def sample(self, n, temperature=1.0, device='cpu', **kw):
+        """n muons from the shield's source (kw: e.g. pz_band of muons.FlowMuons.sample)."""
+        return self.muons.sample(n, temperature, device=device, **kw)
 
     def phi(self, u):
         """The physical design of a normalized one."""

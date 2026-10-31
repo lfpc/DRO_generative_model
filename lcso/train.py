@@ -81,13 +81,14 @@ if args.stack:
 with open(os.path.join(MODELS, '.pool_load.lock'), 'w') as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
     pool = data.load_pool(args.pool, len(phi_0))
-    c = dict(pool=args.pool, seed=args.seed, n=args.n, keep_neg=args.keep_neg or pool['keep_neg'],
+    c = dict(pool=args.pool, seed=args.seed, n=args.n, keep_neg=args.keep_neg,
              budget=(args.n or 0) * len(pool['ids']))
     train, val = data.train_val(c, len(phi_0), args.device)
     del pool
     data.clear_cache()
+off = train.offset if torch.is_tensor(train.offset) else torch.tensor([train.offset])
 print(f'{args.pool}: {train.U.shape[0]} + {val.U.shape[0]} validation designs, {len(train.y):,} training rows, '
-      f'{int(train.y.sum()):,} hits (logit offset {train.offset:.2f})', flush=True)
+      f'{int(train.y.sum()):,} hits (logit offset {float(off.min()):.2f}-{float(off.max()):.2f})', flush=True)
 
 torch.manual_seed(args.seed)
 net = make(args.kind, len(phi_0), 7, p=args.p, hidden=args.hidden, p_res=args.p_res).to(args.device)

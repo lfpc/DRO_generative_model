@@ -57,7 +57,7 @@ The settings (muon source, pools, architecture, simulated muons) are at the top 
 | `paths.py`, `cli.py` | where things are; the shared command-line options (`--model`, `--muons`, `--device`) |
 | `lcso/` | the surrogate: architectures (`models.py`), the trained model as the analysis sees it (`surrogate.py`), training (`training.py`, `train.py`), the pools (`data.py`, `simulate_pools.py`, `adaptive_designs.py`) |
 | `analysis/` | the robustness analysis (`python -m analysis.<script>`): `robustness`, `worst_cases`, `bins`, `tolerance_boxes`, `scan_sim`, `plots`; shared machinery in `core.py` |
-| `validation/` | reference designs simulated on stored muons, and the surrogate scored on them |
+| `validation/` | reference designs simulated on stored muons, and the surrogate scored on them (`validate.py`); the surrogate scored on every design the analyses simulated at the physical flux (`flux_check.py`) |
 | `experiments/` | the studies that chose and checked the method (quadrature vs. sampling, architectures, training settings, derivative convergence) |
 | `report/` | the report |
 | `DRO/` | the earlier latent-space DRO / LCSO project (toy problems, paper), independent of the above |
