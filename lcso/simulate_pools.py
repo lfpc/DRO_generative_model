@@ -7,7 +7,8 @@ Each design gets its own --n_muons fresh muons from --muons, the momentum at --t
 with --pz_band and/or --pt_max, --n_muons muons with p_z in a range and p_t below a cut (the
 model is of p(hit | u, x) for each muon, so choosing the muons by x biases nothing: it puts the
 simulation where the training data is thin; the flow draws the production point only for those).
---sparse K moves only 1 to K parameters per design (data.pool_designs).
+--sparse K moves only 1 to K parameters per design, --faces f puts a fraction f of them at +-1
+(data.pool_designs).
 Every hit is kept and a miss with probability --keep_neg, so the stored rows are a case-control
 sample: a model fitted to them with the logit offset -log(keep_neg) is a model of p(hit | u, x).
 
@@ -41,6 +42,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_nominal', type=int, default=16, help='designs at u = 0')
     parser.add_argument('--no_radial', dest='radial', action='store_false', help='designs uniform in the region')
     parser.add_argument('--sparse', type=int, default=0, help='move only 1 to K parameters per design (0: all)')
+    parser.add_argument('--faces', type=float, default=0.0, help='with --sparse: this fraction of the moved parameters at +-1')
     parser.add_argument('--pz_band', default=None, help="'lo,hi' (GeV): simulate only the muons with p_z in it")
     parser.add_argument('--pt_max', type=float, default=None, help='GeV: simulate only the muons with p_t below it')
     parser.add_argument('--designs', default=None, help='.npy of designs (n, D); overrides the draw')
@@ -62,7 +64,7 @@ if __name__ == '__main__':
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'shard_{args.worker}.pt')
     U = pool_designs(args.n_designs, args.delta, args.n_nominal, args.seed, shield.dim, args.radial, args.designs,
-                     args.sparse)
+                     args.sparse, args.faces)
     band = [float(v) for v in args.pz_band.split(',')] if args.pz_band else None
     args.n_designs, args.dim = len(U), U.shape[1]
     mine = [i for i in range(args.n_designs) if i % args.n_workers == args.worker]

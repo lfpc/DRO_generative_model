@@ -32,11 +32,12 @@ from .training import Rows, split
 _cache = {}
 
 
-def pool_designs(n, delta, n_nominal, seed, dim, radial=True, designs=None, sparse=0):
+def pool_designs(n, delta, n_nominal, seed, dim, radial=True, designs=None, sparse=0, faces=0.0):
     """The designs of a pool, from its arguments: u = delta * (scrambled Sobol in [-1, 1]^dim),
     pulled towards u = 0 by a U(0, 1) factor if radial, the first n_nominal at u = 0; or the
     designs of a .npy file. sparse = K > 0: each design moves only 1 to K parameters (uniform in
-    [-1, 1], the others at 0), the one-at-a-time effects and their pairs."""
+    [-1, 1], the others at 0), the one-at-a-time effects and their pairs; faces = f: a fraction f
+    of the moved parameters at their limit (+-1), where the analyses look."""
     if designs:
         return np.load(designs).astype(np.float32)
     u = qmc.Sobol(d=dim, scramble=True, seed=seed).random(n) * 2 - 1
@@ -45,6 +46,8 @@ def pool_designs(n, delta, n_nominal, seed, dim, radial=True, designs=None, spar
         k = rng.integers(1, sparse + 1, n)
         rank = np.argsort(rng.random((n, dim)), axis=1)
         u *= rank < k[:, None]
+        if faces:
+            u = np.where(rng.random(u.shape) < faces, np.sign(u), u)
     elif radial:
         u *= rng.random((n, 1))
     u[:n_nominal] = 0
@@ -78,7 +81,8 @@ def load_pool(name, dim):
         U = next((s['U'] for s in shards if 'U' in s), None)
         if U is None:
             U = pool_designs(a['n_designs'], a['delta'], a['n_nominal'], a['seed'], dim=a.get('dim', 43),
-                             radial=a.get('radial', True), designs=a.get('designs'), sparse=a.get('sparse', 0))
+                             radial=a.get('radial', True), designs=a.get('designs'), sparse=a.get('sparse', 0),
+                             faces=a.get('faces', 0.0))
         U = torch.as_tensor(np.asarray(U), dtype=torch.float32)
         U = torch.cat([U, torch.zeros(len(U), dim - U.shape[1])], 1)      # missing parameters at nominal
         _cache[name] = dict(U=U, ids=np.array(sum((s['ids'] for s in shards), [])),
