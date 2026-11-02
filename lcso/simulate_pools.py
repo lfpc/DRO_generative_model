@@ -46,6 +46,8 @@ if __name__ == '__main__':
     parser.add_argument('--pz_band', default=None, help="'lo,hi' (GeV): simulate only the muons with p_z in it")
     parser.add_argument('--pt_max', type=float, default=None, help='GeV: simulate only the muons with p_t below it')
     parser.add_argument('--designs', default=None, help='.npy of designs (n, D); overrides the draw')
+    parser.add_argument('--stop_after', type=int, default=None,
+                        help='simulate only the first designs of the draw (a pool cut short; the draw is unchanged)')
     parser.add_argument('--n_muons', type=int, default=int(1e7), help='per design (in the --pz_band, if given)')
     parser.add_argument('--keep_neg', type=float, default=4e-3, help='fraction of misses kept')
     parser.add_argument('--seed', type=int, default=0)
@@ -67,7 +69,7 @@ if __name__ == '__main__':
                      args.sparse, args.faces)
     band = [float(v) for v in args.pz_band.split(',')] if args.pz_band else None
     args.n_designs, args.dim = len(U), U.shape[1]
-    mine = [i for i in range(args.n_designs) if i % args.n_workers == args.worker]
+    mine = [i for i in range(min(args.n_designs, args.stop_after or args.n_designs)) if i % args.n_workers == args.worker]
     shard = dict(args=vars(args), ids=[], n_hits=[], n_muons=[], d=[], x=[], y=[], U=U)
     if os.path.exists(path):
         shard = torch.load(path, weights_only=False)

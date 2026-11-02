@@ -19,7 +19,8 @@
 # Those times are for uniform fields. The simulator now runs in snoopy's field map of each design
 # (shield.py), ~20 s per map on 8 CPU cores and ~3.4 GB of RAM, MAP_WORKERS maps at once beside
 # each pool worker: ~2 s per pool design with 6 on each of the 2 workers (~41 GB of RAM), so the
-# pools (~41000 designs) take ~22 h.
+# pools (~41000 designs) take ~22 h. The targeted pools (~25000 designs, 20-30 s each: the window
+# needs 2e7 muons per design) took ~4 days on one GPU, two at a time.
 set -uo pipefail
 cd "$(dirname "$0")"
 source env.sh
@@ -36,13 +37,26 @@ POOLS_A="T2_m1e6 2.0 1 36000 20 1000000
 T2_d2_m1e6 2.0 2 4000 21 1000000
 T1.5_d1 1.5 1 1024 22 10000000"
 ADAPT="T1.5_adapt 1.5 1 0 23 10000000"      # simulated at the first ensemble's worst cases
+# targeted pools (the final ensemble only), one worker each, alternately on GPUs A and B: the
+# muons of p_z 20-80 GeV (T = 2.5) and the window p_z 30-60 GeV, p_t < 1.2 GeV at the physical
+# spectrum, where the low-p_t hits of the shield's widths are (simulate_pools --pz_band, --pt_max);
+# sparse designs move 1-K parameters (--sparse), half of them at +-1 with --faces 0.5. Two were cut
+# short (--stop_after); the draw is the same.
+PB="--keep_neg 2e-4 --pz_band 20,80"; PW="--keep_neg 2e-4 --pz_band 30,60 --pt_max 1.2"
+POOLS_B="B20_80_d1 2.5 1 7000 30 15000000 $PB --stop_after 2286
+B20_80_sparse 2.5 1 2500 31 15000000 $PB --sparse 3
+W30_60_sparse 1 1 4000 40 20000000 $PW --sparse 3
+W30_60_sparse2 1 1 4000 42 20000000 $PW --sparse 2 --stop_after 1386
+W30_60_d1 1 1 4500 41 20000000 $PW
+W30_60_faces 1 1 4000 43 20000000 $PW --sparse 2 --faces 0.5"
+FINAL="--max_steps 400000"                  # the final ensemble's training, beside ARCH
 EXTRA=                                      # earlier pools to train on too ('A+B'); the r1_, r2_ ones had M4 tapered
 
 L=outputs/logs/run_all
 mkdir -p $L outputs/logs/pools
 step() { echo "$(date '+%F %H:%M') $*"; }
 names() { echo "$1" | awk '{print $1}' | paste -sd+; }
-TRAIN_POOLS=$(names "$POOLS_A")+$(names "$ADAPT")${EXTRA:++$EXTRA}
+TRAIN_POOLS=$(names "$POOLS_A")+$(names "$ADAPT")+$(names "$POOLS_B")${EXTRA:++$EXTRA}
 
 pool() {  # GPU worker n_workers name T delta n seed muons [extra]: restarted after a simulator crash
   local gpu=$1 w=$2 nw=$3 name=$4 T=$5 delta=$6 n=$7 seed=$8 mu=$9; shift 9
@@ -57,7 +71,7 @@ pool() {  # GPU worker n_workers name T delta n seed muons [extra]: restarted af
 }
 train() {  # name seed gpu
   [ -f outputs/models/$1.pt ] && return 0
-  CUDA_VISIBLE_DEVICES=$3 python -W ignore -m lcso.train --pool $POOLS $ARCH --seed $2 --name $1 > $L/train_$1.log 2>&1
+  CUDA_VISIBLE_DEVICES=$3 python -W ignore -m lcso.train --pool $POOLS $ARCH ${ARGS:-} --seed $2 --name $1 > $L/train_$1.log 2>&1
 }
 ensemble() {  # name gpu: seeds 0-3 two at a time, a bad seed replaced (seeds 4, 5, ...), stacked into outputs/models/<name>.pt
   local name=$1 gpu=$2 a b
@@ -90,6 +104,16 @@ pools() {  # GPU worker
 }
 pools $GPU_A 0 & A=$!; pools $GPU_B 1 & B=$!
 wait $A && wait $B && step "1. pools done" || { step "1. a pool failed"; exit 1; }
+step "1b. targeted pools"
+targeted() {  # GPU parity
+  local k=0
+  while read -r p; do
+    [ $((k++ % 2)) == $2 ] && { pool $1 0 1 $p || return 1; }
+  done <<< "$POOLS_B"
+  return 0
+}
+targeted $GPU_A 0 & A=$!; targeted $GPU_B 1 & B=$!
+wait $A && wait $B && step "1b. targeted pools done" || { step "1b. a targeted pool failed"; exit 1; }
 
 # ---- 2. references on GPU B | first ensemble and the adaptive pool on GPU A
 step "2. references | first ensemble, adaptive pool"
@@ -123,7 +147,7 @@ step "2. adaptive pool done"
 
 # ---- 3. the final ensemble (GPU A; GPU B may still be on the references)
 step "3. final ensemble"
-POOLS=$TRAIN_POOLS ensemble lcso $GPU_A || { step "3. failed"; exit 1; }
+POOLS=$TRAIN_POOLS ARGS="$FINAL" ensemble lcso $GPU_A || { step "3. failed"; exit 1; }
 
 # ---- 4. the analysis
 step "4. analysis"
