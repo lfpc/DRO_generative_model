@@ -30,7 +30,7 @@ changes); pools and references delete each map after use.
 ## Running
 
 ```bash
-nohup bash run_all.sh > outputs/logs/run_all.log 2>&1 &       # everything, on GPUs 0 and 1 (~12.5 h)
+nohup bash run_all.sh > outputs/logs/run_all.log 2>&1 &       # everything, on GPUs 0 and 1 (days: the pools)
 nohup bash run_analysis.sh > outputs/logs/run_analysis.log 2>&1 &   # the analysis of an existing surrogate (~5 h)
 SIM=0 bash run_analysis.sh                                     # the same on the surrogate alone (minutes)
 ```
@@ -39,7 +39,10 @@ SIM=0 bash run_analysis.sh                                     # the same on the
 
 1. simulates the training pools (`lcso/simulate_pools.py`): many designs around the nominal one
    (scrambled Sobol, pulled towards it), each with its own muons at a raised momentum temperature;
-   every hit and 0.4% of the misses are kept;
+   every hit and 0.4% of the misses are kept; then the targeted pools: only the muons of p_z
+   20-80 GeV, or of the window p_z 30-60 GeV, p_t < 1.2 GeV at the physical spectrum (where the
+   physical hits are), on radial designs and on sparse designs that move 1-3 parameters, half of
+   them at +-10% in the faces pool (`--pz_band`, `--pt_max`, `--sparse`, `--faces`);
 2. simulates the reference designs of the validation on stored muons (`validation/references.py`);
 3. trains a first four-seed ensemble (`lcso/train.py`), finds its tolerance-box worst cases and
    simulates an adaptive pool there (`lcso/adaptive_designs.py`);
@@ -72,14 +75,16 @@ quantities are the scatter of the ensemble's members.
 
 Under `outputs/` (not tracked; `paths.py`):
 
-    models/     the surrogates: lcso.pt and its seeds, lcso_first.pt (the first ensemble)
+    models/     the surrogates: lcso.pt and its seeds, lcso_first.pt (the first ensemble),
+                lcso_v1.pt (trained without the targeted pools; its analysis in results/robustness_v1/,
+                whose simulated designs flux_check also scores), exp_*.pt (trials)
     data/       simulations: pools/ (training), references/ (validation), adaptive_designs.npy,
                 field_maps/ (one folder per design)
     results/    numbers and text reports: robustness/, robustness_first/, validation/, experiments/
     figures/    every figure: robustness/, validation/, experiments/, muons/
     logs/       the launchers' logs
 
-The products of the 50-parameter analysis (the one in the report) carry the suffix `_p50`
+The products of the 50-parameter analysis (the previous report) carry the suffix `_p50`
 (`models/lcso_p50.pt`, `results/robustness_p50/`, ...); its pools are `data/pools/r2_*`, those of
 the first analysis (43 parameters) `r1_*`. Both were simulated with M4's exit at nominal (M4 tapered
 when its entrance moved); from the 65-parameter analysis on M4 is rectangular, so they are not

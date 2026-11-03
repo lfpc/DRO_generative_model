@@ -4,7 +4,8 @@ The analyses (analysis/*.py) simulate their designs on 1e9 (or 3e8) flow muons: 
 worst cases, the one-at-a-time scans and the tolerance boxes, ~130 designs in all, from near the
 nominal design to the worst found within +-10%. They are the designs the conclusions rest on, so
 they make a check set of the surrogate at the physical flux, wider than the references
-(validation/references.py), though chosen by an earlier surrogate. Each is compared on Y/Y_0 (the
+(validation/references.py), though chosen by a surrogate: those of robustness_v1 (the previous
+surrogate's analysis) and robustness_first by others than the one checked. Each is compared on Y/Y_0 (the
 surrogate on the quadrature grid, the simulator against the nominal of its own run):
 
     ratio  log(pred / sim) of Y/Y_0;  z = (pred - sim) / Poisson error of sim, both in Y/Y_0
@@ -24,7 +25,7 @@ import cli
 from analysis.core import cached_hits, feature_cache, one_group, setup
 from paths import RESULTS, VALIDATION
 
-RUNS = ('robustness', 'robustness_first')
+RUNS = ('robustness', 'robustness_v1', 'robustness_first')
 
 
 def designs(run):
