@@ -13,6 +13,8 @@ muons on the cached points):
                  until the worst case is below the smallest --targets. The first box meeting each
                  target is that target's allocation; its worst design is simulated to check it.
 
+--fixed holds parameters at nominal (zero tolerance), e.g. --fixed M0: for an absorber built to spec.
+
 Errors on the surrogate: the members' standard error at the found designs. --sim simulates the
 found designs on the sampled muons of robustness.py (seed 0), split over --n_workers GPUs; the
 report includes whichever simulations exist. The search is saved and reused unless --redo.
@@ -55,6 +57,8 @@ parser.add_argument('--n_muons', type=int, default=int(1e9), help='sampled muons
 parser.add_argument('--seed', type=int, default=0, help='0 = the muons of robustness.py and worst_cases.py')
 parser.add_argument('--worker', type=int, default=0)
 parser.add_argument('--n_workers', type=int, default=1)
+parser.add_argument('--fixed', default='', help='comma-separated label prefixes (e.g. "M0:") of parameters held at '
+                    'nominal: zero tolerance in every box and in the allocation')
 parser.add_argument('--block', type=int, default=int(2e7), help='sampled muons held in memory')
 args = parser.parse_args()
 
@@ -97,7 +101,7 @@ class BoxSearch:
         g = torch.Generator().manual_seed(seed)
         Z = [torch.from_numpy(z0).float() for z0 in starts]
         if warm is not None:
-            Z.append(torch.from_numpy(np.clip(warm / e, -1, 1)).float())
+            Z.append(torch.from_numpy(np.clip(np.divide(warm, e, out=np.zeros_like(warm), where=e > 0), -1, 1)).float())
         Z += [torch.randint(0, 2, (D,), generator=g).float() * 2 - 1 for _ in range(args.restarts - len(Z))]
         z = torch.stack(Z).to(args.device).requires_grad_(True)
         ev = torch.as_tensor(e, dtype=torch.float32, device=args.device)
@@ -130,6 +134,9 @@ V = r['dir_vecs'][[str(s) for s in r['dir_names']].index('worst')]
 STARTS = [np.sign(GRAD), V / np.abs(V).max()]               # the sign of the gradient, the scaled worst direction
 PCTS = [float(x) for x in args.pcts.split(',')]
 TARGETS = sorted(float(x) for x in args.targets.split(','))
+FREE = np.array([not any(l.startswith(p) for p in args.fixed.split(',') if p) for l in labels], float)
+if not FREE.all():
+    print(f'held at nominal: {", ".join(l for l, f in zip(labels, FREE) if not f)}')
 
 if os.path.exists(OUT) and not args.redo:
     t = np.load(OUT)
@@ -138,12 +145,12 @@ if os.path.exists(OUT) and not args.redo:
 else:
     names, U = [], []
     for x in PCTS:
-        u, lh = search.box_worst(np.full(D, x / 10), STARTS)
+        u, lh = search.box_worst(FREE * x / 10, STARTS)
         names.append(f'box{x:g}%')
         U.append(u)
-        print(f'box +-{x:g}%: worst H/H_0 = {np.exp(lh):.4g}, {int((np.abs(u) > 0.99 * x / 10).sum())}/{D} on a face')
+        print(f'box +-{x:g}%: worst H/H_0 = {np.exp(lh):.4g}, {int((np.abs(u) > 0.99 * x / 10).sum())}/{int(FREE.sum())} on a face')
     # greedy allocation
-    e, u, todo = np.ones(D), None, list(TARGETS)[::-1]                  # largest target first
+    e, u, todo = FREE.copy(), None, list(TARGETS)[::-1]                 # largest target first
     path_e, path_h = [], []
     for it in range(args.max_iter):
         u, lh = search.box_worst(e, STARTS, warm=u, seed=it)
@@ -163,11 +170,11 @@ else:
             if np.isfinite(s[k]) and s[k] > 0:
                 e[k] = max(e[k] * args.shrink, args.floor / 10)
         if it % 10 == 0:
-            print(f'step {it}: worst H/H_0 = {np.exp(lh):.4g}; {int((e < 1).sum())} parameters tightened, '
-                  f'tightest {10 * e.min():.2f}%')
+            print(f'step {it}: worst H/H_0 = {np.exp(lh):.4g}; {int(((e < 1) & (FREE > 0)).sum())} parameters tightened, '
+                  f'tightest {10 * e[FREE > 0].min():.2f}%')
     U, path_e, path_h = np.stack(U), np.stack(path_e), np.array(path_h)
     np.savez(OUT, names=np.array(names), U=U, path_e=path_e, path_h=path_h, pcts=np.array(PCTS),
-             targets=np.array(TARGETS), labels=np.array(labels), H_0=H0, cache_grid=args.cache_grid)
+             targets=np.array(TARGETS), labels=np.array(labels), H_0=H0, cache_grid=args.cache_grid, fixed=args.fixed)
     print(f'saved {OUT}')
 
 # =============================================================================
@@ -203,6 +210,7 @@ if os.path.exists(os.path.join(args.run, 'worst_cases.npz')):
             wc[x] = (wp[i] / wp[0], ws[i] / ws[0] if w['simulated'] else np.nan)
 
 say = Report()
+say((f'held at nominal (--fixed {args.fixed}): ' + ', '.join(l for l, f in zip(labels, FREE) if not f) + '\n') if args.fixed else '')
 say(f'model {args.model}; surrogate integrated on the points {args.cache_grid}, H_0 = {H0:.1f} per {args.n_ref:.0e}; '
     'errors: members\' standard error (surrogate), Poisson (simulator)')
 if sim0:
@@ -222,8 +230,9 @@ say(f'{"box":>6s} {"surrogate H/H_0":>18s} {"simulator H/H_0":>30s} {"on a face"
 for x in PCTS:
     i = names.index(f'box{x:g}%')
     face = int((np.abs(U[i]) > 0.99 * x / 10).sum())
+    nfree = int(FREE.sum())
     ref = f'{wc[x][0]:.3f} / {wc[x][1]:.3f}' if x in wc else '-'
-    say(f'+-{x:g}%'.rjust(6) + f' {pred[i]:9.4g} +- {pred_se[i]:<6.3g} {sim_txt(i):>30s} {face:6d}/{D}   {ref}')
+    say(f'+-{x:g}%'.rjust(6) + f' {pred[i]:9.4g} +- {pred_se[i]:<6.3g} {sim_txt(i):>30s} {face:6d}/{nfree}   {ref}')
     say('        largest shares of log H: ' + ', '.join(f'{labels[k]} {10 * U[i][k]:+.1f}% ({SH[i][k]:+.2f})'
                                                   for k in np.argsort(-SH[i])[:6])
         + f'; cos to the worst direction {U[i] @ V / np.linalg.norm(U[i]) / np.linalg.norm(V):+.2f}')
@@ -238,9 +247,9 @@ for name, u in zip(names, U):
     step = int(np.argmax(np.exp(path_h) <= float(name[5:])))
     e = path_e[step]
     say(f'\nworst H/H_0 <= {name[5:]}: surrogate {pred[i]:.3f} +- {pred_se[i]:.3f}, simulator {sim_txt(i)}')
-    say(f'  {int((e < 1).sum())} parameters tighter than +-10%, the rest at +-10%:')
+    say(f'  {int(((e < 1) & (FREE > 0)).sum())} parameters tighter than +-10%, the rest at +-10%:')
     for k in np.argsort(e):
-        if e[k] < 1:
+        if e[k] < 1 and FREE[k]:
             say(f'    {labels[k]:20s} +-{10 * e[k]:5.2f}%   ({abs(shield.phi_0[k].item()) * e[k] / 10:.3g} {shield.units[k]})')
 say.save(os.path.join(args.run, 'tolerance_boxes_report.txt'))
 np.savez(OUT.replace('.npz', '_eval.npz'), names=np.array(names), pred=pred, pred_se=pred_se, shares=SH, sim=sim, sim0=S0,
