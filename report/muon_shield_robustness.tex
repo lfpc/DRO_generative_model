@@ -287,7 +287,8 @@ From the surrogate we compute
     $\|v\|=1$),
     \texttt{hess1} (top Hessian eigenvector), \texttt{act1}, \texttt{act2} (top active
     directions), \texttt{corner} ($v\propto\operatorname{sign} g$: every parameter moved by the
-    same amount) and \texttt{random};
+    same amount), \texttt{random}, and \texttt{worst2} (as \texttt{worst}, with M7's parameters
+    held at nominal: the worst direction that does not involve M7);
   \item the worst corner of the box, by projected-gradient ascent (\texttt{pga});
   \item 4096 random designs in the box;
   \item the worst design for a given tolerance and a tolerance allocation
@@ -422,6 +423,8 @@ direction & max / RMS change & surrogate $\HH$ & simulator $\HH$ & sim.\ hits & 
 \texttt{corner} & 1.24\% / 1.24\% & $1.78\pm0.01$ & $1.75\pm0.06$ & 2040 & $0.72\pm0.03$ \\
 \texttt{act2}   & 8.7\% / 1.24\% & $1.91\pm0.03$ & $1.64\pm0.06$ & 1912 & $0.99\pm0.04$ \\
 \texttt{random} & 3.8\% / 1.24\% & $0.97\pm0.01$ & $0.96\pm0.04$ & 1114 & $1.24\pm0.05$ \\
+\midrule
+\texttt{worst2} (M7 fixed) & 4.3\% / 1.24\% & $2.46\pm0.06$ & $2.68\pm0.09$ & 3119 & $2.19\pm0.08$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -453,6 +456,16 @@ narrow its outer yoke and exit width (Table~\ref{tab:dirs}, Fig.~\ref{fig:dirgri
 ($\times3.7$ and $\times0.94$ along \texttt{worst}): the nominal design sits on the flank of a
 valley, not at its bottom (Fig.~\ref{fig:plane}). \texttt{act1}, independent of M7, gives
 $\times3.05$ at $t=+1$ (shorter and weaker M0--M4) and $\times1.07$ at $t=-1$.
+
+\paragraph{Without M7 the worst direction is M2--M4, and harmful both ways.}
+With M7's parameters held at nominal, the worst direction of the quadratic model,
+\texttt{worst2}, widens M2's entrance and narrows and weakens M3 and M4, with M1--M3 shorter
+(Table~\ref{tab:dirs}, Fig.~\ref{fig:dirgrid}; cosine $0.25$ with \texttt{worst}). At one
+tolerance unit it gives $\times2.68\pm0.09$ simulated (surrogate $2.46\pm0.06$), against
+$\times3.69$ for \texttt{worst}: M7 accounts for the worst third, but the rest of the shield is
+nearly as sensitive. Unlike \texttt{worst}, it is harmful in both directions ($\times2.19\pm0.08$
+at $t=-1$): it runs across the valley of M2's entrance width, which sits at its bottom
+(Sec.~\ref{sec:single}). The surrogate overestimates that side ($2.63$, $4\sigma$).
 
 \begin{table}[t]
 \centering
@@ -492,6 +505,12 @@ direction & largest changes & in words \\
 \texttt{act2}   & M7:\texttt{dXOut} $-8.7\%$ ($-6.0$), M7:\texttt{Z\_len} $+3.1\%$ ($+6.2$),
                   M7:$B$ $+2.1\%$ ($|B|$ $+0.04$ T), M4:\texttt{dY\_yokeIn} $+1.3\%$ ($+0.6$)
                 & M7's exit narrower, M7 longer and stronger \\
+\midrule
+\texttt{worst2} & M2:\texttt{dXIn} $+4.3\%$ ($+3.0$), M3:$B$ $-3.6\%$ ($-0.07$ T), M3:\texttt{dXIn}
+                  $-3.4\%$ ($-2.2$), M2, M3:\texttt{Z\_len} $-3.1\%$, $-3.0\%$ ($-7.0$, $-6.8$), M4:$B$
+                  $-2.6\%$ ($-0.05$ T), M4:\texttt{dXIn} $-2.4\%$ ($-1.0$), M1:\texttt{Z\_len} $-2.2\%$
+                  ($-3.4$), M3:\texttt{dXYokeIn} $+2.0\%$ ($+1.7$)
+                & M7 fixed: M2's entrance wider, M3 and M4 narrower and weaker, M1--M3 shorter \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -504,8 +523,9 @@ direction & largest changes & in words \\
   field $B_{goal}$; columns: the magnets, M6 and M7 split into entrance (in) and exit (out), whose
   widths and gaps differ (a cell spanning both: one value for the whole magnet). Red: increased;
   blue: decreased; hatched: not a free parameter of that magnet. \texttt{worst} and
-  \texttt{hess1} are M7's yokes and exit; \texttt{act1} shortens and weakens M0--M4;
-  \texttt{corner} moves every parameter by the same amount.}
+  \texttt{hess1} are M7's yokes and exit; \texttt{worst2}, with M7 fixed, widens M2's entrance and
+  narrows and weakens M3 and M4; \texttt{act1} shortens and weakens M0--M4. \texttt{corner}, every
+  parameter by $\pm1.24\%$, is left out.}
   \label{fig:dirgrid}
 \end{figure}
 

@@ -174,6 +174,15 @@ def seed_se(values):
     return v.std(0, ddof=1) / np.sqrt(len(v)) if len(v) > 1 else np.zeros(v.shape[1:])
 
 
+def restricted_worst(grad, hess, labels, fixed, radius):
+    """trust_region_max over the parameters whose labels start with none of the prefixes fixed
+    (e.g. ['M7:']); the others stay at nominal (zero components)."""
+    free = np.array([not any(l.startswith(p) for p in fixed) for l in labels])
+    v = np.zeros(len(labels))
+    v[free] = trust_region_max(grad[free], hess[np.ix_(free, free)], radius)
+    return v
+
+
 def unit(v):
     v = np.asarray(v, dtype=np.float64)
     return v / np.linalg.norm(v)

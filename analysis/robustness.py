@@ -12,7 +12,7 @@ members (lcso/train.py --stack), sd / sqrt(K). The simulator walks use --n_muons
 sampled muons, with Poisson errors.
 
 Directions (--dirs): ascent (+grad), descent, worst (trust-region maximizer of the quadratic
-model at --t_max), corner (sign of grad), pga (worst design in the box, by projected-gradient
+model at --t_max), worst2 (the same with the parameters of --worst2_fixed held at nominal), corner (sign of grad), pga (worst design in the box, by projected-gradient
 ascent on the surrogate), random, hess<k> and act<k> (k-th Hessian / active eigenvector).
 
     python -m analysis.robustness --no_sim                                   # surrogate only, minutes
@@ -25,7 +25,7 @@ import numpy as np
 import torch
 
 from analysis.core import (Report, branch_jacobian, cached_hits, derivatives, feature_cache, muon_blocks, nominal_pass,
-                           one_group, seed_se, setup, simulate, trust_region_max, unit)
+                           one_group, restricted_worst, seed_se, setup, simulate, trust_region_max, unit)
 import cli
 from lcso.surrogate import load_members
 from paths import RUN
@@ -38,7 +38,8 @@ parser.add_argument('--n_ref', type=float, default=1e9, help='hits are quoted pe
 parser.add_argument('--n_muons_sim', type=int, default=int(1e9), help='sampled muons for the simulated walks')
 parser.add_argument('--seed', type=int, default=0, help='seed of the sampled muons')
 parser.add_argument('--n_sigma', type=float, default=3.0, help='significance for "resolved"')
-parser.add_argument('--dirs', default='ascent,worst,act1,act2,hess1,pga,corner,random')
+parser.add_argument('--dirs', default='ascent,worst,act1,act2,hess1,pga,corner,random,worst2')
+parser.add_argument('--worst2_fixed', default='M7:', help='label prefixes held at nominal in worst2')
 parser.add_argument('--t_max', type=float, default=1.0, help='walk half-length (L2, normalized)')
 parser.add_argument('--n_points', type=int, default=5, help='points per walk (made odd)')
 parser.add_argument('--no_sim', dest='sim', action='store_false', help='walks on the surrogate only')
@@ -163,6 +164,8 @@ def direction(name):
         return -unit(grad), args.t_max
     if name == 'worst':
         return unit(v_trs), args.t_max
+    if name == 'worst2':
+        return unit(restricted_worst(grad, hess, labels, args.worst2_fixed.split(','), args.t_max)), args.t_max
     if name == 'corner':
         return unit(np.sign(grad)), args.t_max
     if name == 'pga':

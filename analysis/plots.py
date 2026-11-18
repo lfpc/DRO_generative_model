@@ -164,7 +164,7 @@ def robustness_figures(r):
             x += 1
         x += 0.12                                              # space between the magnets
 
-    show = [n for n in ('worst', 'hess1', 'ascent', 'corner', 'act1', 'act2') if n in NAMES] or NAMES
+    show = [n for n in ('worst', 'hess1', 'ascent', 'worst2', 'act1', 'act2') if n in NAMES] or NAMES
     pct = 10 * M                                               # u = v at t = 1; u_i = +-1 is +-10%
     lim = np.abs(pct[[NAMES.index(n) for n in show]]).max()
     cmap, norm = plt.get_cmap('RdBu_r'), matplotlib.colors.Normalize(-lim, lim)
