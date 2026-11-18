@@ -449,7 +449,7 @@ magnitudes come from the surrogate and the simulator.
 
 \paragraph{The worst direction is M7's yokes; less upstream bending is harmful too.}
 \texttt{worst}, \texttt{hess1} and the largest part of \texttt{ascent} widen M7's inner yoke and
-narrow its outer yoke and exit width (Table~\ref{tab:dirs}). They are harmful on one side only
+narrow its outer yoke and exit width (Table~\ref{tab:dirs}, Fig.~\ref{fig:dirgrid}). They are harmful on one side only
 ($\times3.7$ and $\times0.94$ along \texttt{worst}): the nominal design sits on the flank of a
 valley, not at its bottom (Fig.~\ref{fig:plane}). \texttt{act1}, independent of M7, gives
 $\times3.05$ at $t=+1$ (shorter and weaker M0--M4) and $\times1.07$ at $t=-1$.
@@ -495,6 +495,17 @@ direction & largest changes & in words \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{robustness_direction_grid.pdf}
+  \caption{The directions of Table~\ref{tab:dirs} parameter by parameter: the change of each
+  parameter at one tolerance unit (\%), per magnet (columns) and kind of parameter (rows). Red:
+  increased; blue: decreased; hatched: not a free parameter of that magnet. \texttt{worst} and
+  \texttt{hess1} are M7's yokes and exit; \texttt{act1} shortens and weakens M0--M4;
+  \texttt{corner} moves every parameter by the same amount.}
+  \label{fig:dirgrid}
+\end{figure}
 
 \begin{figure}[p]
   \centering

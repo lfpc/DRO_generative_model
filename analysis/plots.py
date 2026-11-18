@@ -125,6 +125,48 @@ def robustness_figures(r):
     ax.set_title('Directions in parameter space')
     save(fig, 'robustness_directions.png')
 
+    # --- each direction as a magnet x parameter grid: the change at one tolerance unit, in %
+    mag = sorted({int(s[1]) for s in labels})
+    cols = []
+    for s in labels:                                           # parameter kinds, in the order they first appear
+        c = s.split(':')[1]
+        if c not in cols:
+            cols.append(c)
+    from shield import COLUMNS
+    cols.sort(key=COLUMNS.index)
+    show = [n for n in ('worst', 'hess1', 'ascent', 'corner', 'act1', 'act2') if n in NAMES] or NAMES
+    pct = 10 * M                                               # u = v at t = 1; u_i = +-1 is +-10%
+    lim = np.abs(pct[[NAMES.index(n) for n in show]]).max()
+    nc = min(3, len(show))
+    nr = int(np.ceil(len(show) / nc))
+    fig, axes = plt.subplots(nr, nc, figsize=(3.3 * nc + 1.2, 4.1 * nr), constrained_layout=True, squeeze=False,
+                             sharex=True, sharey=True)
+    for a in axes.ravel()[len(show):]:
+        a.axis('off')
+    for a, n in zip(axes.ravel(), show):
+        G = np.full((len(cols), len(mag)), np.nan)
+        for k, s in enumerate(labels):
+            G[cols.index(s.split(':')[1]), mag.index(int(s[1]))] = pct[NAMES.index(n), k]
+        im = a.imshow(np.ma.masked_invalid(G), cmap='RdBu_r', vmin=-lim, vmax=lim, aspect='auto')
+        for y, x in zip(*np.nonzero(np.isnan(G))):                                  # not a parameter
+            a.add_patch(matplotlib.patches.Rectangle((x - 0.5, y - 0.5), 1, 1, facecolor='0.9', edgecolor='0.6',
+                                                     hatch='///', lw=0))
+        for (y, x), val in np.ndenumerate(G):
+            if np.isfinite(val) and abs(val) >= 1:
+                a.text(x, y, f'{val:+.1f}', ha='center', va='center', fontsize=7,
+                       color='w' if abs(val) > 0.6 * lim else 'k')
+        a.set_xticks(np.arange(len(mag)) + 0.5, minor=True)
+        a.set_yticks(np.arange(len(cols)) + 0.5, minor=True)
+        a.grid(which='minor', color='w', lw=1.5)
+        a.tick_params(which='minor', length=0)
+        a.set_xticks(np.arange(len(mag)), [f'M{m}' for m in mag])
+        a.set_yticks(np.arange(len(cols)), ['$B$ (NI)' if c == 'NI' else c for c in cols], fontsize=8)
+        a.set_title(n)
+    fig.colorbar(im, ax=axes, shrink=0.7, label='change at one tolerance unit (%)')
+    fig.suptitle('What each direction changes: red = parameter increased, blue = decreased '
+                 '(hatched: not a free parameter; numbers: changes of at least 1%)', fontsize=11)
+    save(fig, 'robustness_direction_grid.png')
+
     # --- walks
     nr = int(np.ceil(len(NAMES) / 3))
     fig, axes = plt.subplots(nr, 3, figsize=(13.8, 3.9 * nr), constrained_layout=True, squeeze=False)
