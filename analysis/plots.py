@@ -129,11 +129,11 @@ def robustness_figures(r):
     # kinds of parameter, grouped; columns: magnets, those whose exit differs from their entrance
     # (an Out parameter is free) split into an entrance and an exit column. A whole-magnet parameter
     # (a length, a height, the field) spans both.
-    GROUPS = [('core', [('dX', 'width $dX$'), ('dY', 'height $dY$')]),
-              ('yoke', [('dXYoke', 'width $dX_{yoke}$'), ('dY_yoke', 'height $dY_{yoke}$')]),
-              ('gaps, length', [('gap', 'core-yoke gap'), ('Xmgap', 'middle gap'), ('Z_gap', '$Z$ gap'),
-                                ('Z_len', 'length $Z$')]),
-              ('field', [('NI', '$B_{goal}$')])]
+    GROUPS = [('core', [('dX', 'width  dX'), ('dY', 'height  dY')]),
+              ('yoke', [('dXYoke', 'width  dXYoke'), ('dY_yoke', 'height  dY_yoke')]),
+              ('gaps, length', [('gap', 'core-yoke gap'), ('Xmgap', 'middle gap'), ('Z_gap', 'gap  Z_gap'),
+                                ('Z_len', 'length  Z_len')]),
+              ('field', [('NI', 'B_goal  (NI)')])]
     KIND = {'dXIn': ('dX', 'In'), 'dXOut': ('dX', 'Out'), 'dYIn': ('dY', None), 'gapIn': ('gap', 'In'),
             'gapOut': ('gap', 'Out'), 'dXYokeIn': ('dXYoke', 'In'), 'dXYokeOut': ('dXYoke', 'Out'),
             'dY_yokeIn': ('dY_yoke', None), 'XmgapIn': ('Xmgap', None), 'Z_gap': ('Z_gap', None),
@@ -170,7 +170,7 @@ def robustness_figures(r):
     cmap, norm = plt.get_cmap('RdBu_r'), matplotlib.colors.Normalize(-lim, lim)
     nc = min(3, len(show))
     nr = int(np.ceil(len(show) / nc))
-    fig, axes = plt.subplots(nr, nc, figsize=(3.9 * nc + 1.6, 0.36 * y * nr + 1.2), constrained_layout=True,
+    fig, axes = plt.subplots(nr, nc, figsize=(4.6 * nc + 2.0, 0.40 * y * nr + 1.3), constrained_layout=True,
                              squeeze=False, sharex=True, sharey=True)
     for a in axes.ravel()[len(show):]:
         a.axis('off')
@@ -183,7 +183,7 @@ def robustness_figures(r):
             a.add_patch(matplotlib.patches.Rectangle((x0 - 0.47, ROW[key] - 0.47), w - 0.06, 0.94, lw=0,
                                                      facecolor=cmap(norm(val))))
             if abs(val) >= 1:
-                a.text(x0 + (w - 1) / 2, ROW[key], f'{val:+.1f}', ha='center', va='center', fontsize=7,
+                a.text(x0 + (w - 1) / 2, ROW[key], f'{val:+.1f}', ha="center", va="center", fontsize=8.5,
                        color='w' if abs(val) > 0.6 * lim else 'k')
             filled |= {(key, COL[m]['In'] + i) for i in range(w)} if side is None else {(key, x0)}
         for key, yy in ROW.items():                            # not a parameter
@@ -194,20 +194,20 @@ def robustness_figures(r):
         for g, ya, yb in yg[1:]:
             a.axhline(ya - 0.72, color='0.4', lw=0.8)
         a.set(xlim=(-0.6, x - 0.12 - 0.4), ylim=(y - 0.45 - 0.4, -0.6))
-        a.set_xticks([p for p, _ in xlab], [t for _, t in xlab], fontsize=7.5)
-        a.set_yticks([p for p, _ in ylab], [t for _, t in ylab], fontsize=8)
+        a.set_xticks([p for p, _ in xlab], [t for _, t in xlab], fontsize=10)
+        a.set_yticks([p for p, _ in ylab], [t for _, t in ylab], fontsize=11)
         a.tick_params(length=0)
         for sp in a.spines.values():
             sp.set_visible(False)
-        a.set_title(n)
+        a.set_title(n, fontsize=14)
     for a in axes[:, 0]:
         for g, ya, yb in yg:
-            a.annotate(g, xy=(0, (ya + yb) / 2), xycoords=('axes fraction', 'data'), xytext=(-78, 0),
-                       textcoords='offset points', rotation=90, ha='center', va='center', fontsize=9,
+            a.annotate(g, xy=(0, (ya + yb) / 2), xycoords=('axes fraction', 'data'), xytext=(-112, 0),
+                       textcoords='offset points', rotation=90, ha='center', va='center', fontsize=12,
                        fontweight='bold', color='0.3')
-    fig.colorbar(matplotlib.cm.ScalarMappable(norm, cmap), ax=axes, shrink=0.7, label='change at one tolerance unit (%)')
+    fig.colorbar(matplotlib.cm.ScalarMappable(norm, cmap), ax=axes, shrink=0.7).set_label('change at one tolerance unit (%)', fontsize=12)
     fig.suptitle('What each direction changes: red = parameter increased, blue = decreased '
-                 '(hatched: not a free parameter; numbers: changes of at least 1%)', fontsize=11)
+                 '(hatched: not a free parameter; numbers: changes of at least 1%)', fontsize=13)
     save(fig, 'robustness_direction_grid.png')
 
     # --- walks
