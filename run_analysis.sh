@@ -7,6 +7,7 @@
 #     MODEL=outputs/models/other.pt RUN=outputs/results/robustness_other GPUS="0" bash run_analysis.sh
 #     SIM=0 bash run_analysis.sh       # the surrogate alone, no simulation (minutes)
 #     FAST=1 bash run_analysis.sh      # 3e8 simulated muons and fewer concrete designs (< 1 h)
+#     FIXED=M0: RUN=outputs/results/robustness_noM0 bash run_analysis.sh   # M0 held at nominal
 #
 # Two lanes, one per GPU (one after the other on one GPU, or when both are the same GPU: a
 # simulation takes most of its memory):
@@ -31,7 +32,7 @@ if [[ "${FAST:-0}" == 1 ]]; then
 fi
 NOSIM=""
 [[ "${SIM:-1}" == 0 ]] && NOSIM="--no_sim"
-M="--model $MODEL --muons $MUONS"
+M="--model $MODEL --muons $MUONS --fixed ${FIXED:-}"
 mkdir -p "$RUN"
 py() { echo "$(date '+%H:%M') $*"; python -W ignore -m "$@"; }
 
@@ -66,5 +67,6 @@ py analysis.plots $RUN
   echo "commit: $(git rev-parse --short HEAD) $(git diff --quiet || echo '(uncommitted changes)')"
   echo "model:  $MODEL ($(stat -c %y "$MODEL"))"
   echo "muons:  $MUONS; $N simulated (SIM=${SIM:-1}, FAST=${FAST:-0})"
+  echo "fixed:  ${FIXED:-none}"
 } > "$RUN"/MANIFEST.txt
 echo "done: $RUN"

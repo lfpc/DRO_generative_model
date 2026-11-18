@@ -16,7 +16,7 @@ from analysis.core import cached_hits, feature_cache, muon_blocks, setup, simula
 import cli
 from paths import RUN
 
-parser = cli.add_common(cli.parser(__doc__))
+parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.add_argument('--run', default=RUN, help='robustness.py --out_dir, with worst_cases.npz')
 parser.add_argument('--designs', default='nominal,ascent,worst,act1,box,single1')
 parser.add_argument('--t', type=float, default=1.0, help='step along the directions (1 = one tolerance unit)')

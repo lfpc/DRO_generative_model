@@ -13,7 +13,8 @@ muons on the cached points):
                  until the worst case is below the smallest --targets. The first box meeting each
                  target is that target's allocation; its worst design is simulated to check it.
 
---fixed holds parameters at nominal (zero tolerance), e.g. --fixed M0: for an absorber built to spec.
+--fixed holds parameters at nominal (zero tolerance), e.g. --fixed M0: for an absorber built to spec
+(analysis.core.setup: they leave the design u).
 
 Errors on the surrogate: the members' standard error at the found designs. --sim simulates the
 found designs on the sampled muons of robustness.py (seed 0), split over --n_workers GPUs; the
@@ -33,12 +34,11 @@ import os
 import numpy as np
 import torch
 
-from analysis.core import Report, cached_hits, feature_cache, muon_blocks, one_group, seed_se, setup, simulate
+from analysis.core import members, Report, cached_hits, feature_cache, muon_blocks, one_group, seed_se, setup, simulate
 import cli
-from lcso.surrogate import load_members
 from paths import RUN
 
-parser = cli.add_common(cli.parser(__doc__))
+parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.add_argument('--run', default=RUN, help='robustness.py --out_dir (for its worst direction)')
 parser.add_argument('--cache_grid', default='201x64', help='muon points of the surrogate (muons.py: for the flow, latent points per side x azimuths)')
 parser.add_argument('--n_ref', type=float, default=1e9, help='hits are quoted per this many muons')
@@ -57,8 +57,6 @@ parser.add_argument('--n_muons', type=int, default=int(1e9), help='sampled muons
 parser.add_argument('--seed', type=int, default=0, help='0 = the muons of robustness.py and worst_cases.py')
 parser.add_argument('--worker', type=int, default=0)
 parser.add_argument('--n_workers', type=int, default=1)
-parser.add_argument('--fixed', default='', help='comma-separated label prefixes (e.g. "M0:") of parameters held at '
-                    'nominal: zero tolerance in every box and in the allocation')
 parser.add_argument('--block', type=int, default=int(2e7), help='sampled muons held in memory')
 args = parser.parse_args()
 
@@ -134,9 +132,7 @@ V = r['dir_vecs'][[str(s) for s in r['dir_names']].index('worst')]
 STARTS = [np.sign(GRAD), V / np.abs(V).max()]               # the sign of the gradient, the scaled worst direction
 PCTS = [float(x) for x in args.pcts.split(',')]
 TARGETS = sorted(float(x) for x in args.targets.split(','))
-FREE = np.array([not any(l.startswith(p) for p in args.fixed.split(',') if p) for l in labels], float)
-if not FREE.all():
-    print(f'held at nominal: {", ".join(l for l, f in zip(labels, FREE) if not f)}')
+FREE = np.ones(D)                     # --fixed: setup drops the parameters held at nominal
 
 if os.path.exists(OUT) and not args.redo:
     t = np.load(OUT)
@@ -185,7 +181,7 @@ SH = np.stack([search.shares(u) for u in U])                   # what each param
 del search                                                     # free the grid before the members'
 torch.cuda.empty_cache()
 mem = []
-for m in load_members(args.model, shield.phi_0, args.device):
+for m in members(args, shield):
     c = feature_cache(m, shield.muons.points(args.cache_grid, args.n_ref), one_group)
     mem.append(cached_hits(m, c, 1, U)[:, 0] / cached_hits(m, c, 1, np.zeros((1, D)))[0, 0])
     del c
@@ -210,7 +206,7 @@ if os.path.exists(os.path.join(args.run, 'worst_cases.npz')):
             wc[x] = (wp[i] / wp[0], ws[i] / ws[0] if w['simulated'] else np.nan)
 
 say = Report()
-say((f'held at nominal (--fixed {args.fixed}): ' + ', '.join(l for l, f in zip(labels, FREE) if not f) + '\n') if args.fixed else '')
+say((f'held at nominal (--fixed {args.fixed}), not in the search: ' + ', '.join(shield.fixed) + '\n') if shield.fixed else '')
 say(f'model {args.model}; surrogate integrated on the points {args.cache_grid}, H_0 = {H0:.1f} per {args.n_ref:.0e}; '
     'errors: members\' standard error (surrogate), Poisson (simulator)')
 if sim0:

@@ -16,7 +16,7 @@ from analysis.core import muon_blocks, one_group, setup, simulate
 import cli
 from paths import RUN
 
-parser = cli.add_common(cli.parser(__doc__))
+parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.add_argument('--run', default=RUN, help='robustness.py --out_dir')
 parser.add_argument('--t', default='-1,-0.5,0.5,1', help='points of each scan (u_i; +-1 = +-10%%)')
 parser.add_argument('--n_muons', type=int, default=int(1e9))

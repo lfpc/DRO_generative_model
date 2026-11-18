@@ -24,13 +24,12 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
-from analysis.core import (Report, branch_jacobian, cached_hits, derivatives, feature_cache, muon_blocks, nominal_pass,
+from analysis.core import (members, Report, branch_jacobian, cached_hits, derivatives, feature_cache, muon_blocks, nominal_pass,
                            one_group, restricted_worst, seed_se, setup, simulate, trust_region_max, unit)
 import cli
-from lcso.surrogate import load_members
 from paths import RUN
 
-parser = cli.add_common(cli.parser(__doc__))
+parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.add_argument('--temperature', type=float, default=1.0, help='momentum temperature of the muons; 1 = the physical flux')
 parser.add_argument('--grid', default='801x64', help='muon points of the derivatives (muons.py: for the flow, latent points per side x azimuths)')
 parser.add_argument('--cache_grid', default='201x64', help='muon points whose trunk features are cached')
@@ -60,7 +59,7 @@ os.makedirs(args.out_dir, exist_ok=True)
 say = Report()
 NS = args.n_sigma
 shield, model = setup(args)
-MEMBERS = load_members(args.model, shield.phi_0, args.device)
+MEMBERS = members(args, shield)
 D, labels = model.dim, shield.labels
 
 
@@ -299,7 +298,7 @@ Sa, Sb = np.meshgrid(plane_s, plane_s)
 plane = ratio(Sa.reshape(-1, 1) * va + Sb.reshape(-1, 1) * vb).reshape(args.plane_n, args.plane_n)
 
 np.savez(os.path.join(args.out_dir, 'robustness.npz'),
-         labels=np.array(labels), phi_0=shield.phi_0.numpy(), H_0=H0, n_ref=args.n_ref, temperature=args.temperature,
+         labels=np.array(labels), fixed=np.array(shield.fixed, dtype=str), phi_0=shield.phi_0.numpy(), H_0=H0, n_ref=args.n_ref, temperature=args.temperature,
          grid=args.grid, cache_grid=args.cache_grid, n_members=len(mem),
          grad=grad, grad_members=np.array([v['lin'] * v['H0'] for v in mem]), hess=hess, active=act,
          hess_eigvals=mu, hess_eigval_se=mu_se, hess_eigvecs=Qh,

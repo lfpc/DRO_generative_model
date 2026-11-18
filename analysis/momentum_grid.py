@@ -23,7 +23,7 @@ from analysis.core import cached_hits, feature_cache, setup
 import cli
 from paths import RUN, figures, save_figure
 
-parser = cli.add_common(cli.parser(__doc__))
+parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.add_argument('--run', default=RUN, help='robustness.py --out_dir (for its directions)')
 parser.add_argument('--dirs', default='worst,act1', help='directions of the run, walked to --t')
 parser.add_argument('--t', type=float, default=1.0, help='step along each direction (1 = one tolerance unit)')

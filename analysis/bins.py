@@ -24,7 +24,7 @@ from analysis.core import (Report, branch_jacobian, cached_hits, derivatives, fe
 import cli
 from paths import RUN
 
-parser = cli.add_common(cli.parser(__doc__))
+parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.add_argument('--bin_var', default='pz', choices=['pz', 'pt', 'p', 'charge'])
 parser.add_argument('--edges', default='10,20,30,45,75,125,175,225,300',
                     help='interior bin edges in GeV (ignored for charge)')

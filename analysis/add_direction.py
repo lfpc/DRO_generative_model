@@ -13,10 +13,9 @@ import os
 import numpy as np
 import torch
 
-from analysis.core import (cached_hits, feature_cache, muon_blocks, one_group, restricted_worst, seed_se, setup,
+from analysis.core import (cached_hits, members, feature_cache, muon_blocks, one_group, restricted_worst, seed_se, setup,
                            simulate, unit)
 import cli
-from lcso.surrogate import load_members
 from paths import RUN
 
 parser = cli.add_common(cli.parser(__doc__))
@@ -53,7 +52,7 @@ print(f'{args.name}: {", ".join(fixed)} held at nominal; cos to worst '
       f'{v @ r["dir_vecs"][names.index("worst")]:+.3f}; largest components: '
       + ', '.join(f'{labels[k]} {v[k]:+.2f}' for k in np.argsort(-np.abs(v))[:6]))
 
-shield, model = setup(args)
+shield, model = setup(args, ','.join(f'{l}' for l in r.get('fixed', [])))     # the run's parameters
 assert list(shield.labels) == labels, 'the run has other parameters than the shield'
 
 
@@ -66,7 +65,7 @@ def ratios(m):
 
 
 main = ratios(model)
-mem = [ratios(m) for m in load_members(args.model, shield.phi_0, args.device)]
+mem = [ratios(m) for m in members(args, shield)]
 se = seed_se(mem) if mem else np.zeros_like(main)
 
 sim = np.zeros(len(new))

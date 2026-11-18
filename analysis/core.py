@@ -23,20 +23,69 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
-from lcso.surrogate import load_surrogate
-from shield import MuonShield
+from lcso.surrogate import _Box, load_members, load_surrogate
+from shield import FREE, NOMINAL, MuonShield
 
 OK, BAD, GREY = '#0072B2', '#D55E00', '0.6'      # figure colours
 
 
-def setup(args):
+class Restricted(_Box):
+    """A surrogate on the parameters keep of its own, the others at nominal (u = 0)."""
+
+    def __init__(self, model, keep):
+        super().__init__()
+        self.model, self.full_dim = model, model.dim
+        self.register_buffer('keep', torch.as_tensor(keep, dtype=torch.long, device=model.bias.device))
+        self.dim, self.delta = len(keep), model.delta
+        self.register_buffer('lower_bound', model.lower_bound[self.keep])
+        self.register_buffer('upper_bound', model.upper_bound[self.keep])
+        self.hp, self.dx, self.bias = model.hp, model.dx, model.bias
+
+    @property
+    def P(self):
+        return self.model.P
+
+    def branch_net(self, u):
+        return self.model.branch_net(u.new_zeros(*u.shape[:-1], self.full_dim).index_copy(-1, self.keep, u))
+
+    def trunk_x(self, x):
+        return self.model.trunk_x(x)
+
+
+def restrict_shield(shield, fixed):
+    """Hold the parameters whose labels start with one of the prefixes fixed at nominal: shield's
+    free parameters become the others (shield.keep: their index among the 65; shield.fixed: the
+    labels held)."""
+    keep = [i for i, l in enumerate(shield.labels) if not any(l.startswith(p) for p in fixed)]
+    shield.fixed = [l for i, l in enumerate(shield.labels) if i not in keep]
+    shield.keep = keep
+    shield.idx, shield.phi_0, shield.dim = shield.idx[keep], shield.phi_0[keep], len(keep)
+    shield.labels, shield.units = [shield.labels[i] for i in keep], [shield.units[i] for i in keep]
+    return shield
+
+
+def setup(args, fixed=None):
     """(shield, surrogate) of the --muons and --model of cli.add_common. The muon source is built
-    here, before any seeding, because building the flow draws from the global RNG."""
+    here, before any seeding, because building the flow draws from the global RNG. The parameters
+    of --fixed (or fixed: label prefixes) are held at nominal and dropped from the design u."""
     torch.backends.cuda.matmul.allow_tf32 = False   # too coarse for the curvature
     shield = MuonShield(args.muons, fields=args.fields)
     model = load_surrogate(args.model, shield.phi_0, args.device)
+    fixed = [p for p in (getattr(args, 'fixed', '') if fixed is None else fixed).split(',') if p]
+    shield.fixed, shield.keep = [], list(range(shield.dim))
+    if fixed:
+        restrict_shield(shield, fixed)
+        model = Restricted(model, shield.keep)
+        print(f'held at nominal: {", ".join(shield.fixed)}; {shield.dim} free parameters')
     shield.muons.load()
     return shield, model
+
+
+def members(args, shield):
+    """The ensemble members of --model (lcso.surrogate.load_members), on the shield's free parameters."""
+    idx = torch.tensor(FREE)
+    ms = load_members(args.model, NOMINAL[idx[:, 0], idx[:, 1]].clone(), args.device)
+    return [Restricted(m, shield.keep) for m in ms] if len(shield.keep) < len(FREE) else ms
 
 
 def one_group(x):

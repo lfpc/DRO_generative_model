@@ -27,7 +27,7 @@ from analysis.core import Report, cached_hits, feature_cache, muon_blocks, setup
 import cli
 from paths import RUN
 
-parser = cli.add_common(cli.parser(__doc__))
+parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.add_argument('--run', default=RUN, help='robustness.py --out_dir')
 parser.add_argument('--n_muons', type=int, default=int(1e9), help='sampled muons for the simulator; the surrogate is quoted per as many')
 parser.add_argument('--seed', type=int, default=0, help='0 = the muons of robustness.py')
