@@ -125,44 +125,87 @@ def robustness_figures(r):
     ax.set_title('Directions in parameter space')
     save(fig, 'robustness_directions.png')
 
-    # --- each direction as a magnet x parameter grid: the change at one tolerance unit, in %
+    # --- each direction as a grid: the change of every parameter at one tolerance unit, in %. Rows:
+    # kinds of parameter, grouped; columns: magnets, those whose exit differs from their entrance
+    # (an Out parameter is free) split into an entrance and an exit column. A whole-magnet parameter
+    # (a length, a height, the field) spans both.
+    GROUPS = [('core', [('dX', 'width $dX$'), ('dY', 'height $dY$')]),
+              ('yoke', [('dXYoke', 'width $dX_{yoke}$'), ('dY_yoke', 'height $dY_{yoke}$')]),
+              ('gaps, length', [('gap', 'core-yoke gap'), ('Xmgap', 'middle gap'), ('Z_gap', '$Z$ gap'),
+                                ('Z_len', 'length $Z$')]),
+              ('field', [('NI', '$B_{goal}$')])]
+    KIND = {'dXIn': ('dX', 'In'), 'dXOut': ('dX', 'Out'), 'dYIn': ('dY', None), 'gapIn': ('gap', 'In'),
+            'gapOut': ('gap', 'Out'), 'dXYokeIn': ('dXYoke', 'In'), 'dXYokeOut': ('dXYoke', 'Out'),
+            'dY_yokeIn': ('dY_yoke', None), 'XmgapIn': ('Xmgap', None), 'Z_gap': ('Z_gap', None),
+            'Z_len': ('Z_len', None), 'NI': ('NI', None)}
+    present = {KIND[s.split(':')[1]][0] for s in labels}
+    GROUPS = [(g, [rw for rw in rows if rw[0] in present]) for g, rows in GROUPS]
+    GROUPS = [(g, rows) for g, rows in GROUPS if rows]
+    ROW, ylab, yg, y = {}, [], [], 0.0
+    for g, rows in GROUPS:
+        y0 = y
+        for key, name in rows:
+            ROW[key] = y
+            ylab.append((y, name))
+            y += 1
+        yg.append((g, y0, y - 1))
+        y += 0.45                                              # space between the groups
     mag = sorted({int(s[1]) for s in labels})
-    cols = []
-    for s in labels:                                           # parameter kinds, in the order they first appear
-        c = s.split(':')[1]
-        if c not in cols:
-            cols.append(c)
-    from shield import COLUMNS
-    cols.sort(key=COLUMNS.index)
+    split = {m for m in mag if any(s.startswith(f'M{m}:') and s.endswith('Out') for s in labels)}
+    COL, xlab, x = {}, [], 0.0
+    for m in mag:
+        if m in split:
+            COL[m] = {'In': x, 'Out': x + 1}
+            xlab += [(x, f'M{m}\nin'), (x + 1, f'M{m}\nout')]
+            x += 2
+        else:
+            COL[m] = {'In': x, 'Out': x}
+            xlab.append((x, f'M{m}'))
+            x += 1
+        x += 0.12                                              # space between the magnets
+
     show = [n for n in ('worst', 'hess1', 'ascent', 'corner', 'act1', 'act2') if n in NAMES] or NAMES
     pct = 10 * M                                               # u = v at t = 1; u_i = +-1 is +-10%
     lim = np.abs(pct[[NAMES.index(n) for n in show]]).max()
+    cmap, norm = plt.get_cmap('RdBu_r'), matplotlib.colors.Normalize(-lim, lim)
     nc = min(3, len(show))
     nr = int(np.ceil(len(show) / nc))
-    fig, axes = plt.subplots(nr, nc, figsize=(3.3 * nc + 1.2, 4.1 * nr), constrained_layout=True, squeeze=False,
-                             sharex=True, sharey=True)
+    fig, axes = plt.subplots(nr, nc, figsize=(3.9 * nc + 1.6, 0.36 * y * nr + 1.2), constrained_layout=True,
+                             squeeze=False, sharex=True, sharey=True)
     for a in axes.ravel()[len(show):]:
         a.axis('off')
     for a, n in zip(axes.ravel(), show):
-        G = np.full((len(cols), len(mag)), np.nan)
+        filled = set()
         for k, s in enumerate(labels):
-            G[cols.index(s.split(':')[1]), mag.index(int(s[1]))] = pct[NAMES.index(n), k]
-        im = a.imshow(np.ma.masked_invalid(G), cmap='RdBu_r', vmin=-lim, vmax=lim, aspect='auto')
-        for y, x in zip(*np.nonzero(np.isnan(G))):                                  # not a parameter
-            a.add_patch(matplotlib.patches.Rectangle((x - 0.5, y - 0.5), 1, 1, facecolor='0.9', edgecolor='0.6',
-                                                     hatch='///', lw=0))
-        for (y, x), val in np.ndenumerate(G):
-            if np.isfinite(val) and abs(val) >= 1:
-                a.text(x, y, f'{val:+.1f}', ha='center', va='center', fontsize=7,
+            m, (key, side) = int(s[1]), KIND[s.split(':')[1]]
+            x0, w = (COL[m]['In'], int(round(COL[m]['Out'] - COL[m]['In'])) + 1) if side is None else (COL[m][side], 1)
+            val = pct[NAMES.index(n), k]
+            a.add_patch(matplotlib.patches.Rectangle((x0 - 0.47, ROW[key] - 0.47), w - 0.06, 0.94, lw=0,
+                                                     facecolor=cmap(norm(val))))
+            if abs(val) >= 1:
+                a.text(x0 + (w - 1) / 2, ROW[key], f'{val:+.1f}', ha='center', va='center', fontsize=7,
                        color='w' if abs(val) > 0.6 * lim else 'k')
-        a.set_xticks(np.arange(len(mag)) + 0.5, minor=True)
-        a.set_yticks(np.arange(len(cols)) + 0.5, minor=True)
-        a.grid(which='minor', color='w', lw=1.5)
-        a.tick_params(which='minor', length=0)
-        a.set_xticks(np.arange(len(mag)), [f'M{m}' for m in mag])
-        a.set_yticks(np.arange(len(cols)), ['$B$ (NI)' if c == 'NI' else c for c in cols], fontsize=8)
+            filled |= {(key, COL[m]['In'] + i) for i in range(w)} if side is None else {(key, x0)}
+        for key, yy in ROW.items():                            # not a parameter
+            for xx in sorted({c for d in COL.values() for c in d.values()}):
+                if (key, xx) not in filled:
+                    a.add_patch(matplotlib.patches.Rectangle((xx - 0.47, yy - 0.47), 0.94, 0.94, facecolor='0.93',
+                                                             edgecolor='0.7', hatch='///', lw=0))
+        for g, ya, yb in yg[1:]:
+            a.axhline(ya - 0.72, color='0.4', lw=0.8)
+        a.set(xlim=(-0.6, x - 0.12 - 0.4), ylim=(y - 0.45 - 0.4, -0.6))
+        a.set_xticks([p for p, _ in xlab], [t for _, t in xlab], fontsize=7.5)
+        a.set_yticks([p for p, _ in ylab], [t for _, t in ylab], fontsize=8)
+        a.tick_params(length=0)
+        for sp in a.spines.values():
+            sp.set_visible(False)
         a.set_title(n)
-    fig.colorbar(im, ax=axes, shrink=0.7, label='change at one tolerance unit (%)')
+    for a in axes[:, 0]:
+        for g, ya, yb in yg:
+            a.annotate(g, xy=(0, (ya + yb) / 2), xycoords=('axes fraction', 'data'), xytext=(-78, 0),
+                       textcoords='offset points', rotation=90, ha='center', va='center', fontsize=9,
+                       fontweight='bold', color='0.3')
+    fig.colorbar(matplotlib.cm.ScalarMappable(norm, cmap), ax=axes, shrink=0.7, label='change at one tolerance unit (%)')
     fig.suptitle('What each direction changes: red = parameter increased, blue = decreased '
                  '(hatched: not a free parameter; numbers: changes of at least 1%)', fontsize=11)
     save(fig, 'robustness_direction_grid.png')
