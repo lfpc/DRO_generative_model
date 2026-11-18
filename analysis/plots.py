@@ -4,6 +4,7 @@ Reads whichever of these exist in <run> and writes figures/<run name>/ (paths.fi
 main run also writes the report's figures as PDF, paths.save_figure):
   robustness.npz     robustness_{sensitivity,magnets,spectra,directions,walks,summary,calibration,mc,scans,plane}.png
   worst_cases.npz    worst_direction_scaled, worst_parameters, random_tolerances, sim_pz_profiles .png
+  pz_profiles.npz    (pz_profiles.py) sim_pz_profiles.png, in place of worst_cases.npz's
   <var>_bins.npz     <var>_bins_{overview,sensitivity,alignment,walks,mc}.png
   scan_sim_*.npz     (scan_sim.py) the simulated points of robustness_scans.png
   tolerance_boxes.npz (tolerance_boxes.py) tolerance_boxes, tolerance_allocation .png
@@ -415,7 +416,9 @@ def worst_case_figures(w):
     fig.suptitle('Random independent tolerances')
     save(fig, 'random_tolerances.png')
 
-    # --- where the extra hits come from: hits per p_z range
+    # --- where the extra hits come from: hits per p_z range (pz_profiles.py's designs when it ran)
+    if os.path.exists(os.path.join(args.run, 'pz_profiles.npz')):
+        return
     ze = w['pz_edges']
     ranges = [(1, 30), (30, 40), (40, 50), (50, 100), (100, 150), (150, 400)]
     H = w['sim_bin'] if SIM else w['pred_bin']
@@ -432,6 +435,44 @@ def worst_case_figures(w):
     ax.set(xlabel='$p_z$ [GeV]', ylabel=f'{"simulated" if SIM else "predicted"} hits ({float(w["n_muons"]):.0e} muons)',
            title='Where the extra hits come from: hits per $p_z$ range')
     ax.legend(fontsize=8, ncol=2)
+    save(fig, 'sim_pz_profiles.png')
+
+
+# =============================================================================
+# pz_profiles.npz
+# =============================================================================
+def pz_profile_figure(z):
+    """Hits per p_z range of pz_profiles.py's designs, simulated on the same muons."""
+    names, U, labels = [str(s) for s in z['names']], z['U'], [str(s) for s in z['labels']]
+    ze, H, t = z['pz_edges'], z['sim_bin'], float(z['t'])
+    ranges = [(1, 30), (30, 40), (40, 50), (50, 100), (100, 150), (150, 400)]
+    Hz = np.stack([H[:, (ze[:-1] >= a) & (ze[1:] <= b)].sum(1) for a, b in ranges], 1)
+    tot = H.sum(1) / H[0].sum()
+    unit = 'one tolerance unit' if t == 1 else f't = {t:g}'
+    NICE = {'nominal': 'nominal design', 'ascent': f'ascent (gradient), {unit}',
+            'worst': f'worst direction, {unit}', 'act1': f'active subspace (act1), {unit}',
+            'hess1': f'top Hessian direction, {unit}', 'worst2': f'worst with M7 fixed, {unit}',
+            'box': 'worst corner of the $\\pm10\\%$ box'}
+
+    def nice(j, n):
+        if n.startswith('single'):
+            k = int(np.argmax(np.abs(U[j])))
+            return f'{labels[k]} {10 * U[j][k]:+.0f}% alone (most sensitive parameter)' if n == 'single1' else \
+                f'{labels[k]} {10 * U[j][k]:+.0f}% alone'
+        return NICE.get(n, n)
+
+    fig, ax = plt.subplots(figsize=(10, 4.8), constrained_layout=True)
+    x, wd = np.arange(len(ranges)), 0.8 / len(names)
+    for j, n in enumerate(names):
+        h = Hz[j]
+        lab = nice(j, n) + ('' if n == 'nominal' else f': $\\times${tot[j]:.3g}' if tot[j] < 100 else f': $\\times${tot[j]:.0f}')
+        ax.bar(x - 0.4 + wd * (j + 0.5), np.maximum(h, 0.5), wd, yerr=np.sqrt(np.maximum(h, 1)),
+               color='k' if n == 'nominal' else plt.cm.tab10(j - 1), label=lab, capsize=1.5, error_kw={'lw': 0.7})
+    ax.set_yscale('log')
+    ax.set_xticks(x, [f'{a}-{b}' for a, b in ranges])
+    ax.set(xlabel='$p_z$ [GeV]', ylabel=f'simulated hits ({float(z["n_muons"]):.0e} muons)',
+           title='Where the extra hits come from: hits per $p_z$ range')
+    ax.legend(fontsize=8.5)
     save(fig, 'sim_pz_profiles.png')
 
 
@@ -584,6 +625,8 @@ if os.path.exists(path.format('robustness')):
     robustness_figures(np.load(path.format('robustness')))
 if os.path.exists(path.format('worst_cases')):
     worst_case_figures(np.load(path.format('worst_cases')))
+if os.path.exists(path.format('pz_profiles')):
+    pz_profile_figure(np.load(path.format('pz_profiles')))
 for var in ('pz', 'pt', 'p', 'charge'):
     if os.path.exists(path.format(f'{var}_bins')):
         bin_figures(np.load(path.format(f'{var}_bins')))
