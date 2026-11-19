@@ -19,28 +19,31 @@
 \maketitle
 
 \begin{abstract}
-How much do the muon hits on the SHiP sensitive plane change when the 65 free parameters of the
-muon shield (the hadron absorber M0 and the magnets M1--M7, including the heights of the magnets
-and of their yokes) deviate from their nominal values? Every design is simulated in its own field
-map, computed with the finite-element model of the iron. The muons come from a generative flow,
+How much do the muon hits on the SHiP sensitive plane change when the free parameters of the
+muon shield (the magnets M1--M7, including the heights of the magnets and of their yokes; 58 in
+all, with the hadron absorber M0 held at nominal) deviate from their nominal values? Every design
+is simulated in its own field map, computed with the finite-element model of the iron. The muons come from a generative flow,
 each with its momentum and its production point in the target. A neural surrogate of the per-muon
 hit probability (an ensemble of four DeepONets, trained with simulations targeted at the muons of
 $30$--$60$\,GeV that make most hits) gives the gradient, the Hessian and candidate worst-case
 directions, and every conclusion is checked with the full simulation on $10^9$ muons. The nominal
-design gives about $1170$ hits per $10^9$ muons. If every parameter may be off by up to
+design gives about $1150$ hits per $10^9$ muons. If every parameter may be off by up to
 $\varepsilon$, the worst design found within these tolerances (searched on the surrogate, then
-simulated) multiplies the hits by $1.62\pm0.06$ at $\varepsilon=1\%$, $4.2\pm0.1$ at $2\%$,
-$12.1\pm0.4$ at $3\%$, $690\pm20$ at $5\%$ and above $3000$ at $10\%$. It narrows M7's exit and
-outer yoke and widens M4's inner yoke, which alone does nothing but multiplies the effect of
-M7's narrowing. A single parameter at its $\pm10\%$ limit gives at most $\times3.0\pm0.1$ (the
-exit width of M7, narrowed); the heights of the magnets and yokes, the gaps between magnets and
-most of M0 matter least, at most $6\%$ each. Random independent deviations are much milder:
-harmless at $\pm2\%$, mostly harmless at $\pm5\%$, with a heavy tail at $\pm10\%$. Bounding the
-worst case takes sub-percent tolerances on about fifteen parameters, mostly of M7, M2, M3 and M4:
-the allocation found for at most $\times2$ (simulated: $\times1.82$) holds M2's entrance width,
-M4's inner yoke and M7's exit width and outer yoke to $\pm0.5\%$. The surrogate agrees with the
-simulator to $5\%$ (median) on the 242 designs simulated, but overestimates the worst designs
-beyond $\pm2\%$, so the numbers above are simulated.
+simulated) multiplies the hits by $1.58\pm0.06$ at $\varepsilon=1\%$, $4.0\pm0.1$ at $2\%$,
+$12.7\pm0.4$ at $3\%$, $690\pm20$ at $5\%$ and $6700\pm200$ at $10\%$. Up to $\pm5\%$ it narrows
+M7's exit and outer yoke and widens M4's inner yoke, which alone does nothing but multiplies the
+effect of M7's narrowing. A single parameter at its $\pm10\%$ limit gives at most
+$\times2.9\pm0.1$ (the exit width of M7, narrowed); the heights of the magnets and yokes and the
+gaps between magnets matter least, at most $6\%$ each. Random independent deviations are much
+milder: harmless at $\pm2\%$, mostly harmless at $\pm5\%$, with a heavy tail at $\pm10\%$.
+Bounding the worst case takes sub-percent tolerances on about a dozen parameters, mostly of M7,
+M2, M3 and M4: the allocation found for at most $\times2$ (simulated: $\times1.62$) holds M7's
+exit width and outer yoke to $\pm0.5\%$ and M2's entrance width, M4's inner yoke and M7's inner
+yoke and field to $\pm0.55\%$; tighter targets are beyond what the surrogate resolves. The
+surrogate agrees with the simulator to $5\%$ (median) on the 368 designs simulated, but
+overestimates the worst designs beyond $\pm2\%$, so the numbers above are simulated. Part of its
+error is the field maps themselves: re-meshing the iron for every design adds a noise of $2$--$3\%$
+to the hits of each design, as large as the Poisson noise of $10^9$ muons.
 \end{abstract}
 
 \tableofcontents
@@ -58,6 +61,13 @@ and the height \texttt{dY\_yokeIn} of its yoke (their exit values move with them
 the field $B$ of each magnet (the \texttt{NI} column, the target field in tesla, from which the
 current is set). M0--M4 are rectangular (exit = entrance) and M5 has no free transverse size.
 
+\paragraph{Parameters analysed.}
+The surrogate is trained on all 65 parameters, but the analysis holds the seven of M0 at nominal
+and works with the other 58: the absorber is taken as built to specification. Its effects are
+small (apart from its field and length, at most $1.5\%$ at its limit) and the part of the
+surrogate it adds is the least accurate (Sec.~\ref{sec:validation}); left free, the box searches
+lean on it where the surrogate is unreliable. All the results below are for the 58 parameters of
+M1--M7.
 \paragraph{Fields.}
 Each design is simulated in its own field map, computed by the finite-element model of the iron
 (\texttt{snoopy}; yokes of diluted steel) in a few tens of seconds per design and cached. The
@@ -73,7 +83,7 @@ Each parameter may vary by $\pm10\%$ of its nominal value:
 \end{equation}
 $u=0$ is the nominal design and $u_i=\pm1$ puts parameter $i$ alone at its limit. A step of
 $\|u\|=1$ is ``one tolerance unit'': as large as one parameter at its limit, but spread over all
-of them (RMS change $1.24\%$ per parameter). The corners of the box are at $\|u\|=\sqrt{65}=8.1$.
+of them (RMS change $1.31\%$ per parameter). The corners of the box are at $\|u\|=\sqrt{58}=7.6$.
 M6 and M7 have negative fields, so a negative change of their $B$ lowers $|B|$.
 
 \paragraph{Muons and figure of merit.}
@@ -81,7 +91,7 @@ Muons are drawn from the generative flow of \texttt{generator\_muons} (the physi
 momentum and charge, then the production point given them. They start where they are produced,
 along the target ($z$ from $-2.14$ to $0$\,m before the shield) and around the beam axis. The
 figure of merit $Y$ is the number of muons crossing the last sensitive plane per $10^9$ muons. At
-the nominal design, five simulator runs on the muons of the analysis give $1152$--$1197$ (each
+the nominal design, five simulator runs on the muons of the analysis give $1145$--$1201$ (each
 $\pm35$; the transport is stochastic) and four runs on independent muons $1157$--$1192$, a hit
 rate of $1.2\times10^{-6}$; the surrogate gives $1208$. Every simulator number uses $10^9$ muons,
 the same ones for all designs of a table, with Poisson errors (the transport is stochastic, so
@@ -91,7 +101,8 @@ this holds even on shared muons).
 The previous analysis had 50 parameters around a different nominal design, uniform fields per
 iron block, a fixed M0 and a tapered M4. Here the nominal design is the new one, every design
 gets its own field map, M0, the gap before M1 and the yoke heights are free, and M0--M4 are
-rectangular; no earlier simulation is reused. The picture is the same in kind (coordinated small
+rectangular; no earlier simulation is reused. M0 is in the training data but held at nominal
+in the analysis. The picture is the same in kind (coordinated small
 deviations are far worse than single large ones, and a few parameters need sub-percent
 tolerances), but with the field maps the transverse sizes of M7, its exit width and yokes, have
 become the most sensitive parameters, and the training data now include muons simulated at the
@@ -217,7 +228,8 @@ Table~\ref{tab:val} and Fig.~\ref{fig:val} compare the surrogate with the simula
 \begin{table}[t]
 \centering
 \caption{Surrogate vs.\ simulator on the reference designs: median $|\log(\text{pred}/\text{sim})|$
-(signed for the nominal design), and the relative vector errors of the 65 one-at-a-time (OAT)
+(signed for the nominal design), and the relative vector errors of the 65 (and of the 58 analysed)
+one-at-a-time (OAT)
 secants $\tfrac12[Y(+e_i)-Y(-e_i)]$ and curvatures $Y(+e_i)+Y(-e_i)-2Y_0$ on the check sample.
 ``Noise'': what a perfect model would score, from the simulator's Poisson noise.}
 \label{tab:val}
@@ -233,6 +245,8 @@ Check sample: designs in the half box & $0.25\%$ & $3.4\%$ \\
 Check sample: designs in the box & $0.22\%$ & $4.1\%$ \\
 OAT secants (cosine)            & $1.8\%$  & $8.7\%$ (0.997) \\
 OAT curvatures (cosine)         & $8.0\%$  & $46\%$ (0.89) \\
+\quad the 58 analysed (without M0): secants & $1.8\%$ & $6.8\%$ \\
+\quad the 58 analysed: curvatures & $8.4\%$ & $34\%$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -253,23 +267,68 @@ On the physical flux the surrogate is $2\%$ high at the nominal design and $5\%$
 the half box and the box, within about three times the simulator's noise. On the check sample
 (hotter momenta) it reproduces the one-at-a-time slopes to $9\%$ ($\cos=0.997$) and the designs in
 the box to $4\%$, but it is $7\%$ high at the nominal design; the curvatures of single parameters
-are its weakest point ($46\%$, $\cos=0.89$). The check sample's one-at-a-time designs are made of
-hot muons and do not test the $30$--$75$\,GeV muons of the physical hits.
+are its weakest point ($46\%$, $\cos=0.89$; $34\%$ without the seven of M0, which the analysis holds
+at nominal). The check sample's one-at-a-time designs are made of hot muons and do not test the
+$30$--$75$\,GeV muons of the physical hits. On the eight most sensitive parameters, which the
+analysis simulates in scans at the physical flux (Sec.~\ref{sec:single}), the curvatures agree to
+$9\%$ and the slopes to $12\%$: the curvature error sits in the many weak parameters.
+
+\paragraph{Per muon.} Fig.~\ref{fig:calib} bins the muons of all reference designs by their
+predicted hit probability and compares with the simulated hit rate in each bin. On the check
+sample the probabilities are calibrated to within $15\%$ from $10^{-7}$ to $3\times10^{-5}$ and
+above $5\times10^{-3}$ (where $95\%$ of its hits are); in between the simulated rate is up to
+$40\%$ above the predicted one. On the physical flux they are calibrated to $10$--$20\%$ from
+$10^{-7}$ to $2\times10^{-5}$, where the muons of
+designs near nominal are, and above $10^{-2}$; between $3\times10^{-5}$ and $5\times10^{-3}$ the
+simulated rate is $2.5$ times the predicted one. Those muons belong almost all to one reference
+design, a corner of the box with $4.6\times10^5$ simulated hits, which the surrogate puts at
+$1.9\times10^5$ (Fig.~\ref{fig:val}); it carries $88\%$ of the hits of the plot. Below
+$10^{-7}$ the surrogate overestimates (up to twice), on muons that make a negligible share of the
+hits.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.48\linewidth]{validation_calibration_T1.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{validation_calibration_T1.5.pdf}
+  \caption{Per-muon calibration on the reference designs: simulated hit rate against the predicted
+  $p(\text{hit})$ of the muons, in bins of the prediction, over all reference designs, on the
+  physical flux (left; between $3\times10^{-5}$ and $5\times10^{-3}$ the muons are almost all of one
+  extreme design) and the check sample (right); lower panels: the ratio.}
+  \label{fig:calib}
+\end{figure}
 
 \paragraph{The simulated designs of the analyses.}
 A wider check at the physical flux is every design the analyses simulated on $10^9$ muons
 (\texttt{validation/flux\_check.py}): those of this analysis (Sec.~\ref{sec:single}--\ref{sec:allocation}),
-of the first ensemble's, and of an earlier analysis with a surrogate trained without the band
-and window pools, 242 designs from near the nominal design to beyond $\times1000$; none was used
-for training. Comparing $\HH$, the median error is $5.2\%$ and $67\%$ of the designs agree within
-$2\sigma$ ($4.8\%$ and $73\%$ for those the simulator puts below $\times3$). By group: the
-one-at-a-time scans $3.8\%$ ($95\%$ within $2\sigma$), the walks $5.2\%$, the worst designs along
-a direction $7.0\%$, and the worst designs of the tolerance boxes $10\%$. The largest misses are
+of the same analysis with M0 free, of the first ensemble's, and of an earlier analysis with a
+surrogate trained without the band and window pools, 368 designs from near the nominal design to
+beyond $\times1000$; none was used for training. Comparing $\HH$, the median error is $5.1\%$ and
+$67\%$ of the designs agree within $2\sigma$ ($4.7\%$ and $75\%$ for those the simulator puts below
+$\times3$). By group: the one-at-a-time scans $3.7\%$ ($95\%$ within $2\sigma$), the walks $5.1\%$,
+the worst designs along a direction $5.7\%$, and the worst designs of the tolerance boxes $12\%$. The largest misses are
 designs that a box search pushed to the surrogate's maximum beyond $\pm2\%$, which it overestimates
 (Sec.~\ref{sec:box}).
 
 The derivatives are well determined: the four members' gradients at $u=0$ agree with the
 ensemble's. How the architecture and training were chosen is summarised in App.~\ref{app:study}.
+
+\paragraph{Noise of the field maps.}
+The previous analysis, with uniform fields, reproduced the one-at-a-time curvatures to $12\%$;
+here the same parameters reach only $27\%$. The field maps explain much of the difference. A
+design's map is reproducible (the same design gives the same map, bit for bit), but each
+magnet's iron is meshed anew whenever its geometry changes, and the field moves with the mesh:
+changing M7's exit width by only $0.2\%$ ($1.4$\,mm) changes the field integrated along $z$
+through M7 by $0.07$\,T\,m on average over its aperture and core ($1.3\%$), as much as a $1$--$2\%$
+change, while the mean field of the magnet varies smoothly ($-4.4\%$ to $+4.1\%$ over
+$\pm10\%$). A weak parameter, M3's yoke height, gives the same jitter for a change of $0.15$\,mm.
+The changes stay inside the magnet changed. Simulated with common random numbers (the same
+$2\times10^8$ muons and transport seed for every design, so that only the geometry and the field
+differ), the hits along these small steps scatter by $2$--$3\%$ per design beyond what the same
+steps give in uniform fields, where M3's yoke height has no effect at all. At $10^9$ muons this
+design noise is as large as the Poisson noise and does not shrink with more muons; it buries the
+small effects of the weak parameters, in the simulated references as in the training data,
+while the strong parameters stand well above it. The mesh is set in \texttt{snoopy}'s model
+(characteristic length $0.15$, and $0.5$ for setting the current from $B$).
 
 %==============================================================================
 \section{Method}
@@ -289,13 +348,11 @@ From the surrogate we compute
     directions), \texttt{corner} ($v\propto\operatorname{sign} g$: every parameter moved by the
     same amount), \texttt{random}, and \texttt{worst2} (as \texttt{worst}, with M7's parameters
     held at nominal: the worst direction that does not involve M7);
-  \item the worst corner of the box, by projected-gradient ascent (\texttt{pga});
   \item 4096 random designs in the box;
   \item the worst design for a given tolerance and a tolerance allocation
         (Sec.~\ref{sec:tolerance}).
 \end{itemize}
-Each direction is then walked, $u=t\,v$ for $t\in\{-1,-\tfrac12,\tfrac12,1\}$ (for \texttt{pga},
-up to the box face), and simulated.
+Each direction is then walked, $u=t\,v$ for $t\in\{-1,-\tfrac12,\tfrac12,1\}$, and simulated.
 
 %==============================================================================
 \section{Results}
@@ -304,26 +361,26 @@ up to the box face), and simulated.
 \subsection{Single parameters}
 \label{sec:single}
 
-47 of the 65 one-at-a-time effects are resolved beyond three times the members' scatter
+43 of the 58 one-at-a-time effects are resolved beyond three times the members' scatter
 (Fig.~\ref{fig:sensitivity}, Table~\ref{tab:oat}). The most sensitive parameters are those of
 \emph{M7}: its exit width and the outer yoke at its exit, narrowed by $10\%$, multiply the hits by
-$3.0$ and $2.4$ (simulated), and its field lowered by $10\%$ by $1.6$. Next comes the entrance
+$2.9$ and $2.4$ (simulated), and its field lowered by $10\%$ by $1.6$. Next comes the entrance
 width of M2 (harmful on both sides: $\times1.7$ narrowed, $\times1.2$ widened), then the lengths
-and fields of the upstream magnets M0--M4, each harmful when shortened or weakened ($\times1.2$ to
+and fields of the upstream magnets M1--M4, each harmful when shortened or weakened ($\times1.2$ to
 $1.4$ at $-10\%$), and M7's inner yoke, harmful on both sides ($\times1.2$). Most responses are
 one-sided: one side of the tolerance hardly matters, the other is harmful. Per magnet
-(Fig.~\ref{fig:magnets}), M7 carries the largest share of the gradient ($78\%$ of its norm), then
-M3 ($33\%$), M4 ($32\%$), M1 ($24\%$), M2 ($23\%$) and M0 ($22\%$). The \emph{heights} are among
-the least sensitive parameters: no magnet height changes the hits by more than $6\%$ at its limit
-(M7's), no yoke height by more than $4\%$ (M4's), no gap between magnets by more than $1.5\%$, and
-none ranks above 27th. Of M0 only the field ($+22\%$ at $-10\%$) and the length ($+10\%$) matter;
-its widths, gap and heights change the hits by at most $1.5\%$.
+(Fig.~\ref{fig:magnets}), M7 carries the largest share of the gradient ($80\%$ of its norm), then
+M3 and M4 ($33\%$ each), M1 ($25\%$) and M2 ($23\%$). The \emph{heights} are among the least
+sensitive parameters: no magnet height changes the hits by more than $6\%$ at its limit (M7's), no
+yoke height by more than $4\%$ (M4's), no gap between magnets by more than $1.5\%$, and none ranks
+above 25th. (Of M0, held at nominal, only the field, $+22\%$ at $-10\%$, and the length, $+10\%$,
+matter; its widths, gap and heights change the hits by at most $1.5\%$.)
 
 \paragraph{Simulated.} The surrogate's eight largest were simulated at their worse limit
 (Table~\ref{tab:oat}) and in scans at $\pm5\%$ and $\pm10\%$ (Fig.~\ref{fig:scans}). 31 of the 32
 scan points agree within $2\sigma$; the one-at-a-time designs are where the surrogate is most
-accurate ($3.8\%$ median error). At the worse limit it is within $10\%$ of the simulator for all
-eight; the largest difference is M7's outer yoke, $\times2.57$ for $\times2.39\pm0.08$. M3's field
+accurate ($3.7\%$ median error). At the worse limit it is within $10\%$ of the simulator for all
+eight; the largest difference is M7's outer yoke, $\times2.57$ for $\times2.36\pm0.08$. M3's field
 ($\times1.43$ simulated for $\times1.34$) ranks a little higher in the simulator than in the
 surrogate.
 
@@ -338,21 +395,21 @@ $0.01$); last column: the simulated change at the worse limit of the eight simul
 \toprule
 parameter & nominal & $g_i/Y_0$ & $Y/Y_0-1$ at $+10\%$ & at $-10\%$ & simulated \\
 \midrule
-M7:\texttt{dXOut}      & 69 cm    & $-0.358$ & $-0.13\pm0.01$ & $+1.87\pm0.03$ & $+2.02\pm0.10$ \\
-M7:\texttt{dXYokeOut}  & 94 cm    & $-0.231$ & $+0.05\pm0.01$ & $+1.57\pm0.04$ & $+1.39\pm0.08$ \\
-M2:\texttt{dXIn}       & 70 cm    & $-0.002$ & $+0.21\pm0.03$ & $+0.80\pm0.04$ & $+0.71\pm0.06$ \\
-M7:$B$                 & $-2.03$ T & $-0.331$ & $-0.19\pm0.01$ & $+0.60\pm0.01$ & $+0.61\pm0.06$ \\
-M3:\texttt{Z\_len}     & 225 cm   & $-0.192$ & $-0.09\pm0.01$ & $+0.35\pm0.01$ & $+0.32\pm0.05$ \\
+M7:\texttt{dXOut}      & 69 cm    & $-0.358$ & $-0.13\pm0.01$ & $+1.87\pm0.03$ & $+1.89\pm0.10$ \\
+M7:\texttt{dXYokeOut}  & 94 cm    & $-0.231$ & $+0.05\pm0.01$ & $+1.57\pm0.04$ & $+1.36\pm0.08$ \\
+M2:\texttt{dXIn}       & 70 cm    & $-0.002$ & $+0.21\pm0.03$ & $+0.80\pm0.04$ & $+0.72\pm0.06$ \\
+M7:$B$                 & $-2.03$ T & $-0.331$ & $-0.19\pm0.01$ & $+0.60\pm0.01$ & $+0.60\pm0.06$ \\
+M3:\texttt{Z\_len}     & 225 cm   & $-0.192$ & $-0.09\pm0.01$ & $+0.35\pm0.01$ & $+0.36\pm0.05$ \\
 M3:$B$                 & 1.9 T    & $-0.162$ & $-0.01\pm0.01$ & $+0.34\pm0.01$ & $+0.43\pm0.06$ \\
-M2:\texttt{Z\_len}     & 225 cm   & $-0.155$ & $-0.05\pm0.01$ & $+0.32\pm0.01$ & $+0.26\pm0.05$ \\
-M4:\texttt{Z\_len}     & 225 cm   & $-0.184$ & $-0.14\pm0.01$ & $+0.30\pm0.01$ & $+0.26\pm0.05$ \\
+M2:\texttt{Z\_len}     & 225 cm   & $-0.155$ & $-0.05\pm0.01$ & $+0.32\pm0.01$ & $+0.36\pm0.05$ \\
+M4:\texttt{Z\_len}     & 225 cm   & $-0.184$ & $-0.14\pm0.01$ & $+0.30\pm0.01$ & $+0.28\pm0.05$ \\
 M3:\texttt{dXIn}       & 64 cm    & $-0.057$ & $+0.18\pm0.01$ & $+0.27\pm0.01$ & \\
 M4:$B$                 & 1.89 T   & $-0.148$ & $-0.07\pm0.01$ & $+0.26\pm0.01$ & \\
 M7:\texttt{dXYokeIn}   & 125 cm   & $+0.249$ & $+0.23\pm0.02$ & $+0.20\pm0.02$ & \\
-M0:$B$                 & 1.99 T   & $-0.166$ & $-0.13\pm0.01$ & $+0.22\pm0.01$ & \\
 M7:\texttt{Z\_len}     & 200 cm   & $-0.128$ & $-0.08\pm0.01$ & $+0.22\pm0.01$ & \\
 M2:$B$                 & 1.87 T   & $-0.087$ & $-0.04\pm0.01$ & $+0.22\pm0.01$ & \\
 M1:$B$                 & 1.875 T  & $-0.146$ & $-0.13\pm0.01$ & $+0.19\pm0.01$ & \\
+M1:\texttt{Z\_len}     & 150 cm   & $-0.103$ & $-0.04\pm0.01$ & $+0.18\pm0.01$ & \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -383,16 +440,16 @@ M1:$B$                 & 1.875 T  & $-0.146$ & $-0.13\pm0.01$ & $+0.19\pm0.01$ &
 \subsection{Curvature and active subspace}
 
 Two Hessian eigenvalues stand out (Fig.~\ref{fig:spectra}): $4.53\pm0.28\,Y_0$ per unit$^2$ and
-$2.47\,Y_0$, then $0.97$, $0.52$, $0.44$ and $\lesssim0.19\,Y_0$; 25 are negative, the lowest
-$-0.24\pm0.10\,Y_0$. Along the gradient the second-order term at one tolerance unit is larger than
-the first-order one ($1.18\,Y_0$ vs.\ $0.79\,Y_0$), and along the worst direction almost four times
-as large ($2.23$ vs.\ $0.61\,Y_0$): the response is strongly non-linear at that scale. The top
+$2.36\,Y_0$, then $0.95$, $0.51$, $0.42$ and $\lesssim0.19\,Y_0$; 22 are negative, the lowest
+$-0.23\pm0.10\,Y_0$. Along the gradient the second-order term at one tolerance unit is larger than
+the first-order one ($1.19\,Y_0$ vs.\ $0.77\,Y_0$), and along the worst direction almost four times
+as large ($2.23$ vs.\ $0.60\,Y_0$): the response is strongly non-linear at that scale. The top
 eigenvector is M7's yokes and exit width: the inner yoke wider, the outer yoke and exit narrower.
 
-The active subspace is effectively one-dimensional ($98.9\%$ of $\mathbb{E}[\|\nabla_u p\|^2]$).
-Its direction \texttt{act1} shortens M2--M4 by $3.5\%$ and lowers the fields of M0 and M2--M4 by
-$2.6$--$3.4\%$ together, i.e.\ it lowers the upstream bending power (Table~\ref{tab:dirs}; the
-sign of an eigenvector is arbitrary). It is at $\cos=0.47$ with the gradient: individual muons are
+The active subspace is effectively one-dimensional ($98.8\%$ of $\mathbb{E}[\|\nabla_u p\|^2]$).
+Its direction \texttt{act1} shortens M2--M4 by $3.6$--$3.7\%$ and lowers the fields of M1--M4 by
+$2.7$--$3.6\%$ together, i.e.\ it lowers the upstream bending power (Table~\ref{tab:dirs}; the
+sign of an eigenvector is arbitrary). It is at $\cos=0.43$ with the gradient: individual muons are
 deflected most along it, and part of the changes cancels in the total.
 
 \begin{figure}[t]
@@ -408,42 +465,43 @@ deflected most along it, and part of the changes cancels in the total.
 
 \begin{table}[t]
 \centering
-\caption{Hits one tolerance unit along each direction, surrogate and simulator (nominal: $1165$
-simulated hits). ``max / RMS'': the largest and the RMS change over the 65 parameters.}
+\caption{Hits one tolerance unit along each direction, surrogate and simulator (nominal: $1171$
+simulated hits). ``max / RMS'': the largest and the RMS change over the 58 parameters.}
 \label{tab:walks}
 \small
 \begin{tabular}{lcccrr}
 \toprule
 direction & max / RMS change & surrogate $\HH$ & simulator $\HH$ & sim.\ hits & at $t=-1$ (sim.) \\
 \midrule
-\texttt{worst}  & 5.8\% / 1.24\% & $3.94\pm0.20$ & $3.69\pm0.12$ & 4300 & $0.94\pm0.04$ \\
-\texttt{hess1}  & 6.1\% / 1.24\% & $3.67\pm0.19$ & $3.49\pm0.12$ & 4071 & $1.03\pm0.04$ \\
-\texttt{ascent} & 4.5\% / 1.24\% & $3.65\pm0.11$ & $3.25\pm0.11$ & 3784 & $0.69\pm0.03$ \\
-\texttt{act1}   & 3.5\% / 1.24\% & $3.00\pm0.03$ & $3.05\pm0.10$ & 3557 & $1.07\pm0.04$ \\
-\texttt{corner} & 1.24\% / 1.24\% & $1.78\pm0.01$ & $1.75\pm0.06$ & 2040 & $0.72\pm0.03$ \\
-\texttt{act2}   & 8.7\% / 1.24\% & $1.91\pm0.03$ & $1.64\pm0.06$ & 1912 & $0.99\pm0.04$ \\
-\texttt{random} & 3.8\% / 1.24\% & $0.97\pm0.01$ & $0.96\pm0.04$ & 1114 & $1.24\pm0.05$ \\
+\texttt{hess1}  & 6.1\% / 1.31\% & $3.65\pm0.19$ & $3.72\pm0.12$ & 4352 & $0.99\pm0.04$ \\
+\texttt{worst}  & 5.9\% / 1.31\% & $3.90\pm0.20$ & $3.46\pm0.11$ & 4050 & $0.96\pm0.04$ \\
+\texttt{ascent} & 4.6\% / 1.31\% & $3.65\pm0.12$ & $3.20\pm0.11$ & 3749 & $0.70\pm0.03$ \\
+\texttt{act1}   & 3.7\% / 1.31\% & $2.77\pm0.02$ & $2.67\pm0.09$ & 3122 & $1.07\pm0.04$ \\
+\texttt{corner} & 1.31\% / 1.31\% & $1.75\pm0.02$ & $1.67\pm0.06$ & 1958 & $0.75\pm0.03$ \\
+\texttt{act2}   & 8.7\% / 1.31\% & $1.91\pm0.03$ & $1.48\pm0.06$ & 1734 & $0.98\pm0.04$ \\
+\texttt{random} & 4.0\% / 1.31\% & $0.96\pm0.01$ & $0.95\pm0.04$ & 1113 & $1.21\pm0.05$ \\
 \midrule
-\texttt{worst2} (M7 fixed) & 4.3\% / 1.24\% & $2.46\pm0.06$ & $2.68\pm0.09$ & 3119 & $2.19\pm0.08$ \\
+\texttt{worst2} (M7 fixed) & 4.5\% / 1.31\% & $2.28\pm0.06$ & $2.42\pm0.08$ & 2831 & $2.36\pm0.08$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \paragraph{Small coordinated changes are far more harmful than a large single one.}
-Moving every parameter by at most $5.8\%$ (RMS $1.24\%$) along \texttt{worst} multiplies the hits
-by $3.7\pm0.1$ (Table~\ref{tab:walks}). The simplest such pattern, \texttt{corner}, moves
-\emph{every} parameter by exactly $1.24\%$ with the sign of its gradient and gives $\times1.75$.
-Only M7's exit width, alone at $10\%$, does as much as \texttt{worst}. A random direction of the
-same size changes little ($0.96\pm0.04$): the damage comes from the pattern of signs, not the size
+Moving every parameter by at most $5.9\%$ (RMS $1.31\%$) along \texttt{worst} multiplies the hits
+by $3.5\pm0.1$, along \texttt{hess1} by $3.7\pm0.1$ (Table~\ref{tab:walks}). The simplest such
+pattern, \texttt{corner}, moves \emph{every} parameter by exactly $1.31\%$ with the sign of its
+gradient and gives $\times1.67$. Only M7's exit width, alone at $10\%$, comes close
+($\times2.9$). A random direction of the same size changes little ($0.95\pm0.04$): the damage comes from the pattern of signs, not the size
 of the step.
 
 \paragraph{The surrogate gets the directions and, within one unit, the sizes.}
 Its four harmful directions (\texttt{worst}, \texttt{hess1}, \texttt{ascent}, \texttt{act1},
-$\times3.0$--$3.7$ simulated) are the simulator's four worst, in the same order. Within one
-tolerance unit it agrees with the simulator to $2\sigma$ in 21 of the 28 points and to $3\sigma$
-in 25 (Fig.~\ref{fig:calibration}), with no overall bias. It misses most at $t=\tfrac12$ of
-\texttt{act2} ($1.22$ vs.\ $0.97\pm0.04$) and \texttt{hess1} ($2.05$ vs.\ $1.70\pm0.06$), both
-through M7's exit or yokes, which it puts slightly too early on the rise.
+$\times2.7$--$3.7$ simulated) are the simulator's four worst; only the first two swap places, within
+their errors. Within one tolerance unit it agrees with the simulator to $2\sigma$ in 21 of the 28
+points and to $3\sigma$ in 24 (Fig.~\ref{fig:calibration}). It misses most at $t=\tfrac12$ of
+\texttt{worst} ($2.10$ vs.\ $1.71\pm0.06$) and \texttt{hess1} ($2.04$ vs.\ $1.68\pm0.06$) and at
+$t=1$ of \texttt{act2} ($1.91$ vs.\ $1.48\pm0.06$), all through M7's exit or yokes, which it puts
+too early on the rise.
 
 \paragraph{The quadratic model is not enough.}
 Built from the gradient and Hessian, it misses the shape of the harmful directions
@@ -453,19 +511,19 @@ magnitudes come from the surrogate and the simulator.
 \paragraph{The worst direction is M7's yokes; less upstream bending is harmful too.}
 \texttt{worst}, \texttt{hess1} and the largest part of \texttt{ascent} widen M7's inner yoke and
 narrow its outer yoke and exit width (Table~\ref{tab:dirs}, Fig.~\ref{fig:dirgrid}). They are harmful on one side only
-($\times3.7$ and $\times0.94$ along \texttt{worst}): the nominal design sits on the flank of a
-valley, not at its bottom (Fig.~\ref{fig:plane}). \texttt{act1}, independent of M7, gives
-$\times3.05$ at $t=+1$ (shorter and weaker M0--M4) and $\times1.07$ at $t=-1$.
+($\times3.5$ and $\times0.96$ along \texttt{worst}): the nominal design sits on the flank of a
+valley, not at its bottom (Fig.~\ref{fig:plane}). \texttt{act1}, nearly independent of M7, gives
+$\times2.67$ at $t=+1$ (shorter and weaker M1--M4) and $\times1.07$ at $t=-1$.
 
 \paragraph{Without M7 the worst direction is M2--M4, and harmful both ways.}
 With M7's parameters held at nominal, the worst direction of the quadratic model,
 \texttt{worst2}, widens M2's entrance and narrows and weakens M3 and M4, with M1--M3 shorter
-(Table~\ref{tab:dirs}, Fig.~\ref{fig:dirgrid}; cosine $0.25$ with \texttt{worst}). At one
-tolerance unit it gives $\times2.68\pm0.09$ simulated (surrogate $2.46\pm0.06$), against
-$\times3.69$ for \texttt{worst}: M7 accounts for the worst third, but the rest of the shield is
-nearly as sensitive. Unlike \texttt{worst}, it is harmful in both directions ($\times2.19\pm0.08$
+(Table~\ref{tab:dirs}, Fig.~\ref{fig:dirgrid}; cosine $0.24$ with \texttt{worst}). At one
+tolerance unit it gives $\times2.42\pm0.08$ simulated (surrogate $2.28\pm0.06$), against
+$\times3.46$ for \texttt{worst}: M7 accounts for the worst part, but the rest of the shield is
+nearly as sensitive. Unlike \texttt{worst}, it is harmful in both directions ($\times2.36\pm0.08$
 at $t=-1$): it runs across the valley of M2's entrance width, which sits at its bottom
-(Sec.~\ref{sec:single}). The surrogate overestimates that side ($2.63$, $4\sigma$).
+(Sec.~\ref{sec:single}). The surrogate overestimates that side ($2.66$, $2.6\sigma$).
 
 \begin{table}[t]
 \centering
@@ -477,39 +535,39 @@ relative and in physical units (cm, or T for $B$).}
 \toprule
 direction & largest changes & in words \\
 \midrule
-\texttt{worst}  & M7:\texttt{dXYokeIn} $+5.8\%$ ($+7.3$), M7:\texttt{dXYokeOut} $-5.6\%$ ($-5.3$),
+\texttt{worst}  & M7:\texttt{dXYokeIn} $+5.9\%$ ($+7.3$), M7:\texttt{dXYokeOut} $-5.6\%$ ($-5.3$),
                   M7:\texttt{dXOut} $-4.6\%$ ($-3.2$), M7:$B$ $-1.9\%$ ($|B|$ $-0.04$ T),
                   M2:\texttt{dXIn} $+1.5\%$ ($+1.1$), M7:\texttt{dXIn} $+1.1\%$ ($+0.4$),
-                  M3:$B$ $-1.0\%$ ($-0.02$ T)
+                  M3:$B$ $-0.9\%$ ($-0.02$ T), M4:\texttt{dXYokeIn} $+0.8\%$ ($+0.9$)
                 & M7's inner yoke wider, its outer yoke and exit narrower \\
 \midrule
-\texttt{hess1}  & M7:\texttt{dXYokeIn} $+6.1\%$ ($+7.6$), M7:\texttt{dXYokeOut} $-5.8\%$ ($-5.5$),
+\texttt{hess1}  & M7:\texttt{dXYokeIn} $+6.1\%$ ($+7.6$), M7:\texttt{dXYokeOut} $-5.9\%$ ($-5.5$),
                   M7:\texttt{dXOut} $-4.4\%$ ($-3.1$), M2:\texttt{dXIn} $+1.6\%$ ($+1.1$),
                   M7:$B$ $-1.4\%$, M7:\texttt{dXIn} $+1.0\%$, M4:\texttt{dXYokeIn} $+0.8\%$ ($+0.9$)
                 & as \texttt{worst} \\
 \midrule
-\texttt{ascent} & M7:\texttt{dXOut} $-4.5\%$ ($-3.1$), M7:$B$ $-4.2\%$ ($|B|$ $-0.08$ T),
-                  M7:\texttt{dXYokeIn} $+3.1\%$ ($+3.9$), M7:\texttt{dXYokeOut} $-2.9\%$ ($-2.7$),
-                  M3:\texttt{Z\_len} $-2.4\%$ ($-5.4$), M4:\texttt{Z\_len} $-2.3\%$ ($-5.2$),
-                  M0:$B$ $-2.1\%$ ($-0.04$ T)
-                & the gradient: weaker M7 with a narrower exit, shorter and weaker M0--M4 \\
+\texttt{ascent} & M7:\texttt{dXOut} $-4.6\%$ ($-3.2$), M7:$B$ $-4.3\%$ ($|B|$ $-0.09$ T),
+                  M7:\texttt{dXYokeIn} $+3.2\%$ ($+4.0$), M7:\texttt{dXYokeOut} $-3.0\%$ ($-2.8$),
+                  M3:\texttt{Z\_len} $-2.5\%$ ($-5.6$), M4:\texttt{Z\_len} $-2.4\%$ ($-5.4$),
+                  M3:$B$ $-2.1\%$ ($-0.04$ T)
+                & the gradient: weaker M7 with a narrower exit, shorter and weaker M1--M4 \\
 \midrule
-\texttt{corner} & all 65 parameters by exactly $\pm1.24\%$, each with the sign of its gradient
+\texttt{corner} & all 58 parameters by exactly $\pm1.31\%$, each with the sign of its gradient
                 & the simplest uniform pattern \\
 \midrule
-\texttt{act1}   & M3, M4:\texttt{Z\_len} $-3.5\%$ ($-7.8$), M2:$B$ $-3.4\%$, M2:\texttt{Z\_len}
-                  $-3.4\%$ ($-7.7$), M3:$B$ $-3.0\%$, M0:$B$ $-2.7\%$, M4:$B$ $-2.6\%$ ($-0.05$
-                  to $-0.06$ T)
-                & M0--M4 shorter and weaker: less bending upstream \\
+\texttt{act1}   & M3, M4:\texttt{Z\_len} $-3.7\%$ ($-8.3$), M2:$B$ $-3.6\%$, M2:\texttt{Z\_len}
+                  $-3.6\%$ ($-8.2$), M3:$B$ $-3.2\%$, M1, M4:$B$ $-2.7\%$ ($-0.05$ to $-0.07$ T),
+                  M1:\texttt{Z\_len} $-2.5\%$ ($-3.7$), M7:\texttt{dXIn} $+2.4\%$ ($+0.9$)
+                & M1--M4 shorter and weaker: less bending upstream \\
 \midrule
 \texttt{act2}   & M7:\texttt{dXOut} $-8.7\%$ ($-6.0$), M7:\texttt{Z\_len} $+3.1\%$ ($+6.2$),
-                  M7:$B$ $+2.1\%$ ($|B|$ $+0.04$ T), M4:\texttt{dY\_yokeIn} $+1.3\%$ ($+0.6$)
+                  M7:$B$ $+2.2\%$ ($|B|$ $+0.04$ T), M4:\texttt{dY\_yokeIn} $+1.3\%$ ($+0.6$)
                 & M7's exit narrower, M7 longer and stronger \\
 \midrule
-\texttt{worst2} & M2:\texttt{dXIn} $+4.3\%$ ($+3.0$), M3:$B$ $-3.6\%$ ($-0.07$ T), M3:\texttt{dXIn}
-                  $-3.4\%$ ($-2.2$), M2, M3:\texttt{Z\_len} $-3.1\%$, $-3.0\%$ ($-7.0$, $-6.8$), M4:$B$
-                  $-2.6\%$ ($-0.05$ T), M4:\texttt{dXIn} $-2.4\%$ ($-1.0$), M1:\texttt{Z\_len} $-2.2\%$
-                  ($-3.4$), M3:\texttt{dXYokeIn} $+2.0\%$ ($+1.7$)
+\texttt{worst2} & M2:\texttt{dXIn} $+4.5\%$ ($+3.2$), M3:$B$ $-3.7\%$ ($-0.07$ T), M3:\texttt{dXIn}
+                  $-3.5\%$ ($-2.3$), M2, M3:\texttt{Z\_len} $-3.2\%$, $-3.1\%$ ($-7.1$, $-6.9$), M4:$B$
+                  $-2.7\%$ ($-0.05$ T), M4:\texttt{dXIn} $-2.5\%$ ($-1.0$), M1:\texttt{Z\_len} $-2.3\%$
+                  ($-3.4$), M3:\texttt{dXYokeIn} $+2.1\%$ ($+1.8$)
                 & M7 fixed: M2's entrance wider, M3 and M4 narrower and weaker, M1--M3 shorter \\
 \bottomrule
 \end{tabular}
@@ -524,8 +582,8 @@ direction & largest changes & in words \\
   widths and gaps differ (a cell spanning both: one value for the whole magnet). Red: increased;
   blue: decreased; hatched: not a free parameter of that magnet. \texttt{worst} and
   \texttt{hess1} are M7's yokes and exit; \texttt{worst2}, with M7 fixed, widens M2's entrance and
-  narrows and weakens M3 and M4; \texttt{act1} shortens and weakens M0--M4. \texttt{corner}, every
-  parameter by $\pm1.24\%$, is left out.}
+  narrows and weakens M3 and M4; \texttt{act1} shortens and weakens M1--M4. \texttt{corner}, every
+  parameter by $\pm1.31\%$, is left out; M0 is held at nominal.}
   \label{fig:dirgrid}
 \end{figure}
 
@@ -542,8 +600,7 @@ direction & largest changes & in words \\
   \includegraphics[width=0.48\linewidth]{robustness_summary.pdf}\hfill
   \includegraphics[width=0.42\linewidth]{robustness_calibration.pdf}
   \caption{Left: $\HH$ at one tolerance unit along each direction. Right: surrogate vs.\
-  simulator for all 33 walked designs; the outliers are the box designs of \texttt{pga}
-  (Sec.~\ref{sec:box}).}
+  simulator for all 32 walked designs.}
   \label{fig:calibration}
 \end{figure}
 
@@ -566,54 +623,54 @@ parameters stay well inside them, and the worst design within the tolerances is 
 
 \begin{table}[t]
 \centering
-\caption{Concrete designs, simulated (nominal $1152\pm34$ hits) and predicted. At
+\caption{Concrete designs, simulated (nominal $1146\pm34$ hits) and predicted. At
 $\varepsilon=10\%$ the worst direction changes M7:\texttt{dXYokeIn} by $+12.5$ cm,
 M7:\texttt{dXYokeOut} by $-9.0$ cm, M7:\texttt{dXOut} by $-5.5$ cm, M7:$B$ from $-2.03$ to $-1.96$
 T, M2:\texttt{dXIn} by $+1.8$ cm, M7:\texttt{dXIn} by $+0.7$ cm, M3:$B$ by $-0.03$ T,
-M4:\texttt{dXYokeIn} by $+1.5$ cm, M3:\texttt{dXIn} by $-0.9$ cm, M7:\texttt{Z\_len} by $-2.5$ cm,
-and 55 more parameters by at most $1.2\%$.}
+M4:\texttt{dXYokeIn} by $+1.5$ cm, M7:\texttt{Z\_len} by $-2.6$ cm, M3:\texttt{dXIn} by $-0.8$ cm,
+and 48 more parameters by at most $1.1\%$.}
 \label{tab:concrete}
 \small
 \begin{tabular}{llrcc}
 \toprule
 design & what changes & hits & sim.\ $\HH$ & surr.\ $\HH$ \\
 \midrule
-worst, max 1\%   & all 65, RMS 0.21\% & 1549  & $1.35\pm0.05$ & 1.19 \\
-worst, max 2\%   & all 65, RMS 0.43\% & 1713  & $1.49\pm0.06$ & 1.60 \\
-worst, max 3\%   & all 65, RMS 0.64\% & 2270  & $1.97\pm0.07$ & 2.16 \\
-worst, max 5\%   & all 65, RMS 1.06\% & 3514  & $3.05\pm0.10$ & 3.36 \\
-worst, max 10\%  & all 65, RMS 2.1\%  & 9150  & $7.9\pm0.2$   & 8.9 \\
-opposite, max 5\% & all 65, signs reversed & 1110 & $0.96\pm0.04$ & 0.93 \\
-opposite, max 10\% & all 65, signs reversed & 1306 & $1.13\pm0.05$ & 1.01 \\
+worst, max 1\%   & all 58, RMS 0.22\% & 1424  & $1.24\pm0.05$ & 1.18 \\
+worst, max 2\%   & all 58, RMS 0.45\% & 1728  & $1.51\pm0.06$ & 1.59 \\
+worst, max 3\%   & all 58, RMS 0.67\% & 2152  & $1.88\pm0.07$ & 2.14 \\
+worst, max 5\%   & all 58, RMS 1.12\% & 3584  & $3.13\pm0.11$ & 3.32 \\
+worst, max 10\%  & all 58, RMS 2.2\%  & 8396  & $7.3\pm0.2$   & 8.7 \\
+opposite, max 5\% & all 58, signs reversed & 1117 & $0.98\pm0.04$ & 0.93 \\
+opposite, max 10\% & all 58, signs reversed & 1182 & $1.03\pm0.04$ & 0.99 \\
 \midrule
-worst, top 1 only  & M7:\texttt{dXYokeIn} $+10\%$ ($+12.5$ cm) & 1442 & $1.25\pm0.05$ & 1.23 \\
-worst, top 3 only  & + M7:\texttt{dXYokeOut} $-9.6\%$, M7:\texttt{dXOut} $-7.9\%$ & 3705 & $3.22\pm0.11$ & 4.54 \\
-worst, top 5 only  & + M7:$B$ $-3.2\%$, M2:\texttt{dXIn} $+2.6\%$ & 6398 & $5.55\pm0.18$ & 6.99 \\
-worst, top 10 only & the ten largest changes & 7296 & $6.33\pm0.20$ & 8.28 \\
+worst, top 1 only  & M7:\texttt{dXYokeIn} $+10\%$ ($+12.5$ cm) & 1385 & $1.21\pm0.05$ & 1.23 \\
+worst, top 3 only  & + M7:\texttt{dXYokeOut} $-9.6\%$, M7:\texttt{dXOut} $-7.9\%$ & 3827 & $3.34\pm0.11$ & 4.54 \\
+worst, top 5 only  & + M7:$B$ $-3.3\%$, M2:\texttt{dXIn} $+2.6\%$ & 6389 & $5.58\pm0.18$ & 6.95 \\
+worst, top 10 only & the ten largest changes & 7714 & $6.73\pm0.21$ & 8.21 \\
 \midrule
-single & M7:\texttt{dXOut} $-10\%$ ($-6.9$ cm)  & 3475 & $3.02\pm0.10$ & 2.87 \\
-single & M7:\texttt{dXYokeOut} $-10\%$ ($-9.4$ cm) & 2756 & $2.39\pm0.08$ & 2.57 \\
-single & M2:\texttt{dXIn} $-10\%$ ($-7.0$ cm)   & 1971 & $1.71\pm0.06$ & 1.80 \\
-single & M7:$B$ $-10\%$ ($|B|$ $2.03\to1.83$ T) & 1852 & $1.61\pm0.06$ & 1.60 \\
-single & M3:$B$ $-10\%$ ($1.9\to1.71$ T) & 1645 & $1.43\pm0.06$ & 1.34 \\
-single & M3:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1517 & $1.32\pm0.05$ & 1.35 \\
-single & M2:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1454 & $1.26\pm0.05$ & 1.32 \\
-single & M4:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1448 & $1.26\pm0.05$ & 1.30 \\
+single & M7:\texttt{dXOut} $-10\%$ ($-6.9$ cm)  & 3313 & $2.89\pm0.10$ & 2.87 \\
+single & M7:\texttt{dXYokeOut} $-10\%$ ($-9.4$ cm) & 2709 & $2.36\pm0.08$ & 2.57 \\
+single & M2:\texttt{dXIn} $-10\%$ ($-7.0$ cm)   & 1973 & $1.72\pm0.06$ & 1.80 \\
+single & M7:$B$ $-10\%$ ($|B|$ $2.03\to1.83$ T) & 1831 & $1.60\pm0.06$ & 1.60 \\
+single & M3:$B$ $-10\%$ ($1.9\to1.71$ T) & 1639 & $1.43\pm0.06$ & 1.34 \\
+single & M3:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1561 & $1.36\pm0.05$ & 1.35 \\
+single & M2:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1559 & $1.36\pm0.05$ & 1.32 \\
+single & M4:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1462 & $1.28\pm0.05$ & 1.30 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \paragraph{Exponential growth along the direction, on one side.}
-Along the worst direction (Fig.~\ref{fig:scaled}) the hits grow by $\times1.35$--$1.5$ at a
-maximum change of $1$--$2\%$, $\times2.0$ at $3\%$, $\times3.1$ at $5\%$ and $\times7.9$ at
-$10\%$: a factor $e$ per $\sim5\%$ of tolerance. The surrogate follows to within $7$--$12\%$ from
-$2\%$ to $10\%$ (slightly high) and is $12\%$ low at $1\%$. The opposite direction is harmless
-($\times0.96$ at $5\%$, $\times1.13$ at $10\%$).
+Along the worst direction (Fig.~\ref{fig:scaled}) the hits grow by $\times1.24$--$1.5$ at a
+maximum change of $1$--$2\%$, $\times1.9$ at $3\%$, $\times3.1$ at $5\%$ and $\times7.3$ at
+$10\%$: a factor $e$ per $\sim5\%$ of tolerance. The surrogate follows to within $5$--$18\%$
+(slightly high from $2\%$ on, $5\%$ low at $1\%$). The opposite direction is harmless
+($\times0.98$ at $5\%$, $\times1.03$ at $10\%$).
 
 \paragraph{The rise is collective.}
-The largest component alone (M7's inner yoke $+10\%$) gives $\times1.25$; the top three (adding
-M7's outer yoke and exit width narrowed) $\times3.2$; the top five $\times5.6$; the top ten
-$\times6.3$; all 65 $\times7.9$ (Fig.~\ref{fig:attribution}). Most of the damage is the three
+The largest component alone (M7's inner yoke $+10\%$) gives $\times1.21$; the top three (adding
+M7's outer yoke and exit width narrowed) $\times3.3$; the top five $\times5.6$; the top ten
+$\times6.7$; all 58 $\times7.3$ (Fig.~\ref{fig:attribution}). Most of the damage is the three
 widths of M7 together, each a moderate factor alone; the surrogate overestimates this
 combination ($\times4.5$ for the top three), while it gets each of them alone right.
 
@@ -652,19 +709,18 @@ underestimates it.
 \begin{table}[!htb]
 \centering
 \caption{The worst design within $\pm\varepsilon$ on every parameter: found on the surrogate,
-simulated ($10^9$ muons; nominal $1159\pm34$). Last column: the worst direction scaled to the
-same $\varepsilon$ (Table~\ref{tab:concrete}). At $\pm10\%$ the box corner of the walks
-(\texttt{pga}) is worse than the design found: $\times3283\pm97$.}
+simulated ($10^9$ muons; nominal $1145\pm34$). Last column: the worst direction scaled to the
+same $\varepsilon$ (Table~\ref{tab:concrete}).}
 \label{tab:tolerance}
 \begin{tabular}{lrrccc}
 \toprule
 $\varepsilon$ & at a limit & sim.\ hits & sim.\ $\HH$ & surr.\ $\HH$ & scaled direction (sim.) \\
 \midrule
-$1\%$  & 65 & 1875        & $1.62\pm0.06$ & $1.79\pm0.01$ & $1.35\pm0.05$ \\
-$2\%$  & 63 & 4817        & $4.16\pm0.14$ & $4.13\pm0.08$ & $1.49\pm0.06$ \\
-$3\%$  & 63 & 14\,009     & $12.1\pm0.4$  & $31\pm3$      & $1.97\pm0.07$ \\
-$5\%$  & 58 & 803\,992    & $694\pm20$    & $(4.1\pm1.1)\times10^3$ & $3.05\pm0.10$ \\
-$10\%$ & 58 & 3\,244\,523 & $2799\pm82$   & $(4.6\pm1.2)\times10^5$ & $7.9\pm0.2$ \\
+$1\%$  & 58 & 1803        & $1.58\pm0.06$ & $1.71\pm0.01$ & $1.24\pm0.05$ \\
+$2\%$  & 57 & 4564        & $3.99\pm0.13$ & $3.86\pm0.07$ & $1.51\pm0.06$ \\
+$3\%$  & 58 & 14\,551     & $12.7\pm0.4$  & $27\pm1$      & $1.88\pm0.07$ \\
+$5\%$  & 50 & 785\,116    & $686\pm20$    & $(2.3\pm0.5)\times10^3$ & $3.13\pm0.11$ \\
+$10\%$ & 52 & 7\,684\,325 & $6711\pm198$  & $(2.2\pm0.2)\times10^5$ & $7.3\pm0.2$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -678,15 +734,16 @@ $10\%$ & 58 & 3\,244\,523 & $2799\pm82$   & $(4.6\pm1.2)\times10^5$ & $7.9\pm0.2
 \end{figure}
 
 \paragraph{Results} (Table~\ref{tab:tolerance}, Fig.~\ref{fig:tolerance}). Already at $\pm1\%$
-the worst design gives $\times1.6$, at $\pm2\%$ $\times4.2$ and at $\pm3\%$ $\times12$, up to six
-times the scaled direction. Up to $\pm2\%$ the surrogate predicts them to $1$--$10\%$, and they
-act through M7: its outer yoke and exit narrower, its inner yoke wider and its field weaker, with
-M2's entrance wider and M3 weaker, every parameter at or near its limit. From $\pm2\%$ on, the
-search also widens M4's inner yoke, and the surrogate then overestimates, by $\times2.6$ at
-$\pm3\%$ and $\times6$ at $\pm5\%$, but the designs it finds are real: $\times12$ at $\pm3\%$ and
-$\times690$ at $\pm5\%$. At $\pm10\%$ its maximum ($\times4.6\times10^5$) is an artefact of its
-extrapolation; the design found gives $\times2800$, and the corner of the walks' box search
-$\times3283$, so the worst case at $\pm10\%$ is above $\times3000$.
+the worst design gives $\times1.6$, at $\pm2\%$ $\times4.0$ and at $\pm3\%$ $\times13$, up to seven
+times the scaled direction. Up to $\pm2\%$ the surrogate predicts them to $3$--$8\%$, and they act
+through M7: its outer yoke and exit narrower, its inner yoke wider and its field weaker, with M2's
+entrance wider and M3 weaker, every parameter at or near its limit. From $\pm2\%$ on, the search
+also widens M4's inner yoke, and the surrogate then overestimates, by $\times2.1$ at $\pm3\%$ and
+$\times3.4$ at $\pm5\%$, but the designs it finds are real: $\times13$ at $\pm3\%$ and $\times690$
+at $\pm5\%$. At $\pm10\%$ its maximum ($\times2.2\times10^5$) is an artefact of its extrapolation;
+the design found gives $\times6700$, so the worst case at $\pm10\%$ is above that. It is a
+different corner: M7's inner yoke narrowed, M2's entrance widened, the gap before M7 shorter and
+M7's entrance narrower.
 
 \paragraph{M4's inner yoke acts through M7.}
 Alone, M4's inner yoke changes nothing ($\times1.01\pm0.04$ at $+10\%$ on $10^9$ simulated muons;
@@ -708,9 +765,8 @@ M7's widths and yokes at nominal & $1.47\pm0.10$ & $1.47\pm0.10$ & $1.06\pm0.08$
 \end{center}
 With M7 at nominal the box designs are harmless; with M7 narrowed, widening M4's inner yoke
 multiplies the hits by up to seven. The surrogate finds this interaction but exaggerates it.
-The cruder box search of the walks (\texttt{pga}, 4 starts, 200 steps) ends at a different
-corner, with $\times3283\pm97$; half of it gives
-$\times350\pm10$, and its opposite corner $\times4.4\pm0.1$.
+(These box designs are those of the same search with M0 free; at $\pm2$--$5\%$ the designs found
+here are the same pattern.)
 
 \subsection{Tolerance allocation}
 \label{sec:allocation}
@@ -726,38 +782,38 @@ overestimates the worst designs beyond $\pm2\%$, so it errs on the tight side.
 
 \begin{table}[!htb]
 \centering
-\caption{Tolerance allocations (greedy, surrogate) for a worst case of at most $3$, $2$ and $1.5$
-times the nominal hits: the sixteen tightest parameters ($\pm\%$), and a summary of all 65. The
-worst design of each allocation is simulated in the last row.}
+\caption{Tolerance allocations (greedy, surrogate) for a worst case of at most $3$, $2$, $1.5$ and
+$1.25$ times the nominal hits: the sixteen tightest parameters ($\pm\%$), and a summary of all
+58. The worst design of each allocation is simulated in the last row.}
 \label{tab:allocation}
 \small
-\begin{tabular}{lrccc}
+\begin{tabular}{lrcccc}
 \toprule
-parameter & nominal & $\le3Y_0$ & $\le2Y_0$ & $\le1.5Y_0$ \\
+parameter & nominal & $\le3Y_0$ & $\le2Y_0$ & $\le1.5Y_0$ & $\le1.25Y_0$ \\
 \midrule
-M2:\texttt{dXIn}         & 70 cm    & 0.86 & 0.50 & 0.50 \\
-M4:\texttt{dXYokeIn}     & 109 cm   & 0.55 & 0.50 & 0.50 \\
-M7:\texttt{dXYokeOut}    & 94 cm    & 0.55 & 0.50 & 0.50 \\
-M7:\texttt{dXOut}        & 69 cm    & 0.55 & 0.50 & 0.50 \\
-M3:$B$                   & 1.9 T    & 0.86 & 0.55 & 0.50 \\
-M7:$B$                   & $-2.03$ T & 1.07 & 0.55 & 0.50 \\
-M3:\texttt{Z\_len}       & 225 cm   & 0.86 & 0.55 & 0.50 \\
-M3:\texttt{dXIn}         & 64 cm    & 1.07 & 0.55 & 0.50 \\
-M2:\texttt{Z\_len}       & 225 cm   & 1.07 & 0.69 & 0.50 \\
-M4:$B$                   & 1.89 T   & 1.07 & 0.69 & 0.50 \\
-M1:\texttt{Z\_len}       & 150 cm   & 1.34 & 0.69 & 0.50 \\
-M4:\texttt{Z\_len}       & 225 cm   & 1.68 & 0.86 & 0.50 \\
-M7:\texttt{dXYokeIn}     & 125 cm   & 0.86 & 0.86 & 0.50 \\
-M3:\texttt{dXYokeIn}     & 83 cm    & 1.68 & 0.86 & 0.50 \\
-M0:$B$                   & 1.99 T   & 1.34 & 0.86 & 0.50 \\
-M0:\texttt{Z\_len}       & 115 cm   & 1.68 & 1.07 & 0.69 \\
+M7:\texttt{dXOut}        & 69 cm    & 0.55 & 0.50 & 0.50 & 0.50 \\
+M7:\texttt{dXYokeOut}    & 94 cm    & 0.55 & 0.50 & 0.50 & 0.50 \\
+M4:\texttt{dXYokeIn}     & 109 cm   & 0.55 & 0.55 & 0.50 & 0.50 \\
+M2:\texttt{dXIn}         & 70 cm    & 0.86 & 0.55 & 0.50 & 0.50 \\
+M7:\texttt{dXYokeIn}     & 125 cm   & 0.86 & 0.55 & 0.50 & 0.50 \\
+M7:$B$                   & $-2.03$ T & 1.07 & 0.55 & 0.50 & 0.50 \\
+M3:\texttt{Z\_len}       & 225 cm   & 1.07 & 0.69 & 0.50 & 0.50 \\
+M3:$B$                   & 1.9 T    & 1.07 & 0.69 & 0.50 & 0.50 \\
+M3:\texttt{dXIn}         & 64 cm    & 1.34 & 0.69 & 0.50 & 0.50 \\
+M2:\texttt{Z\_len}       & 225 cm   & 1.34 & 0.86 & 0.50 & 0.50 \\
+M4:$B$                   & 1.89 T   & 1.34 & 0.86 & 0.50 & 0.50 \\
+M1:\texttt{Z\_len}       & 150 cm   & 1.68 & 0.86 & 0.50 & 0.50 \\
+M4:\texttt{Z\_len}       & 225 cm   & 1.68 & 1.07 & 0.50 & 0.50 \\
+M3:\texttt{dXYokeIn}     & 83 cm    & 1.68 & 1.34 & 0.55 & 0.50 \\
+M7:\texttt{dXIn}         & 38 cm    & 2.62 & 2.10 & 0.55 & 0.50 \\
+M2:$B$                   & 1.87 T   & 2.10 & 1.07 & 0.69 & 0.50 \\
 \midrule
-parameters below $\pm1\%$ / $\pm2\%$ / $\pm5\%$ & & 7 / 16 / 39 & 15 / 22 / 46 & 23 / 31 / 62 \\
-median tolerance & & $4.1\%$ & $3.3\%$ & $2.1\%$ \\
-heights (\texttt{dYIn}, \texttt{dY\_yokeIn}) & & $3.3$--$10\%$ & $1.7$--$6.4\%$ & $0.7$--$5.1\%$ \\
+parameters below $\pm1\%$ / $\pm2\%$ / $\pm5\%$ & & 5 / 14 / 29 & 12 / 20 / 36 & 19 / 25 / 55 & 47 / 56 / 58 \\
+median tolerance & & $4.6\%$ & $4.1\%$ & $2.4\%$ & $0.5\%$ \\
+heights (\texttt{dYIn}, \texttt{dY\_yokeIn}) & & $3.3$--$10\%$ & $1.7$--$8.0\%$ & $1.1$--$6.4\%$ & $0.5$--$1.3\%$ \\
 \midrule
-worst design: surrogate & & $2.99\pm0.63$ & $2.00\pm0.10$ & $1.50\pm0.03$ \\
-worst design: simulator & & $1.78\pm0.07$ & $1.82\pm0.07$ & $1.42\pm0.05$ \\
+worst design: surrogate & & $2.96\pm0.15$ & $2.00\pm0.05$ & $1.50\pm0.01$ & $1.25\pm0.01$ \\
+worst design: simulator & & $2.17\pm0.08$ & $1.62\pm0.06$ & $\mathbf{1.69\pm0.06}$ & $\mathbf{1.43\pm0.06}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -765,24 +821,29 @@ worst design: simulator & & $1.78\pm0.07$ & $1.82\pm0.07$ & $1.42\pm0.05$ \\
 \begin{figure}[!htbp]
   \centering
   \includegraphics[width=\linewidth,height=0.82\textheight,keepaspectratio]{tolerance_allocation.pdf}
-  \caption{Left: the tolerance allocations for a worst case of at most $3$, $2$ and $1.5\,Y_0$
-  (surrogate; simulated worst designs in the legend). Right: the greedy path, the worst case of
+  \caption{Left: the tolerance allocations for a worst case of at most $3$, $2$, $1.5$ and
+  $1.25\,Y_0$ (surrogate; simulated worst designs in the legend). Right: the greedy path, the worst case of
   the box against the number of parameters tightened.}
   \label{fig:allocation}
 \end{figure}
 
 \paragraph{Results} (Table~\ref{tab:allocation}, Fig.~\ref{fig:allocation}). A guarantee against
-the worst case is demanding. For at most $\times3$, the allocation holds M4's inner yoke, M7's exit
-width and outer yoke to $\pm0.55\%$ ($0.4$--$0.6$ cm), and M2's entrance, M3's field and length and
-M7's inner yoke to $\pm0.9\%$; 16 parameters are below $\pm2\%$ and the median tolerance is $4\%$;
-two (M3's inner gap and M5's height) may stay at $\pm10\%$. For at most $\times2$ it puts fifteen
-parameters below $\pm1\%$, four of them at the $0.5\%$ floor (M2's entrance, M4's inner yoke, M7's
-exit width and outer yoke), and for $\times1.5$ twenty-three, fifteen at the floor. The order
-follows the sensitivities and the interaction of Sec.~\ref{sec:box}: M7 (exit width, yokes, field),
-M4's inner yoke, M2's entrance and the lengths and fields of M0--M4 first; the gaps between
-magnets, the heights and M0's transverse sizes last. The simulated worst designs stay below every
-target ($\times1.78$, $1.82$, $1.42$): at these tolerances the surrogate is accurate for $\times2$
-and $\times1.5$, and conservative for $\times3$.
+the worst case is demanding. For at most $\times3$, the allocation holds M7's exit width and outer
+yoke and M4's inner yoke to $\pm0.55\%$ ($0.4$--$0.6$ cm), and M2's entrance and M7's inner yoke to
+$\pm0.9\%$; 14 parameters are below $\pm2\%$ and the median tolerance is $4.6\%$; two (the gap
+before M2 and M7's yoke height) may stay at $\pm10\%$. For at most $\times2$ it puts twelve
+parameters below $\pm1\%$: M7's exit width and outer yoke at the $0.5\%$ floor, M2's entrance, M4's
+inner yoke and M7's inner yoke and field at $\pm0.55\%$, M3's length, field and entrance at
+$\pm0.7\%$. The order follows the sensitivities and the interaction of Sec.~\ref{sec:box}: M7
+(exit width, yokes, field), M4's inner yoke, M2's entrance and the lengths and fields of M1--M4
+first; the gaps between magnets and the heights last. The simulated worst designs of the
+allocations for $\times3$ and $\times2$ stay below their targets ($\times2.17$ and $\times1.62$):
+the surrogate is conservative there. Those for $\times1.5$ and $\times1.25$ do not
+($\times1.69\pm0.06$ and $\times1.43\pm0.06$), although they tighten 19 and 47 parameters below
+$\pm1\%$. At these levels the remaining worst case is the sum of many small effects, each below
+what the surrogate resolves and comparable to the noise of the field maps
+(Sec.~\ref{sec:validation}); the greedy search then tightens what the surrogate believes, not what
+the simulator shows. The allocation for $\times2$ is the tightest one verified.
 
 \subsection{Random tolerances}
 
@@ -794,18 +855,19 @@ each simulated, and 4096 per level from the surrogate (Fig.~\ref{fig:random}).
 \toprule
 tolerance & simulated $\HH$ (8 designs) & surr.\ median & surr.\ 5--95\% & $P(Y>Y_0)$ \\
 \midrule
-$\pm2\%$  & 0.94, 0.95, 0.97, 0.99, 1.01, 1.04, 1.10, 1.20 & 1.04 & 0.90--1.25 & $68\%$ \\
-$\pm5\%$  & 0.89, 1.18, 1.20, 1.27, 1.47, 1.48, 1.51, 2.49 & 1.26 & 0.86--2.31 & $83\%$ \\
-$\pm10\%$ & 1.16, 1.88, 2.06, 2.55, 3.08, 3.46, 3.92, 7.34 & 2.28 & 0.94--14.7 & $94\%$ \\
+$\pm2\%$  & 0.96, 0.97, 0.97, 0.98, 1.00, 1.01, 1.08, 1.11 & 1.04 & 0.91--1.25 & $68\%$ \\
+$\pm5\%$  & 0.96, 1.03, 1.11, 1.35, 1.46, 1.67, 1.82, 1.84 & 1.24 & 0.87--2.25 & $82\%$ \\
+$\pm10\%$ & 1.92, 1.93, 2.46, 2.92, 3.10, 4.04, 10.3, 16.4 & 2.15 & 0.91--15.7 & $93\%$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 At $\pm2\%$ the hits stay within about $\pm20\%$. At $\pm5\%$ most designs stay within $\pm50\%$,
-but the tail reaches $\times2.5$ among the simulated designs ($\times3.6$ at the surrogate's 99th
+but the tail reaches $\times1.8$ among the simulated designs ($\times3.6$ at the surrogate's 99th
 percentile). At $\pm10\%$ the median design is more than twice as bad and the tail reaches
-$\times7$ among the simulated designs ($\times130$ at the surrogate's 99th percentile, where the
+$\times16$ among the simulated designs ($\times100$ at the surrogate's 99th percentile, where the
 surrogate is less reliable). The surrogate agrees with the simulator design by design (median
-ratio simulator/surrogate $1.03$--$1.06$).
+ratio simulator/surrogate $1.02$ at $\pm2\%$ and $\pm5\%$, $1.17$ at $\pm10\%$, where it is low
+on the worst, $\times11$ for $\times16$).
 
 \begin{figure}[t]
   \centering
@@ -844,63 +906,63 @@ bin's gradient and that of the total.}
 $p_z$ [GeV] & muons & share of hits & hit rate & $|\nabla Y_b|/Y_b$ & $\cos(g_b, g)$ \\
 \midrule
 10--20   & $1.7\%$   & $0.1\%$  & $4.2\times10^{-8}$ & 2.87 & $+0.10$ \\
-20--30   & $48.4\%$  & $6.0\%$  & $1.5\times10^{-7}$ & 2.34 & $+0.31$ \\
-30--45   & $28.8\%$  & $47.5\%$ & $2.0\times10^{-6}$ & 1.26 & $+0.79$ \\
-45--75   & $15.3\%$  & $14.6\%$ & $1.2\times10^{-6}$ & 1.73 & $+0.09$ \\
-75--125  & $4.7\%$   & $2.7\%$  & $7.1\times10^{-7}$ & 0.54 & $+0.12$ \\
-125--175 & $0.89\%$  & $2.2\%$  & $3.0\times10^{-6}$ & 0.82 & $+0.45$ \\
-175--225 & $0.23\%$  & $4.1\%$  & $2.1\times10^{-5}$ & 1.42 & $+0.48$ \\
-225--300 & $0.08\%$  & $10.1\%$ & $1.6\times10^{-4}$ & 1.30 & $+0.47$ \\
-$>300$   & $0.006\%$ & $12.7\%$ & $2.5\times10^{-3}$ & 2.70 & $+0.44$ \\
+20--30   & $48.4\%$  & $6.0\%$  & $1.5\times10^{-7}$ & 2.32 & $+0.30$ \\
+30--45   & $28.8\%$  & $47.5\%$ & $2.0\times10^{-6}$ & 1.26 & $+0.81$ \\
+45--75   & $15.3\%$  & $14.6\%$ & $1.2\times10^{-6}$ & 1.70 & $+0.12$ \\
+75--125  & $4.7\%$   & $2.7\%$  & $7.1\times10^{-7}$ & 0.53 & $+0.10$ \\
+125--175 & $0.89\%$  & $2.2\%$  & $3.0\times10^{-6}$ & 0.77 & $+0.42$ \\
+175--225 & $0.23\%$  & $4.1\%$  & $2.1\times10^{-5}$ & 1.34 & $+0.45$ \\
+225--300 & $0.08\%$  & $10.1\%$ & $1.6\times10^{-4}$ & 1.23 & $+0.43$ \\
+$>300$   & $0.006\%$ & $12.7\%$ & $2.5\times10^{-3}$ & 2.56 & $+0.40$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \paragraph{The populations want different changes.}
-All bins above $125$\,GeV want the same changes ($\cos=0.96$--$1.00$), and the soft bins
+All bins above $125$\,GeV want the same changes ($\cos=0.95$--$1.00$), and the soft bins
 ($10$--$30$\,GeV) agree with each other ($0.90$). The $45$--$75$\,GeV bin is anti-aligned with
-both ($\cos=-0.49$ to $-0.51$ with the high momenta, $-0.46$ and $-0.60$ with the soft ones), and
-the $30$--$45$\,GeV bin, the largest, is nearly orthogonal to the high momenta ($-0.11$ to
-$-0.16$; Fig.~\ref{fig:pz_alignment}). The total gradient follows the $30$--$45$\,GeV bin
-($\cos=0.79$) and is at $\cos\approx0.45$ with the high-momentum bins and $0.1$--$0.3$ with the
-soft ones. Simulated on the same $10^9$ muons (Fig.~\ref{fig:simpz}; nominal $1100$ hits):
+both ($\cos=-0.48$ to $-0.50$ with the high momenta, $-0.46$ and $-0.60$ with the soft ones), and
+the $30$--$45$\,GeV bin, the largest, is nearly orthogonal to the high momenta ($-0.13$ to
+$-0.18$; Fig.~\ref{fig:pz_alignment}). The total gradient follows the $30$--$45$\,GeV bin
+($\cos=0.81$) and is at $\cos\approx0.4$ with the high-momentum bins and $0.1$--$0.3$ with the
+soft ones. Simulated on the same $10^9$ muons (Fig.~\ref{fig:simpz}; nominal $1201$ hits):
 \begin{itemize}
-  \item the worst direction at one tolerance unit ($\times3.9$): the $30$--$40$\,GeV hits go from
-        $331$ to $2435$, the $40$--$50$\,GeV ones from $309$ to $991$ and those below $30$\,GeV from
-        $78$ to $325$, while those above $150$\,GeV barely move ($282\to369$): it acts on the
+  \item the worst direction at one tolerance unit ($\times3.4$): the $30$--$40$\,GeV hits go from
+        $362$ to $2245$, the $40$--$50$\,GeV ones from $334$ to $966$ and those below $30$\,GeV from
+        $88$ to $325$, while those above $150$\,GeV do not move ($320\to344$): it acts on the
         intermediate and soft muons;
-  \item M7's exit width alone at $-10\%$, the most sensitive parameter ($\times3.2$): the same
-        pattern, $30$--$50$\,GeV from $640$ to $2997$, above $150$\,GeV down to $219$;
-  \item \texttt{ascent} ($\times3.5$) opens both groups: $30$--$40$\,GeV $331\to1814$ and above
-        $150$\,GeV $282\to858$;
-  \item \texttt{act1} ($\times3.3$) acts on the high momenta only: above $150$\,GeV the hits go from
-        $282$ to $2706$ ($\times9.6$), while those at $30$--$50$\,GeV stay ($640\to663$);
-  \item the worst corner of the $\pm10\%$ box ($\times3436$): almost all $30$--$50$\,GeV
-        ($640\to3.4\times10^6$) and below $30$\,GeV ($78\to3.3\times10^5$); the high-momentum
-        hits do not change ($282\to266$).
+  \item M7's exit width alone at $-10\%$, the most sensitive parameter ($\times2.8$): the same
+        pattern, $30$--$50$\,GeV from $696$ to $2911$, above $150$\,GeV down to $211$;
+  \item \texttt{ascent} ($\times3.1$) opens both groups: $30$--$40$\,GeV $362\to1873$ and above
+        $150$\,GeV $320\to699$;
+  \item \texttt{act1} ($\times2.6$) acts on the high momenta only: above $150$\,GeV the hits go from
+        $320$ to $2321$ ($\times7.3$), while those at $30$--$50$\,GeV stay ($696\to605$);
+  \item the worst design in the $\pm10\%$ box (Sec.~\ref{sec:box}; $\times6394$): almost all
+        $30$--$50$\,GeV ($696\to7.5\times10^6$) and below $30$\,GeV ($88\to6.3\times10^4$); the
+        high-momentum hits fall ($320\to143$).
 \end{itemize}
-Random $\pm10\%$ designs (Table~\ref{tab:concrete}) can open either group: the worst of the
-eight ($\times7.3$) raises the $40$--$60$\,GeV hits from $380$ to $7987$, another ($\times3.9$)
-those above $150$\,GeV from $290$ to $3260$.
+Random $\pm10\%$ designs (Sec.~\ref{sec:concrete}) can open either group: the worst of the eight
+($\times16$) raises the $40$--$60$\,GeV hits from $362$ to $17\,911$, another ($\times4.0$) those
+above $150$\,GeV from $310$ to $3052$.
 
 \paragraph{Which parameters act on which muons} (Fig.~\ref{fig:pz_sensitivity}).
 The high-momentum hits are controlled by the \emph{upstream} magnets: the lengths and fields of
-M0--M4, each changing the hits above $300$\,GeV by $95$--$160\%$ at its worse limit. The soft hits
+M1--M4, each changing the hits above $300$\,GeV by $90$--$160\%$ at its worse limit. The soft hits
 respond most to the entrance widths of M2 and M3 (up to $\times8$ at $10$--$20$\,GeV, $\times4.4$
 at $20$--$30$\,GeV) and the field of M3. The intermediate hits are controlled by M7: its exit
 width ($\times4.6$ for the $30$--$45$\,GeV hits) and field ($+100\%$ of the $30$--$45$\,GeV hits,
 $+117\%$ of the $45$--$75$\,GeV ones), and, at $45$--$75$\,GeV, by M2's entrance width
-($\times3.6$). This explains \texttt{act1}: weakening M0--M4 together lets more high-momentum
+($\times3.6$). This explains \texttt{act1}: weakening M1--M4 together lets more high-momentum
 muons through.
 
 \paragraph{Transverse momentum and charge.}
-The sensitivity falls with $p_t$ ($1.48$ per tolerance unit below $0.25$\,GeV, $0.66$--$0.82$
-above $0.75$\,GeV), and the bins below $1$\,GeV want the same changes ($\cos\ge0.85$,
+The sensitivity falls with $p_t$ ($1.45$ per tolerance unit below $0.25$\,GeV, $0.65$--$0.81$
+above $0.75$\,GeV), and the bins below $1$\,GeV want the same changes ($\cos\ge0.84$,
 Fig.~\ref{fig:pt}). The muons above $1.5$\,GeV ($1.6\%$ of the muons, $28\%$ of the hits) want
-other changes ($\cos=0.00$--$0.11$ with the bins below $1$\,GeV). The narrowing of M7 acts on the
+other changes ($\cos=-0.03$ to $0.08$ with the bins below $1$\,GeV). The narrowing of M7 acts on the
 low-$p_t$ muons: its exit width and outer yoke at their worse limit multiply the hits below
 $0.5$\,GeV by $4.3$--$5.0$ and change those above $1.5$\,GeV by $3$--$8\%$. Positive muons give
-$67\%$ of the hits; both charges respond to similar changes ($\cos=0.70$), the $\mu^-$ more
+$67\%$ of the hits; both charges respond to similar changes ($\cos=0.69$), the $\mu^-$ more
 strongly to M7's exit width and outer yoke ($+244\%$ and $+213\%$ vs.\ $+159\%$ and $+129\%$) and
 to M2's entrance width ($+117\%$ vs.\ $+61\%$).
 
@@ -909,9 +971,10 @@ to M2's entrance width ($+117\%$ vs.\ $+61\%$).
   \includegraphics[width=\linewidth]{sim_pz_profiles.pdf}
   \caption{Simulated hits per $p_z$ range, all on the same $10^9$ muons
   (\texttt{analysis/pz\_profiles.py}): the nominal design, \texttt{ascent}, \texttt{worst} and
-  \texttt{act1} at one tolerance unit, the worst corner of the $\pm10\%$ box, and the most
-  sensitive parameter alone. Factors: total hits relative to this simulation's nominal ($1100$
-  hits; Table~\ref{tab:walks} quotes the walks' $1165$, the difference is the simulator's noise).}
+  \texttt{act1} at one tolerance unit, the worst design in the $\pm10\%$ box
+  (Table~\ref{tab:tolerance}), and the most sensitive parameter alone. Factors: total hits
+  relative to this simulation's nominal ($1201$ hits; Table~\ref{tab:walks} quotes the walks'
+  $1171$, the difference is the simulator's noise).}
   \label{fig:simpz}
 \end{figure}
 
@@ -955,32 +1018,33 @@ to M2's entrance width ($+117\%$ vs.\ $+61\%$).
 \begin{enumerate}
   \item \textbf{The design is fragile to coordinated deviations.} With every parameter off by up
         to $\varepsilon$, the worst design found (on the surrogate, then simulated) gives
-        $\times1.6$ at $\varepsilon=1\%$, $\times4.2$ at $2\%$, $\times12$ at $3\%$, $\times690$
-        at $5\%$ and above $\times3000$ at $10\%$; these are lower bounds on the true worst case,
-        tight up to $2\%$. Moving every parameter by $1.24\%$ with the sign of its gradient
-        already gives $\times1.75$.
+        $\times1.6$ at $\varepsilon=1\%$, $\times4.0$ at $2\%$, $\times13$ at $3\%$, $\times690$
+        at $5\%$ and $\times6700$ at $10\%$; these are lower bounds on the true worst case,
+        tight up to $2\%$. Moving every parameter by $1.31\%$ with the sign of its gradient
+        already gives $\times1.7$.
   \item \textbf{M7's widths are the core of it, with M4's inner yoke.} The worst direction narrows
         M7's outer yoke and exit and widens its inner yoke; these three alone at their scaled
-        values give $\times3.2$. The worst box designs add M4's inner yoke widened, which alone does
+        values give $\times3.3$. The worst box designs add M4's inner yoke widened, which alone does
         nothing but with M7 narrowed multiplies the hits by up to seven; with M7's widths at
         nominal the same designs are harmless.
-  \item \textbf{Bounding the worst case needs sub-percent tolerances on about fifteen parameters
+  \item \textbf{Bounding the worst case needs sub-percent tolerances on about a dozen parameters
         and a few percent on most others.} The allocation found for at most $\times2$
-        (simulated $\times1.82$) holds M2's entrance width, M4's inner yoke and M7's exit width
-        and outer yoke to $\pm0.5\%$, M3's and M7's fields to $\pm0.55\%$, fifteen parameters
-        below $\pm1\%$, median $3.3\%$; for at most $\times3$ (simulated $\times1.78$), seven below
-        $\pm1\%$, median $4\%$. M7, M4's inner yoke, M2's entrance and the lengths and fields of
-        M0--M4 need the tightest tolerances; the gaps between magnets, the heights of magnets and
-        yokes and M0's transverse sizes the loosest.
+        (simulated $\times1.62$) holds M7's exit width and outer yoke to $\pm0.5\%$, M2's
+        entrance, M4's inner yoke and M7's inner yoke and field to $\pm0.55\%$, twelve parameters
+        below $\pm1\%$, median $4.1\%$; for at most $\times3$ (simulated $\times2.17$), five below
+        $\pm1\%$, median $4.6\%$. M7, M4's inner yoke, M2's entrance and the lengths and fields of
+        M1--M4 need the tightest tolerances; the gaps between magnets and the heights of magnets
+        and yokes the loosest. Tighter targets ($\times1.5$, $\times1.25$) fail in the simulator:
+        they are beyond what the surrogate resolves.
   \item \textbf{Single parameters underestimate the risk.} The worst one at its $\pm10\%$ limit
-        (the exit width of M7, narrowed) gives $\times3.0$; M7's outer yoke $\times2.4$, M2's
+        (the exit width of M7, narrowed) gives $\times2.9$; M7's outer yoke $\times2.4$, M2's
         entrance $\times1.7$ and M7's field $\times1.6$. The top five changes of the worst
-        direction together give $\times5.6$, all 65 $\times7.9$. M7 matters most; the heights
+        direction together give $\times5.6$, all 58 $\times7.3$. M7 matters most; the heights
         hardly matter ($\le6\%$ each at $\pm10\%$), nor the gaps between magnets ($\le1.5\%$).
   \item \textbf{Random deviations are much milder than the worst case.} Independent errors of
         $\pm2\%$ keep the hits within about $\pm20\%$; at $\pm5\%$ most designs stay within
-        $\pm50\%$, with a tail to $\times2.5$--$3.6$; at $\pm10\%$ the median design is more than
-        twice as bad and the tail reaches $\times7$ among eight simulated designs. A
+        $\pm50\%$, with a tail to $\times1.8$--$3.6$; at $\pm10\%$ the median design is more than
+        twice as bad and the tail reaches $\times16$ among eight simulated designs. A
         specification can therefore be much looser if the errors are independent than if it
         must hold against the worst combination.
   \item \textbf{Different muons pull in different directions.} The hits come from muons of
@@ -990,24 +1054,33 @@ to M2's entrance width ($+117\%$ vs.\ $+61\%$).
         worst direction acts on the intermediate and soft muons and leaves the high-momentum ones
         unchanged.
   \item \textbf{The surrogate is quantitative within $\pm2\%$ and on single parameters.} On the
-        242 designs the analyses simulated, its median error is $5\%$; it reproduces every
+        368 designs the analyses simulated, its median error is $5\%$; it reproduces every
         parameter alone to $10\%$ (31 of 32 scan points within $2\sigma$), the walks within one
         tolerance unit (21 of 28 within $2\sigma$), the worst designs of the boxes up to $\pm2\%$
-        to $1$--$10\%$, and the random designs. It overestimates the combination of M7's widths
-        with M4's inner yoke, and so the worst designs beyond $\pm2\%$, by factors of $2.6$ to
-        over $100$. Every number used for a decision here is simulated.
+        to $3$--$8\%$, and the random designs. It overestimates the combination of M7's widths
+        with M4's inner yoke, and so the worst designs beyond $\pm2\%$, by factors of $2$ to
+        over $30$. Every number used for a decision here is simulated.
+  \item \textbf{The field maps limit the precision.} Each design's iron is meshed anew, which adds
+        $2$--$3\%$ of noise to its hits, as much as the Poisson noise of $10^9$ muons. It hides the
+        small effects of the weak parameters (the one-at-a-time curvatures are off by $34\%$ over
+        the 58 parameters, $9\%$ over the eight strongest) and caps the tightest tolerance target
+        that can be verified at about $\times2$. A finer or fixed mesh in the field maps is the
+        next step.
 \end{enumerate}
 
 \section*{Limitations}
 \begin{itemize}
   \item The field maps use \texttt{snoopy}'s diluted-steel yokes (its full model fails on M5,
         which has no gap). The height of a magnet, and of its yoke, moves its entrance and exit
-        together.
+        together. Each map is meshed anew, which adds $2$--$3\%$ of noise to every design's hits
+        (Sec.~\ref{sec:validation}).
+  \item The hadron absorber M0 is held at nominal; its tolerances are not analysed.
   \item Muons come from the generative flow, so the absolute numbers depend on how well the flow
         reproduces the muon spectrum and the production points.
   \item The surrogate's errors are the scatter of its members: they miss a bias the members
         share, such as their overestimate of the worst box designs (Sec.~\ref{sec:box}). The
-        curvatures of single parameters on the high-momentum check sample are off by $46\%$.
+        curvatures of single parameters on the high-momentum check sample are off by $34\%$
+        over the 58 analysed ($46\%$ with M0).
   \item The random-tolerance distributions rest on eight simulated designs per level and on the
         surrogate for their tails.
   \item The worst designs within a tolerance are found on the surrogate: their simulated values
@@ -1020,7 +1093,8 @@ to M2's entrance width ($+117\%$ vs.\ $+61\%$).
 \section{Free parameters}
 \begin{table}[h]
 \centering
-\caption{Free parameters and nominal values (lengths in cm, $B$ in T): 65 in all. The exit
+\caption{Free parameters and nominal values (lengths in cm, $B$ in T): 65 in all, of which the
+surrogate is trained on all and the analysis holds the seven of M0 at nominal. The exit
 values \texttt{dYOut} and \texttt{dY\_yokeOut} equal \texttt{dYIn} and \texttt{dY\_yokeIn};
 M0--M4 are rectangular (\texttt{dXOut}, \texttt{gapOut}, \texttt{dXYokeOut} equal their entrance
 values). \texttt{Z\_gap} is the gap before the magnet.}

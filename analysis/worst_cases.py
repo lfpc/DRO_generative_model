@@ -8,7 +8,6 @@ over the muons, quoted per as many):
                the opposite side)
   worst-top<k> worst@10% with only its k largest changes kept: how many parameters the rise needs
   single<i>    the i-th most sensitive parameter (surrogate) alone at its worse +-10% face
-  box, box/2   the worst design in the +-10% box (pga), and halfway to it
   rand<X>%_<i> random designs with every parameter uniform in +-X%, next to the surrogate's
                Monte Carlo of --n_mc such designs
 
@@ -59,9 +58,6 @@ for k in map(int, args.top_k.split(',')):
     DESIGNS.append((f'worst-top{k}', np.where(np.isin(np.arange(D), top), v, 0)))
 for i, k in enumerate(np.argsort(-np.maximum(r['oat_plus'], r['oat_minus']))[:args.n_single]):
     DESIGNS.append((f'single{i + 1}', np.eye(D)[k] * (1 if r['oat_plus'][k] >= r['oat_minus'][k] else -1)))
-if 'pga' in NAMES:
-    box = r['designs'][r['dir_idx'][NAMES.index('pga')][-1]]
-    DESIGNS += [('box/2', box / 2), ('box', box)]
 rng = np.random.default_rng(args.seed)
 RAND = {}                                                # X -> indices of its random designs
 for spec in args.random.split(','):

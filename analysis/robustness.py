@@ -37,7 +37,7 @@ parser.add_argument('--n_ref', type=float, default=1e9, help='hits are quoted pe
 parser.add_argument('--n_muons_sim', type=int, default=int(1e9), help='sampled muons for the simulated walks')
 parser.add_argument('--seed', type=int, default=0, help='seed of the sampled muons')
 parser.add_argument('--n_sigma', type=float, default=3.0, help='significance for "resolved"')
-parser.add_argument('--dirs', default='ascent,worst,act1,act2,hess1,pga,corner,random,worst2')
+parser.add_argument('--dirs', default='ascent,worst,act1,act2,hess1,corner,random,worst2')
 parser.add_argument('--worst2_fixed', default='M7:', help='label prefixes held at nominal in worst2')
 parser.add_argument('--t_max', type=float, default=1.0, help='walk half-length (L2, normalized)')
 parser.add_argument('--n_points', type=int, default=5, help='points per walk (made odd)')

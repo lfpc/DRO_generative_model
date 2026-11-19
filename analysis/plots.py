@@ -26,7 +26,7 @@ from paths import RUN, figures, save_figure
 parser = cli.parser(__doc__)
 parser.add_argument('run', nargs='?', default=RUN)
 parser.add_argument('--n_sigma', type=float, default=3.0, help='significance for "resolved"')
-parser.add_argument('--profiles', default='nominal,worst@5%,worst@10%,worst@-10%,box,single4,rand10%_3',
+parser.add_argument('--profiles', default='nominal,worst@5%,worst@10%,worst@-10%,single4,rand10%_3',
                     help='worst-case designs shown in sim_pz_profiles.png')
 args = parser.parse_args()
 FIGS = figures(args.run)
@@ -256,11 +256,13 @@ def robustness_figures(r):
             k = [i for i, t in zip(idx, ts) if t != 0 and sim[i] > 0]
             ax.errorbar(sr[k], r['ratio'][k], xerr=sr_se[k], yerr=r['ratio_se'][k], fmt='o', ms=5,
                         color=plt.cm.tab10(j % 10), label=nm, capsize=2)
-        lo, hi = 0.5 * min(sr[sr > 0].min(), r['ratio'].min()), 2 * max(sr.max(), r['ratio'].max())
+        shown = np.array([i for idx, ts in zip(r['dir_idx'], r['dir_t']) for i, t in zip(idx, ts) if t != 0 and sim[i] > 0])
+        lo = 0.8 * min(sr[shown].min(), r['ratio'][shown].min())
+        hi = 1.25 * max(sr[shown].max(), r['ratio'][shown].max())
         ax.plot([lo, hi], [lo, hi], 'k--', lw=0.8)
         ax.set(xscale='log', yscale='log', xlim=(lo, hi), ylim=(lo, hi), xlabel='simulator $Y/Y_0$',
                ylabel='surrogate $Y/Y_0$',
-               title=f'Every walked design (nominal: surrogate {r["pred"][0]:.0f}, simulator {sim[0]:.0f} hits)')
+               title=f'Every walked design\n(nominal: surrogate {r["pred"][0]:.0f}, simulator {sim[0]:.0f} hits)')
         ax.legend(fontsize=8)
         save(fig, 'robustness_calibration.png')
 
@@ -452,7 +454,7 @@ def pz_profile_figure(z):
     NICE = {'nominal': 'nominal design', 'ascent': f'ascent (gradient), {unit}',
             'worst': f'worst direction, {unit}', 'act1': f'active subspace (act1), {unit}',
             'hess1': f'top Hessian direction, {unit}', 'worst2': f'worst with M7 fixed, {unit}',
-            'box': 'worst corner of the $\\pm10\\%$ box'}
+            'box': 'worst corner of the $\\pm10\\%$ box', 'box10%': 'worst design in the $\\pm10\\%$ box'}
 
     def nice(j, n):
         if n.startswith('single'):
@@ -620,11 +622,21 @@ def tolerance_figures(t, ev):
     save(fig, 'tolerance_allocation.png')
 
 
+def without(npz, key, drop):
+    """The arrays of npz with the rows of the names in drop (of npz[key]) left out, in every array
+    of as many rows as there are names."""
+    d = dict(npz)
+    names = [str(s) for s in d[key]]
+    keep = np.array([n not in drop for n in names])
+    return {k: (v[keep] if v.ndim and len(v) == len(names) else v) for k, v in d.items()}
+
+
+DROPPED = ('pga', 'box', 'box/2')      # the walks' crude box search: tolerance_boxes.py finds the box worst cases
 path = os.path.join(args.run, '{}.npz')
 if os.path.exists(path.format('robustness')):
-    robustness_figures(np.load(path.format('robustness')))
+    robustness_figures(without(np.load(path.format('robustness')), 'dir_names', DROPPED))
 if os.path.exists(path.format('worst_cases')):
-    worst_case_figures(np.load(path.format('worst_cases')))
+    worst_case_figures(without(np.load(path.format('worst_cases'), allow_pickle=True), 'names', DROPPED))
 if os.path.exists(path.format('pz_profiles')):
     pz_profile_figure(np.load(path.format('pz_profiles')))
 for var in ('pz', 'pt', 'p', 'charge'):

@@ -24,8 +24,11 @@ import torch
 import cli
 from analysis.core import cached_hits, feature_cache, one_group, setup
 from paths import RESULTS, VALIDATION
+from shield import COLUMNS, FREE
 
-RUNS = ('robustness', 'robustness_v1', 'robustness_first')
+LABELS = [f'M{m}:{COLUMNS[c]}' for m, c in FREE]
+
+RUNS = ('robustness', 'robustness_p65', 'robustness_v1', 'robustness_first')
 
 
 def designs(run):
@@ -64,6 +67,12 @@ def designs(run):
         s = np.load(f, allow_pickle=True)
         b = np.load(os.path.join(d, 'tolerance_boxes.npz'), allow_pickle=True)
         add('tolerance boxes', b['names'][s['idx']], b['U'][s['idx']], s['hits'], float(s['nominal']))
+    if r is not None and len(r['labels']) < len(LABELS):          # a run with parameters held at nominal
+        k = [LABELS.index(str(l)) for l in r['labels']]
+        for i, (g, n, u, y, e) in enumerate(out):
+            full = np.zeros(len(LABELS), np.float32)
+            full[k] = u
+            out[i] = (g, n, full, y, e)
     return out
 
 
