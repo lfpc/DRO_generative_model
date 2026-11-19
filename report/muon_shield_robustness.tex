@@ -91,7 +91,7 @@ Muons are drawn from the generative flow of \texttt{generator\_muons} (the physi
 momentum and charge, then the production point given them. They start where they are produced,
 along the target ($z$ from $-2.14$ to $0$\,m before the shield) and around the beam axis. The
 figure of merit $Y$ is the number of muons crossing the last sensitive plane per $10^9$ muons. At
-the nominal design, five simulator runs on the muons of the analysis give $1145$--$1201$ (each
+the nominal design, six simulator runs on the muons of the analysis give $1145$--$1201$ (each
 $\pm35$; the transport is stochastic) and four runs on independent muons $1157$--$1192$, a hit
 rate of $1.2\times10^{-6}$; the surrogate gives $1208$. Every simulator number uses $10^9$ muons,
 the same ones for all designs of a table, with Poisson errors (the transport is stochastic, so
@@ -925,21 +925,24 @@ both ($\cos=-0.48$ to $-0.50$ with the high momenta, $-0.46$ and $-0.60$ with th
 the $30$--$45$\,GeV bin, the largest, is nearly orthogonal to the high momenta ($-0.13$ to
 $-0.18$; Fig.~\ref{fig:pz_alignment}). The total gradient follows the $30$--$45$\,GeV bin
 ($\cos=0.81$) and is at $\cos\approx0.4$ with the high-momentum bins and $0.1$--$0.3$ with the
-soft ones. Simulated on the same $10^9$ muons (Fig.~\ref{fig:simpz}; nominal $1201$ hits):
+soft ones. Simulated on the same $10^9$ muons (Fig.~\ref{fig:simpz}; nominal $1157$ hits):
 \begin{itemize}
-  \item the worst direction at one tolerance unit ($\times3.4$): the $30$--$40$\,GeV hits go from
-        $362$ to $2245$, the $40$--$50$\,GeV ones from $334$ to $966$ and those below $30$\,GeV from
-        $88$ to $325$, while those above $150$\,GeV do not move ($320\to344$): it acts on the
+  \item the worst direction at one tolerance unit ($\times3.6$): the $30$--$40$\,GeV hits go from
+        $308$ to $2190$, the $40$--$50$\,GeV ones from $358$ to $1059$ and those below $30$\,GeV from
+        $84$ to $339$, while those above $150$\,GeV barely move ($301\to392$): it acts on the
         intermediate and soft muons;
-  \item M7's exit width alone at $-10\%$, the most sensitive parameter ($\times2.8$): the same
-        pattern, $30$--$50$\,GeV from $696$ to $2911$, above $150$\,GeV down to $211$;
-  \item \texttt{ascent} ($\times3.1$) opens both groups: $30$--$40$\,GeV $362\to1873$ and above
-        $150$\,GeV $320\to699$;
-  \item \texttt{act1} ($\times2.6$) acts on the high momenta only: above $150$\,GeV the hits go from
-        $320$ to $2321$ ($\times7.3$), while those at $30$--$50$\,GeV stay ($696\to605$);
-  \item the worst design in the $\pm10\%$ box (Sec.~\ref{sec:box}; $\times6394$): almost all
-        $30$--$50$\,GeV ($696\to7.5\times10^6$) and below $30$\,GeV ($88\to6.3\times10^4$); the
-        high-momentum hits fall ($320\to143$).
+  \item M7's exit width alone at $-10\%$, the most sensitive parameter ($\times3.0$): the same
+        pattern, $30$--$50$\,GeV from $666$ to $2936$, above $150$\,GeV down to $220$;
+  \item \texttt{ascent} ($\times3.2$) opens both groups: $30$--$40$\,GeV $308\to1798$ and above
+        $150$\,GeV $301\to752$;
+  \item \texttt{act1} ($\times2.7$) acts on the high momenta only: above $150$\,GeV the hits go from
+        $301$ to $2229$ ($\times7.4$), while those at $30$--$50$\,GeV stay ($666\to621$);
+  \item \texttt{act2} ($\times1.6$) is milder and acts on the intermediate muons: $30$--$40$\,GeV
+        $308\to804$, $40$--$50$\,GeV $358\to567$, above $150$\,GeV slightly down ($301\to234$);
+  \item \texttt{worst2}, the worst direction with M7 held at nominal ($\times2.4$), opens the soft
+        and high momenta instead: below $30$\,GeV $84\to520$ ($\times6.2$), above $150$\,GeV
+        $301\to1085$ ($\times3.6$) and $30$--$40$\,GeV $308\to911$, while the $40$--$50$\,GeV hits
+        fall ($358\to197$).
 \end{itemize}
 Random $\pm10\%$ designs (Sec.~\ref{sec:concrete}) can open either group: the worst of the eight
 ($\times16$) raises the $40$--$60$\,GeV hits from $362$ to $17\,911$, another ($\times4.0$) those
@@ -971,9 +974,9 @@ to M2's entrance width ($+117\%$ vs.\ $+61\%$).
   \includegraphics[width=\linewidth]{sim_pz_profiles.pdf}
   \caption{Simulated hits per $p_z$ range, all on the same $10^9$ muons
   (\texttt{analysis/pz\_profiles.py}): the nominal design, \texttt{ascent}, \texttt{worst} and
-  \texttt{act1} at one tolerance unit, the worst design in the $\pm10\%$ box
-  (Table~\ref{tab:tolerance}), and the most sensitive parameter alone. Factors: total hits
-  relative to this simulation's nominal ($1201$ hits; Table~\ref{tab:walks} quotes the walks'
+  \texttt{act1}, \texttt{act2} and \texttt{worst2} at one tolerance unit, and the most sensitive
+  parameter alone. Factors: total hits relative to this simulation's nominal ($1157$ hits;
+  Table~\ref{tab:walks} quotes the walks'
   $1171$, the difference is the simulator's noise).}
   \label{fig:simpz}
 \end{figure}

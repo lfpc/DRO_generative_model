@@ -454,6 +454,7 @@ def pz_profile_figure(z):
     NICE = {'nominal': 'nominal design', 'ascent': f'ascent (gradient), {unit}',
             'worst': f'worst direction, {unit}', 'act1': f'active subspace (act1), {unit}',
             'hess1': f'top Hessian direction, {unit}', 'worst2': f'worst with M7 fixed, {unit}',
+            'act2': f'second active direction (act2), {unit}',
             'box': 'worst corner of the $\\pm10\\%$ box', 'box10%': 'worst design in the $\\pm10\\%$ box'}
 
     def nice(j, n):
@@ -463,7 +464,7 @@ def pz_profile_figure(z):
                 f'{labels[k]} {10 * U[j][k]:+.0f}% alone'
         return NICE.get(n, n)
 
-    fig, ax = plt.subplots(figsize=(10, 4.8), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(10, 5.6), constrained_layout=True)
     x, wd = np.arange(len(ranges)), 0.8 / len(names)
     for j, n in enumerate(names):
         h = Hz[j]
@@ -474,7 +475,7 @@ def pz_profile_figure(z):
     ax.set_xticks(x, [f'{a}-{b}' for a, b in ranges])
     ax.set(xlabel='$p_z$ [GeV]', ylabel=f'simulated hits ({float(z["n_muons"]):.0e} muons)',
            title='Where the extra hits come from: hits per $p_z$ range')
-    ax.legend(fontsize=8.5)
+    ax.legend(fontsize=8.5, ncol=2, loc='upper center', bbox_to_anchor=(0.5, -0.13))
     save(fig, 'sim_pz_profiles.png')
 
 

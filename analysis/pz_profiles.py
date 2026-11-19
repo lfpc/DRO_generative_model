@@ -6,7 +6,7 @@ worst_cases.py by its name (single1: the most sensitive parameter alone at its w
 design of tolerance_boxes.py by its name (box10%: the worst design in the +-10% box). Writes
 <run>/pz_profiles.npz.
 
-    python -m analysis.pz_profiles --designs nominal,ascent,worst,act1,box10%,single1
+    python -m analysis.pz_profiles --designs nominal,ascent,worst,act1,act2,worst2,single1
 """
 import os
 
@@ -19,7 +19,7 @@ from paths import RUN
 
 parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.add_argument('--run', default=RUN, help='robustness.py --out_dir, with worst_cases.npz')
-parser.add_argument('--designs', default='nominal,ascent,worst,act1,box10%,single1')
+parser.add_argument('--designs', default='nominal,ascent,worst,act1,act2,worst2,single1')
 parser.add_argument('--t', type=float, default=1.0, help='step along the directions (1 = one tolerance unit)')
 parser.add_argument('--n_muons', type=int, default=int(1e9), help='simulated muons')
 parser.add_argument('--seed', type=int, default=0, help='0: the muons of robustness.py and worst_cases.py')
