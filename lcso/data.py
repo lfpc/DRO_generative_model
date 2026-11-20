@@ -102,6 +102,7 @@ def clear_cache():
 
 def training_rows(c, dim):
     """Rows of budget / n designs of the pool, n muons each (n = None: every design and muon),
+    times design_frac if given (a learning curve in the number of designs),
     the misses thinned further to keep_neg where more were kept (keep_neg None: as stored). The
     offset is per row if the designs kept different fractions. thin_pz = (cut, frac): only a
     fraction frac of the rows (hits and misses alike) of muons with p_z > cut, which leaves
@@ -109,6 +110,8 @@ def training_rows(c, dim):
     P = load_pool(c['pool'], dim)
     g = torch.Generator().manual_seed(c['seed'])
     M = len(P['ids']) if c.get('n') is None else int(c['budget'] // c['n'])
+    if c.get('design_frac', 1) < 1:                                               # a random fraction of the designs
+        M = int(round(M * c['design_frac']))
     avail = P['ids'][torch.randperm(len(P['ids']), generator=g).numpy()]
     if M > len(avail):
         raise ValueError(f'{c["pool"]} has {len(avail)} designs, {M} needed')

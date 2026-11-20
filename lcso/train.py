@@ -44,6 +44,7 @@ parser.add_argument('--thin_pz', default=None,
                     help="'cut,frac': keep only frac of the rows of muons with p_z > cut GeV (data.training_rows)")
 parser.add_argument('--hidden', type=int, default=64)
 parser.add_argument('--p', type=int, default=16, help='branch/trunk feature dimension (DeepONet)')
+parser.add_argument('--design_frac', type=float, default=1.0, help='train on this random fraction of the designs (all their muons)')
 parser.add_argument('--p_res', type=int, default=16, help='features of the gated residual (taylor-*-res)')
 parser.add_argument('--near', type=float, default=0.0,
                     help='taylor-*-res: the Taylor part learns from each row with weight exp(-sqrt(dist4(u)) / near^2), '
@@ -85,7 +86,7 @@ with open(os.path.join(MODELS, '.pool_load.lock'), 'w') as lock:
     pool = data.load_pool(args.pool, len(phi_0))
     c = dict(pool=args.pool, seed=args.seed, n=args.n, keep_neg=args.keep_neg,
              thin_pz=[float(v) for v in args.thin_pz.split(',')] if args.thin_pz else None,
-             budget=(args.n or 0) * len(pool['ids']))
+             budget=(args.n or 0) * len(pool['ids']), design_frac=args.design_frac)
     train, val = data.train_val(c, len(phi_0), args.device)
     del pool
     data.clear_cache()
