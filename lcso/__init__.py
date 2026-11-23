@@ -9,6 +9,6 @@ simulated pools of designs and then used for the robustness analysis.
   adaptive_designs.py designs for an adaptive pool, where the conclusions rest
   train.py            train a surrogate on pools, or stack seeds into one (python -m lcso.train)
 """
-from .surrogate import LCSONet, ModelSurrogate, load_members, load_surrogate, muon_inputs, save_surrogate, stack
+from .surrogate import LCSONet, load_members, load_surrogate, muon_inputs, save_surrogate, stack
 
-__all__ = ['LCSONet', 'ModelSurrogate', 'load_members', 'load_surrogate', 'muon_inputs', 'save_surrogate', 'stack']
+__all__ = ['LCSONet', 'load_members', 'load_surrogate', 'muon_inputs', 'save_surrogate', 'stack']

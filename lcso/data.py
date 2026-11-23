@@ -7,15 +7,9 @@ fractions train together, each row with its own pool's offset. A pool lives in
 paths.POOLS/<name>/shard_<worker>.pt, with its designs (redrawn from its arguments, pool_designs,
 if a shard lacks them) and its raw muons.
 
-Pools of fewer parameters load too, the missing ones at nominal (u = 0), shield.FREE being ordered
-so: the first analysis' pools (r1_*) had 43 parameters, without the magnet heights (and every muon
-at x = y = 0, z = -1 m), the second's (r2_*) 50, without the hadron absorber and the yoke heights.
-Both were simulated with M4's exit (dXOut, gapOut, dXYokeOut) at nominal, which shield.full_design
-no longer does (M4 is rectangular): they are not the current shield and are not trained on.
-
-    load_pool('A+B', dim)        every row of one or several pools (design ids offset)
-    training_rows(config, dim)   the rows a training run uses (a budget of designs and muons, if given)
-    train_val(config, dim, dev)  those rows split by design into training and validation
+    load_pool('A+B')             every row of one or several pools (design ids offset)
+    training_rows(pool)          the rows a training run uses
+    train_val(pool, seed, dev)   those rows split by design into training and validation
 """
 import glob
 import os
@@ -32,12 +26,13 @@ from .training import Rows, split
 _cache = {}
 
 
-def pool_designs(n, delta, n_nominal, seed, dim, radial=True, designs=None, sparse=0, faces=0.0):
+def pool_designs(n, delta, n_nominal, seed, dim, radial=True, designs=None, sparse=0, faces=0.0, fixed=()):
     """The designs of a pool, from its arguments: u = delta * (scrambled Sobol in [-1, 1]^dim),
     pulled towards u = 0 by a U(0, 1) factor if radial, the first n_nominal at u = 0; or the
     designs of a .npy file. sparse = K > 0: each design moves only 1 to K parameters (uniform in
     [-1, 1], the others at 0), the one-at-a-time effects and their pairs; faces = f: a fraction f
-    of the moved parameters at their limit (+-1), where the analyses look."""
+    of the moved parameters at their limit (+-1), where the analyses look. fixed: indices of
+    parameters held at nominal (the draw is unchanged otherwise)."""
     if designs:
         return np.load(designs).astype(np.float32)
     u = qmc.Sobol(d=dim, scramble=True, seed=seed).random(n) * 2 - 1
@@ -51,6 +46,7 @@ def pool_designs(n, delta, n_nominal, seed, dim, radial=True, designs=None, spar
     elif radial:
         u *= rng.random((n, 1))
     u[:n_nominal] = 0
+    u[:, list(fixed)] = 0
     return (delta * u).astype(np.float32)
 
 
@@ -59,20 +55,16 @@ def to_x(mu):
     return muon_inputs(torch.as_tensor(mu)).float()
 
 
-def load_pool(name, dim):
-    """All designs simulated so far in a pool, or in several ('A+B+C', design ids offset), with
-    dim parameters: dict(U, ids, d, x, y, keep_neg, n_muons) with keep_neg the fraction of misses
-    kept and n_muons the muons simulated, per design (M,). Pools are cached; clear_cache() frees
-    them."""
+def load_pool(name):
+    """All designs simulated so far in a pool, or in several ('A+B+C', design ids offset):
+    dict(U, ids, d, x, y, keep_neg) with keep_neg the fraction of misses kept, per design (M,).
+    Pools are cached; clear_cache() frees them."""
     if '+' in name:
-        parts = [load_pool(p, dim) for p in name.split('+')]
-        if len({P['fields'] for P in parts}) > 1:
-            raise ValueError(f'{name}: the pools were simulated in different fields (field map, uniform)')
+        parts = [load_pool(p) for p in name.split('+')]
         off = np.cumsum([0] + [len(P['U']) for P in parts])
         return dict(U=torch.cat([P['U'] for P in parts]), ids=np.concatenate([P['ids'] + o for P, o in zip(parts, off)]),
                     d=torch.cat([P['d'] + int(o) for P, o in zip(parts, off)]), x=torch.cat([P['x'] for P in parts]),
-                    y=torch.cat([P['y'] for P in parts]), keep_neg=torch.cat([P['keep_neg'] for P in parts]),
-                    n_muons=torch.cat([P['n_muons'] for P in parts]), fields=parts[0]['fields'])
+                    y=torch.cat([P['y'] for P in parts]), keep_neg=torch.cat([P['keep_neg'] for P in parts]))
     if name not in _cache:
         shards = [torch.load(f, weights_only=False) for f in sorted(glob.glob(os.path.join(POOLS, name, 'shard_*.pt')))]
         if not shards:
@@ -80,18 +72,14 @@ def load_pool(name, dim):
         a = shards[0]['args']
         U = next((s['U'] for s in shards if 'U' in s), None)
         if U is None:
-            U = pool_designs(a['n_designs'], a['delta'], a['n_nominal'], a['seed'], dim=a.get('dim', 43),
-                             radial=a.get('radial', True), designs=a.get('designs'), sparse=a.get('sparse', 0),
-                             faces=a.get('faces', 0.0))
+            U = pool_designs(a['n_designs'], a['delta'], a['n_nominal'], a['seed'], a.get('dim', 65), a.get('radial', True),
+                             a.get('designs'), a.get('sparse', 0), a.get('faces', 0.0), a.get('fixed_idx', ()))
         U = torch.as_tensor(np.asarray(U), dtype=torch.float32)
-        U = torch.cat([U, torch.zeros(len(U), dim - U.shape[1])], 1)      # missing parameters at nominal
         _cache[name] = dict(U=U, ids=np.array(sum((s['ids'] for s in shards), [])),
                             d=torch.cat([t for s in shards for t in s['d']]).long(),
                             x=to_x(torch.cat([t for s in shards for t in s['x']])),
                             y=torch.cat([t for s in shards for t in s['y']]).float(),
-                            keep_neg=torch.full((len(U),), float(a['keep_neg'])),
-                            n_muons=torch.full((len(U),), float(a['n_muons'])),
-                            fields=a.get('fields', 'uniform'))
+                            keep_neg=torch.full((len(U),), float(a['keep_neg'])))
     return _cache[name]
 
 
@@ -100,44 +88,26 @@ def clear_cache():
     _cache.clear()
 
 
-def training_rows(c, dim):
-    """Rows of budget / n designs of the pool, n muons each (n = None: every design and muon),
-    times design_frac if given (a learning curve in the number of designs),
-    the misses thinned further to keep_neg where more were kept (keep_neg None: as stored). The
-    offset is per row if the designs kept different fractions. thin_pz = (cut, frac): only a
-    fraction frac of the rows (hits and misses alike) of muons with p_z > cut, which leaves
-    p(hit | u, x) as it is and gives the rest of the muons more weight in the loss."""
-    P = load_pool(c['pool'], dim)
-    g = torch.Generator().manual_seed(c['seed'])
-    M = len(P['ids']) if c.get('n') is None else int(c['budget'] // c['n'])
-    if c.get('design_frac', 1) < 1:                                               # a random fraction of the designs
-        M = int(round(M * c['design_frac']))
-    avail = P['ids'][torch.randperm(len(P['ids']), generator=g).numpy()]
-    if M > len(avail):
-        raise ValueError(f'{c["pool"]} has {len(avail)} designs, {M} needed')
-    sel = torch.as_tensor(np.sort(avail[:M]))
-    member = torch.zeros(len(P['U']), dtype=torch.bool)
-    member[sel] = True
-    keep = member[P['d']]
-    if c.get('n') is not None:                                                    # n muons per design
-        keep &= torch.rand(len(P['y']), generator=g) < c['n'] / P['n_muons'][P['d']]
-    if c.get('thin_pz'):
-        cut, frac = c['thin_pz']
-        keep &= (P['x'][:, 2] <= cut) | (torch.rand(len(P['y']), generator=g) < frac)
-    q = P['keep_neg'] if c.get('keep_neg') is None else P['keep_neg'].clamp(max=c['keep_neg'])   # per design
-    keep &= (P['y'] > 0) | (torch.rand(len(P['y']), generator=g) < (q / P['keep_neg'])[P['d']])   # thin the misses
+def training_rows(pool):
+    """Every row of the pool(s), the simulated designs renumbered 0..M-1; the logit offset per row
+    if the pools kept different fractions of the misses."""
+    P = load_pool(pool)
+    sel = torch.as_tensor(np.sort(P['ids']))
     new = torch.full((len(P['U']),), -1, dtype=torch.long)
-    new[sel] = torch.arange(M)
-    qs = q[sel]
-    offset = -float(np.log(qs[0])) if bool((qs == qs[0]).all()) else -torch.log(q[P['d'][keep]])
+    new[sel] = torch.arange(len(sel))
+    keep = torch.zeros(len(P['U']), dtype=torch.bool)
+    keep[sel] = True
+    keep = keep[P['d']]
+    q = P['keep_neg'][sel]
+    offset = -float(np.log(q[0])) if bool((q == q[0]).all()) else -torch.log(P['keep_neg'][P['d'][keep]])
     return Rows(P['U'][sel], new[P['d'][keep]], P['x'][keep], P['y'][keep], offset)
 
 
-def train_val(c, dim, dev, val_frac=0.1, max_val_rows=2_000_000):
+def train_val(pool, seed, dev, val_frac=0.1, max_val_rows=2_000_000):
     """(train, val) Rows on dev: split by design in host memory, so only the halves go to the GPU;
     the validation designs' rows thinned to at most max_val_rows (hits and misses alike)."""
-    train, val = split(training_rows(c, dim), val_frac, c['seed'])
+    train, val = split(training_rows(pool), val_frac, seed)
     if len(val.y) > max_val_rows:
-        keep = torch.randperm(len(val.y), generator=torch.Generator().manual_seed(c['seed']))[:max_val_rows]
+        keep = torch.randperm(len(val.y), generator=torch.Generator().manual_seed(seed))[:max_val_rows]
         val = Rows(val.U, val.d[keep], val.x[keep], val.y[keep], val.off(keep))
     return train.to(dev), val.to(dev)

@@ -2,7 +2,7 @@
 
 How much do the muon hits change when the 65 free parameters of the optimised muon shield (the
 hadron absorber M0 and magnets M1-M7, with their heights and yoke heights) deviate from their
-nominal values? A surrogate of the per-muon
+nominal values? The analysis holds M0 at nominal and studies the other 58. A surrogate of the per-muon
 hit probability, LCSO (`p(hit | design, muon)`, a DeepONet), is trained once on simulated
 designs; the robustness quantities are read off it (sensitivities, Hessian, active subspace,
 worst directions, the worst design for a given tolerance, a tolerance allocation); and every
@@ -42,12 +42,15 @@ SIM=0 bash run_analysis.sh                                     # the same on the
    every hit and 0.4% of the misses are kept; then the targeted pools: only the muons of p_z
    20-80 GeV, or of the window p_z 30-60 GeV, p_t < 1.2 GeV at the physical spectrum (where the
    physical hits are), on radial designs and on sparse designs that move 1-3 parameters, half of
-   them at +-10% in the faces pool (`--pz_band`, `--pt_max`, `--sparse`, `--faces`);
-2. simulates the reference designs of the validation on stored muons (`validation/references.py`);
+   them at +-10% in the faces pool (`--pz_band`, `--pt_max`, `--sparse`, `--faces`); then one more
+   pool like the main one with M0 at nominal (`--fixed M0:`);
+2. simulates the reference designs of the validation on stored muons (`validation/references.py`),
+   with every analysed parameter alone at +-10% and +-5% on the T = 1.5 muons;
 3. trains a first four-seed ensemble (`lcso/train.py`), finds its tolerance-box worst cases and
    simulates an adaptive pool there (`lcso/adaptive_designs.py`);
 4. trains the final ensemble on all pools: `outputs/models/lcso.pt`;
-5. runs the analysis (`run_analysis.sh`) and the validation (`validation/validate.py`).
+5. runs the analysis (`run_analysis.sh`) and the validation (`validation/validate.py`,
+   `validation/flux_check.py`).
 
 The settings (muon source, pools, architecture, simulated muons) are at the top of `run_all.sh`.
 
@@ -59,11 +62,10 @@ The settings (muon source, pools, architecture, simulated muons) are at the top 
 | `muons.py` | muon sources: the generative flow (sampled, or as a quadrature grid), or stored muons (`--muons file:<muons.npy>`); another generator plugs in as a class with `sample()` |
 | `paths.py`, `cli.py` | where things are; the shared command-line options (`--model`, `--muons`, `--device`) |
 | `lcso/` | the surrogate: architectures (`models.py`), the trained model as the analysis sees it (`surrogate.py`), training (`training.py`, `train.py`), the pools (`data.py`, `simulate_pools.py`, `adaptive_designs.py`) |
-| `analysis/` | the robustness analysis (`python -m analysis.<script>`): `robustness`, `worst_cases`, `bins`, `tolerance_boxes`, `scan_sim`, `plots`; shared machinery in `core.py` |
+| `analysis/` | the robustness analysis (`python -m analysis.<script>`): `robustness`, `worst_cases`, `bins`, `tolerance_boxes`, `scan_sim`, `pz_profiles`, `plots`; shared machinery in `core.py` |
 | `validation/` | reference designs simulated on stored muons, and the surrogate scored on them (`validate.py`); the surrogate scored on every design the analyses simulated at the physical flux (`flux_check.py`) |
-| `experiments/` | the studies that chose and checked the method (quadrature vs. sampling, architectures, training settings, derivative convergence) |
+| `experiments/` | the studies of how to integrate over the muons (quadrature vs. sampling, importance sampling, the training proposal) |
 | `report/` | the report |
-| `DRO/` | the earlier latent-space DRO / LCSO project (toy problems, paper), independent of the above |
 
 The surrogate is integrated over the muons on a quadrature grid (the flow's momentum latent x
 azimuth x charge, one production point per node drawn with a fixed seed), not sampled: within
@@ -75,17 +77,13 @@ quantities are the scatter of the ensemble's members.
 
 Under `outputs/` (not tracked; `paths.py`):
 
-    models/     the surrogates: lcso.pt and its seeds, lcso_first.pt (the first ensemble),
-                lcso_v1.pt (trained without the targeted pools; its analysis in results/robustness_v1/,
-                whose simulated designs flux_check also scores), exp_*.pt (trials)
+    models/     the surrogates: lcso.pt (four seeds stacked) and its seeds lcso_s<k>.pt;
+                lcso_first.pt, the first ensemble, whose worst cases chose the adaptive pool
     data/       simulations: pools/ (training), references/ (validation), adaptive_designs.npy,
-                field_maps/ (one folder per design)
-    results/    numbers and text reports: robustness/, robustness_first/, validation/, experiments/
-    figures/    every figure: robustness/, validation/, experiments/, muons/
+                field_maps/ (a cache, one folder per design; delete it when snoopy changes)
+    results/    numbers and text reports: robustness/ (the analysis), robustness_first/ (the first
+                ensemble's), validation/, experiments/; robustness_p65/ and robustness_v1/ hold
+                only the designs simulated by earlier analyses (M0 free, earlier surrogates), which
+                validation/flux_check.py scores too
+    figures/    every figure, one folder per results folder
     logs/       the launchers' logs
-
-The products of the 50-parameter analysis (the previous report) carry the suffix `_p50`
-(`models/lcso_p50.pt`, `results/robustness_p50/`, ...); its pools are `data/pools/r2_*`, those of
-the first analysis (43 parameters) `r1_*`. Both were simulated with M4's exit at nominal (M4 tapered
-when its entrance moved); from the 65-parameter analysis on M4 is rectangular, so they are not
-trained on, and the references' hits of that geometry are kept as `shard_p50_*.pt`.

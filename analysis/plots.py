@@ -3,8 +3,8 @@
 Reads whichever of these exist in <run> and writes figures/<run name>/ (paths.figures; the
 main run also writes the report's figures as PDF, paths.save_figure):
   robustness.npz     robustness_{sensitivity,magnets,spectra,directions,walks,summary,calibration,mc,scans,plane}.png
-  worst_cases.npz    worst_direction_scaled, worst_parameters, random_tolerances, sim_pz_profiles .png
-  pz_profiles.npz    (pz_profiles.py) sim_pz_profiles.png, in place of worst_cases.npz's
+  worst_cases.npz    worst_direction_scaled, worst_parameters, random_tolerances .png
+  pz_profiles.npz    (pz_profiles.py) sim_pz_profiles.png
   <var>_bins.npz     <var>_bins_{overview,sensitivity,alignment,walks,mc}.png
   scan_sim_*.npz     (scan_sim.py) the simulated points of robustness_scans.png
   tolerance_boxes.npz (tolerance_boxes.py) tolerance_boxes, tolerance_allocation .png
@@ -26,8 +26,6 @@ from paths import RUN, figures, save_figure
 parser = cli.parser(__doc__)
 parser.add_argument('run', nargs='?', default=RUN)
 parser.add_argument('--n_sigma', type=float, default=3.0, help='significance for "resolved"')
-parser.add_argument('--profiles', default='nominal,worst@5%,worst@10%,worst@-10%,single4,rand10%_3',
-                    help='worst-case designs shown in sim_pz_profiles.png')
 args = parser.parse_args()
 FIGS = figures(args.run)
 MAIN = os.path.abspath(args.run) == os.path.abspath(RUN)       # only the main run feeds the report
@@ -417,27 +415,6 @@ def worst_case_figures(w):
         a.legend(fontsize=7)
     fig.suptitle('Random independent tolerances')
     save(fig, 'random_tolerances.png')
-
-    # --- where the extra hits come from: hits per p_z range (pz_profiles.py's designs when it ran)
-    if os.path.exists(os.path.join(args.run, 'pz_profiles.npz')):
-        return
-    ze = w['pz_edges']
-    ranges = [(1, 30), (30, 40), (40, 50), (50, 100), (100, 150), (150, 400)]
-    H = w['sim_bin'] if SIM else w['pred_bin']
-    Hz = np.stack([H[:, (ze[:-1] >= a) & (ze[1:] <= b)].sum(1) for a, b in ranges], 1)
-    show = [nm for nm in args.profiles.split(',') if nm in idx]
-    fig, ax = plt.subplots(figsize=(10, 4.8), constrained_layout=True)
-    x, wd = np.arange(len(ranges)), 0.8 / len(show)
-    for j, nm in enumerate(show):
-        h = Hz[idx[nm]]
-        ax.bar(x - 0.4 + wd * (j + 0.5), np.maximum(h, 0.5), wd, yerr=np.sqrt(np.maximum(h, 1)) if SIM else None,
-               color='k' if nm == 'nominal' else plt.cm.tab10(j), label=describe(nm), capsize=1.5, error_kw={'lw': 0.7})
-    ax.set_yscale('log')
-    ax.set_xticks(x, [f'{a}-{b}' for a, b in ranges])
-    ax.set(xlabel='$p_z$ [GeV]', ylabel=f'{"simulated" if SIM else "predicted"} hits ({float(w["n_muons"]):.0e} muons)',
-           title='Where the extra hits come from: hits per $p_z$ range')
-    ax.legend(fontsize=8, ncol=2)
-    save(fig, 'sim_pz_profiles.png')
 
 
 # =============================================================================

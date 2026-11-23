@@ -20,7 +20,8 @@
 # (shield.py), ~20 s per map on 8 CPU cores and ~3.4 GB of RAM, MAP_WORKERS maps at once beside
 # each pool worker: ~2 s per pool design with 6 on each of the 2 workers (~41 GB of RAM), so the
 # pools (~41000 designs) take ~22 h. The targeted pools (~25000 designs, 20-30 s each: the window
-# needs 2e7 muons per design) took ~4 days on one GPU, two at a time.
+# needs 2e7 muons per design) took ~4 days on one GPU, two at a time; the last pool (36000 designs,
+M0 at nominal) ~25 h on one GPU.
 set -uo pipefail
 cd "$(dirname "$0")"
 source env.sh
@@ -49,14 +50,17 @@ W30_60_sparse 1 1 4000 40 20000000 $PW --sparse 3
 W30_60_sparse2 1 1 4000 42 20000000 $PW --sparse 2 --stop_after 1386
 W30_60_d1 1 1 4500 41 20000000 $PW
 W30_60_faces 1 1 4000 43 20000000 $PW --sparse 2 --faces 0.5"
+# more designs of the main pool's kind, with M0 at nominal as the analysis holds it (--fixed): the
+# surrogate's curvatures improved with the number of designs, not of muons
+POOLS_C="T2_noM0 2.0 1 36000 24 1000000 --fixed M0:"
 FINAL="--max_steps 400000"                  # the final ensemble's training, beside ARCH
-EXTRA=                                      # earlier pools to train on too ('A+B'); the r1_, r2_ ones had M4 tapered
+FIXED=M0:                                   # held at nominal in the analysis and the validation
 
 L=outputs/logs/run_all
 mkdir -p $L outputs/logs/pools
 step() { echo "$(date '+%F %H:%M') $*"; }
 names() { echo "$1" | awk '{print $1}' | paste -sd+; }
-TRAIN_POOLS=$(names "$POOLS_A")+$(names "$ADAPT")+$(names "$POOLS_B")${EXTRA:++$EXTRA}
+TRAIN_POOLS=$(names "$POOLS_A")+$(names "$ADAPT")+$(names "$POOLS_B")+$(names "$POOLS_C")
 
 pool() {  # GPU worker n_workers name T delta n seed muons [extra]: restarted after a simulator crash
   local gpu=$1 w=$2 nw=$3 name=$4 T=$5 delta=$6 n=$7 seed=$8 mu=$9; shift 9
@@ -114,6 +118,8 @@ targeted() {  # GPU parity
 }
 targeted $GPU_A 0 & A=$!; targeted $GPU_B 1 & B=$!
 wait $A && wait $B && step "1b. targeted pools done" || { step "1b. a targeted pool failed"; exit 1; }
+pool $GPU_A 0 2 $POOLS_C & A=$!; pool $GPU_B 1 2 $POOLS_C & B=$!
+wait $A && wait $B && step "1c. last pool done" || { step "1c. the last pool failed"; exit 1; }
 
 # ---- 2. references on GPU B | first ensemble and the adaptive pool on GPU A
 step "2. references | first ensemble, adaptive pool"
@@ -125,6 +131,7 @@ step "2. references | first ensemble, adaptive pool"
   for t in T1.5 T1; do        # references of fewer parameters: the same muons, new designs appended
     $R --name $t --stage extend --n_random 8 >> $L/ref_extend_$t.log 2>&1
   done
+  $R --name T1.5 --stage extend --oat_half --fixed $FIXED >> $L/ref_extend_T1.5.log 2>&1   # five-point curvatures
   for t in T1.5 T1; do
     for try in 1 2 3; do $R --name $t --stage simulate >> $L/ref_sim_$t.log 2>&1 && break; done
   done
@@ -132,7 +139,7 @@ step "2. references | first ensemble, adaptive pool"
 ) &
 REFS=$!
 (
-  POOLS=$(names "$POOLS_A")${EXTRA:++$EXTRA} ensemble lcso_first $GPU_A
+  POOLS=$(names "$POOLS_A") ensemble lcso_first $GPU_A
   F=outputs/results/robustness_first
   M="--model outputs/models/lcso_first.pt --muons $MUONS"
   export CUDA_VISIBLE_DEVICES=$GPU_A
@@ -152,10 +159,11 @@ POOLS=$TRAIN_POOLS ARGS="$FINAL" ensemble lcso $GPU_A || { step "3. failed"; exi
 # ---- 4. the analysis
 step "4. analysis"
 wait $REFS
-GPUS="$GPU_A $GPU_B" N=$N bash run_analysis.sh > $L/analysis.log 2>&1 || { step "4. failed"; exit 1; }
+FIXED=$FIXED GPUS="$GPU_A $GPU_B" N=$N bash run_analysis.sh > $L/analysis.log 2>&1 || { step "4. failed"; exit 1; }
 step "4. analysis done"
 
 # ---- 5. the validation
 step "5. validation"
-CUDA_VISIBLE_DEVICES=$GPU_A python -W ignore -m validation.validate --muons $MUONS > $L/validate.log 2>&1
+CUDA_VISIBLE_DEVICES=$GPU_A python -W ignore -m validation.validate --muons $MUONS --fixed $FIXED > $L/validate.log 2>&1
+CUDA_VISIBLE_DEVICES=$GPU_A python -W ignore -m validation.flux_check --muons $MUONS > $L/flux_check.log 2>&1
 step "all done"

@@ -7,7 +7,7 @@
 #     MODEL=outputs/models/other.pt RUN=outputs/results/robustness_other GPUS="0" bash run_analysis.sh
 #     SIM=0 bash run_analysis.sh       # the surrogate alone, no simulation (minutes)
 #     FAST=1 bash run_analysis.sh      # 3e8 simulated muons and fewer concrete designs (< 1 h)
-#     FIXED=M0: RUN=outputs/results/robustness_noM0 bash run_analysis.sh   # M0 held at nominal
+#     FIXED= RUN=outputs/results/robustness_all bash run_analysis.sh   # M0 free too (default: held at nominal)
 #
 # Two lanes, one per GPU (one after the other on one GPU, or when both are the same GPU: a
 # simulation takes most of its memory):
@@ -15,7 +15,8 @@
 #      (concrete designs, simulated), scans (the one-at-a-time scans simulated, shared with B)
 #   B  bins (the sensitivity split by p_z, p_t and charge; surrogate only), tolerance_boxes (the box
 #      worst cases and the allocation, searched on the surrogate, then simulated), scans
-# then the tolerance report and every figure (analysis/plots.py).
+# then the tolerance report, the hits per p_z range of the clearest designs (pz_profiles, simulated)
+# and every figure (analysis/plots.py).
 set -euo pipefail
 cd "$(dirname "$0")"
 source env.sh
@@ -32,7 +33,7 @@ if [[ "${FAST:-0}" == 1 ]]; then
 fi
 NOSIM=""
 [[ "${SIM:-1}" == 0 ]] && NOSIM="--no_sim"
-M="--model $MODEL --muons $MUONS --fixed ${FIXED:-}"
+M="--model $MODEL --muons $MUONS --fixed ${FIXED-M0:}"
 mkdir -p "$RUN"
 py() { echo "$(date '+%H:%M') $*"; python -W ignore -m "$@"; }
 
@@ -60,6 +61,7 @@ else
   wait $A; wait $B
 fi
 CUDA_VISIBLE_DEVICES=${GPUS[0]} py analysis.tolerance_boxes $M --run $RUN         # the report, with the simulations
+[ -n "$NOSIM" ] || [ -f $RUN/pz_profiles.npz ] || CUDA_VISIBLE_DEVICES=${GPUS[0]} py analysis.pz_profiles $M --run $RUN --n_muons $N
 py analysis.plots $RUN
 {
   echo "date:   $(date)"
@@ -67,6 +69,6 @@ py analysis.plots $RUN
   echo "commit: $(git rev-parse --short HEAD) $(git diff --quiet || echo '(uncommitted changes)')"
   echo "model:  $MODEL ($(stat -c %y "$MODEL"))"
   echo "muons:  $MUONS; $N simulated (SIM=${SIM:-1}, FAST=${FAST:-0})"
-  echo "fixed:  ${FIXED:-none}"
+  echo "fixed:  ${FIXED-M0:}"
 } > "$RUN"/MANIFEST.txt
 echo "done: $RUN"

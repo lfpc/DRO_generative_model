@@ -4,9 +4,10 @@ The analyses (analysis/*.py) simulate their designs on 1e9 (or 3e8) flow muons: 
 worst cases, the one-at-a-time scans and the tolerance boxes, ~130 designs in all, from near the
 nominal design to the worst found within +-10%. They are the designs the conclusions rest on, so
 they make a check set of the surrogate at the physical flux, wider than the references
-(validation/references.py), though chosen by a surrogate: those of robustness_v1 (the previous
-surrogate's analysis) and robustness_first by others than the one checked. Each is compared on Y/Y_0 (the
-surrogate on the quadrature grid, the simulator against the nominal of its own run):
+(validation/references.py), though chosen by a surrogate. Besides the --runs, the designs that
+earlier analyses simulated (other surrogates, M0 free) are in data/simulated_designs.npz (--archive
+writes it from runs about to be deleted). Each is compared on Y/Y_0 (the surrogate on the
+quadrature grid, the simulator against the nominal of its own run):
 
     ratio  log(pred / sim) of Y/Y_0;  z = (pred - sim) / Poisson error of sim, both in Y/Y_0
 
@@ -14,6 +15,7 @@ Scores: median |ratio| and the fraction within 2 sigma, over all designs and ove
 simulator puts within x3 of nominal; and per group. Writes <out>/flux_check_<model>.json, .txt.
 
     python -m validation.flux_check --model outputs/models/lcso.pt
+    python -m validation.flux_check --archive old_run1,old_run2     # add their designs to the archive
 """
 import json
 import os
@@ -23,12 +25,13 @@ import torch
 
 import cli
 from analysis.core import cached_hits, feature_cache, one_group, setup
-from paths import RESULTS, VALIDATION
+from paths import DATA, RESULTS, VALIDATION
 from shield import COLUMNS, FREE
 
 LABELS = [f'M{m}:{COLUMNS[c]}' for m, c in FREE]
 
-RUNS = ('robustness', 'robustness_p65', 'robustness_v1', 'robustness_first')
+RUNS = ('robustness', 'robustness_first')
+ARCHIVE = os.path.join(DATA, 'simulated_designs.npz')
 
 
 def designs(run):
@@ -76,6 +79,14 @@ def designs(run):
     return out
 
 
+def archived():
+    """The designs of data/simulated_designs.npz, as designs() gives them."""
+    if not os.path.exists(ARCHIVE):
+        return []
+    z = np.load(ARCHIVE)
+    return [(str(g), str(n), u, y, e) for g, n, u, y, e in zip(z['group'], z['name'], z['U'], z['y'], z['err'])]
+
+
 def scores(pred, sim, err):
     lr = np.log(pred / sim)
     z = (pred - sim) / err
@@ -86,11 +97,17 @@ def scores(pred, sim, err):
 if __name__ == '__main__':
     parser = cli.add_common(cli.parser(__doc__))
     parser.add_argument('--runs', default=','.join(RUNS), help='results/<run> directories to collect')
+    parser.add_argument('--archive', default=None, help='only add the designs of these runs to the archive')
     parser.add_argument('--grid', default='201x64', help='quadrature grid of the surrogate')
     parser.add_argument('--out', default=VALIDATION)
     args = parser.parse_args()
 
-    D = sum((designs(r) for r in args.runs.split(',')), [])
+    if args.archive:
+        D = archived() + sum((designs(r) for r in args.archive.split(',')), [])
+        np.savez(ARCHIVE, group=[d[0] for d in D], name=[d[1] for d in D], U=np.stack([d[2] for d in D]),
+                 y=[d[3] for d in D], err=[d[4] for d in D])
+        raise SystemExit(f'{ARCHIVE}: {len(D)} designs')
+    D = sum((designs(r) for r in args.runs.split(',')), []) + archived()
     shield, model = setup(args)
     cache = feature_cache(model, shield.muons.points(args.grid, 1e9), one_group)
     U = np.stack([d[2] for d in D])
@@ -102,7 +119,7 @@ if __name__ == '__main__':
     res = {'all': scores(pred, sim, err), 'sim within x3': scores(pred[sim < 3], sim[sim < 3], err[sim < 3])}
     res.update({g: scores(pred[groups == g], sim[groups == g], err[groups == g]) for g in dict.fromkeys(groups)})
     name = os.path.splitext(os.path.basename(args.model))[0]
-    lines = [f'model {args.model}; {len(D)} simulated designs of {args.runs}; Y/Y_0, surrogate on {args.grid}',
+    lines = [f'model {args.model}; {len(D)} simulated designs of {args.runs} and the archive; Y/Y_0, surrogate on {args.grid}',
              f'{"set":18s} {"n":>4s} {"median|log|":>11s} {"mean log":>9s} {"|z|<2":>6s}']
     lines += [f'{k:18s} {v["n"]:4d} {v["median_abs_log"]:11.3f} {v["mean_log"]:+9.3f} {v["within_2sigma"]:6.2f}' for k, v in res.items()]
     lines += ['', f'{"design":40s} {"sim":>9s} {"pred":>9s} {"z":>6s}']

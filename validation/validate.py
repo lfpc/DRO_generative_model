@@ -1,10 +1,13 @@
 """Score a surrogate on the reference designs (validation/references.py), on the same muons.
 
 On each reference: predicted vs. simulated hits at u = 0 (h0_err), in the half box and in the box
-(pred_half, pred_box: median |log pred / sim|); with one-at-a-time designs also the secants
-(H(+e_i) - H(-e_i)) / 2 and curvatures H(+e_i) + H(-e_i) - 2 H(0) of every parameter
-(oat_slope_err, oat_curv_err: relative vector errors, and their cosines). Each score is quoted
-next to its noise floor: what a perfect model would read, from the simulator's Poisson noise.
+(pred_half, pred_box: median |log pred / sim|); with one-at-a-time designs also the slope b_i and
+curvature c_i = 2 a_i of every analysed parameter (not in --fixed), from a weighted quadratic fit
+Y = a u^2 + b u + Y_0 through the nominal and the parameter alone at u = +-1 (and +-1/2 where the
+reference has those): with only +-1 these are (Y(+1) - Y(-1)) / 2 and Y(+1) + Y(-1) - 2 Y(0).
+oat_slope_err, oat_curv_err: relative vector errors |hat - sim| / |sim|, and their cosines. Each
+score is quoted next to its noise floor: what a perfect model would read, from the simulator's
+Poisson noise (not the field-map noise of each design, ~1% of Y).
 
 Writes <out>/scores.json, report.txt, predictions.npz (--replot redraws the figures from it), and
 to <figs>:
@@ -61,23 +64,12 @@ class Reference:
         dev = model.bias.device
         U = self.U.to(dev)
         out = torch.zeros(len(U), dtype=torch.float64, device=dev)
-        if not model.separable:     # the whole network per design and muon; TF32 here (~1e-3 on the sums)
-            chunk = 2 ** 24 // len(U)
-            tf32 = torch.backends.cuda.matmul.allow_tf32
-            torch.backends.cuda.matmul.allow_tf32 = True
-            try:
-                for c in range(0, self.n, chunk):
-                    out += torch.sigmoid(model.logits(U, self.X[c:c + chunk].to(dev, non_blocking=True))).double().sum(1)
-            finally:
-                torch.backends.cuda.matmul.allow_tf32 = tf32
-            return out.cpu().numpy()
         chunk = 2 ** 27 // (model.P + 3 * len(U))       # ~0.5 GB of features and logits at a time
         b = model.branch(U)
         for c in range(0, self.n, chunk):
             t = model.trunk(self.X[c:c + chunk].to(dev, non_blocking=True))
             out += torch.sigmoid(b @ t.T + model.bias).double().sum(1)
         return out.cpu().numpy()
-
 
     @torch.no_grad()
     def calibration(self, model, edges=np.logspace(-10, 0, 201)):
@@ -118,30 +110,40 @@ def merge_bins(n, s, h, min_pred=20):
     return s / n, h / n, np.sqrt(np.maximum(h, 1)) / n
 
 
-def oat_pairs(names, values, h0):
-    """(secants, curvatures) of the one-at-a-time designs oat+<i>, oat-<i> of values."""
-    idx = {n: i for i, n in enumerate(names)}
-    D = sum(n.startswith('oat+') for n in names)
-    p = np.array([values[idx[f'oat+{i}']] for i in range(D)])
-    m = np.array([values[idx[f'oat-{i}']] for i in range(D)])
-    return (p - m) / 2, p + m - 2 * h0
-
-
-def ref_scores(R, pred, tag):
+def oat_fit(R, values, keep):
+    """(slopes b, curvatures c = 2a, var(b), var(c)) per parameter of keep: the weighted fit
+    a u^2 + b u + c0 to the nominal mean of values (u = 0) and the parameter alone at u = +-1, +-1/2
+    (the reference's oat+<i>, oat-<i>, oat+h<i>, oat-h<i>, those it has), weighted by the
+    simulated counts' Poisson variances."""
+    idx = {n: i for i, n in enumerate(R.names)}
     nom = R.group('nominal')
-    s0 = R.hits[nom].mean()
-    out = {f'h0_err_{tag}': float(pred[nom].mean() / s0 - 1)}
+    b, c, vb, vc = (np.zeros(len(keep)) for _ in range(4))
+    for k, i in enumerate(keep):
+        pts = [(u, idx[n]) for u, n in ((1, f'oat+{i}'), (-1, f'oat-{i}'), (0.5, f'oat+h{i}'), (-0.5, f'oat-h{i}')) if n in idx]
+        u = np.array([0] + [q[0] for q in pts])
+        y = np.array([values[nom].mean()] + [values[j] for _, j in pts])
+        w = 1 / np.array([R.hits[nom].mean() / nom.sum()] + [max(R.hits[j], 1) for _, j in pts])
+        A = np.vander(u, 3) * np.sqrt(w)[:, None]
+        coef = np.linalg.lstsq(A, y * np.sqrt(w), rcond=None)[0]
+        cov = np.linalg.inv(A.T @ A)
+        b[k], c[k], vb[k], vc[k] = coef[1], 2 * coef[0], cov[1, 1], 4 * cov[0, 0]
+    return b, c, vb, vc
+
+
+def ref_scores(R, pred, tag, keep):
+    nom = R.group('nominal')
+    out = {f'h0_err_{tag}': float(pred[nom].mean() / R.hits[nom].mean() - 1)}
     for grp in ('half', 'box'):
         m = R.group(grp) & (R.hits > 0)
         out[f'pred_{grp}_{tag}'] = float(np.median(np.abs(np.log(pred[m] / R.hits[m]))))
     if R.group('oat').any():
-        for name, sim, hat in zip(('slope', 'curv'), oat_pairs(R.names, R.hits, s0), oat_pairs(R.names, pred, pred[nom].mean())):
+        for name, sim, hat in zip(('slope', 'curv'), oat_fit(R, R.hits, keep), oat_fit(R, pred, keep)):
             out[f'oat_{name}_err'] = float(np.linalg.norm(hat - sim) / np.linalg.norm(sim))
             out[f'oat_{name}_cos'] = float(hat @ sim / (np.linalg.norm(hat) * np.linalg.norm(sim)))
     return out
 
 
-def noise_floors(R, rng):
+def noise_floors(R, rng, keep):
     """What the scores of R read for a perfect model, from the Poisson noise of its simulated
     counts (expected values under Gaussian noise)."""
     out = {f'h0_err_{R.name}': float(1 / np.sqrt(R.hits[R.group('nominal')].sum()))}
@@ -149,25 +151,20 @@ def noise_floors(R, rng):
         h = R.hits[R.group(grp)]
         out[f'pred_{grp}_{R.name}'] = float(np.median(np.abs(np.log1p(rng.standard_normal((2000, len(h))) / np.sqrt(h)))))
     if R.group('oat').any():
-        h0 = R.hits[R.group('nominal')]
-        s0, v0 = h0.mean(), h0.mean() / len(h0)
-        slope, curv = oat_pairs(R.names, R.hits, s0)
-        hp_hm = curv + 2 * s0                                                  # H(+e_i) + H(-e_i)
-        out['oat_slope_err'] = float(np.sqrt((hp_hm / 4).sum()) / np.linalg.norm(slope))
-        out['oat_curv_err'] = float(np.sqrt((hp_hm + 4 * v0).sum()) / np.linalg.norm(curv))
+        b, c, vb, vc = oat_fit(R, R.hits, keep)
+        out['oat_slope_err'] = float(np.sqrt(vb.sum()) / np.linalg.norm(b))
+        out['oat_curv_err'] = float(np.sqrt(vc.sum()) / np.linalg.norm(c))
     return out
 
 
-def score(model, refs, arrays):
+def score(model, refs, arrays, keep):
     """The scores of a study network (lcso.models interface) on refs; the predictions, and the
     hits' gradient and Hessian at u = 0 on the first reference's muons, go to arrays."""
     out = {}
     for tag, R in refs.items():
         pred = R.predict(model)
         arrays[f'pred_{tag}'] = pred
-        out.update(ref_scores(R, pred, tag))
-    if not model.separable:
-        return out
+        out.update(ref_scores(R, pred, tag, keep))
     X = next(iter(refs.values())).X
     H0, g, H = derivatives(model, X, chunk=min(2 ** 20, 2 ** 27 // model.P))
     arrays.update(H0=H0 * len(X), g=g.numpy() * len(X), H=H.numpy() * len(X))   # in hits, not rates
@@ -190,12 +187,11 @@ class Production(torch.nn.Module):
 
 
 def as_study(model):
-    """A loaded surrogate as an lcso.models network: a ModelSurrogate's own network, an LCSONet
-    through Production."""
-    return model.net if hasattr(model, 'net') else Production(model)
+    """A loaded surrogate as an lcso.models network (lcso.models.derivatives works on those)."""
+    return Production(model)
 
 
-def plot(refs, preds, cals, labels, out, report=False):
+def plot(refs, preds, cals, labels, keep, out, report=False):
     """The figures, as PNG in out; with report, also the report's as PDF (validation_<name>.pdf)."""
     import matplotlib
     matplotlib.use('Agg')
@@ -265,10 +261,10 @@ def plot(refs, preds, cals, labels, out, report=False):
     tag, R = next(((t, R) for t, R in refs.items() if R.group('oat').any()), (None, None))
     if R is None:
         return
-    s0 = R.hits[R.group('nominal')].mean()
-    sim = oat_pairs(R.names, R.hits, s0)[0]
-    err = np.sqrt(oat_pairs(R.names, R.hits, s0)[1] + 2 * s0) / 2
-    hat = oat_pairs(R.names, preds[tag], preds[tag][R.group('nominal')].mean())[0]
+    sim, _, var, _ = oat_fit(R, R.hits, keep)
+    hat = oat_fit(R, preds[tag], keep)[0]
+    err = np.sqrt(var)
+    labels = [labels[i] for i in keep]
     order = np.argsort(-np.abs(sim))
     D = len(sim)
     fig, ax = plt.subplots(figsize=(11, 3.6), constrained_layout=True)
@@ -276,13 +272,14 @@ def plot(refs, preds, cals, labels, out, report=False):
     ax.plot(np.arange(D), hat[order], 'o', mfc='none', mec=color, ms=6, mew=1.5, label='surrogate')
     ax.axhline(0, color='0.7', lw=0.8)
     ax.set_xticks(range(D), [labels[i] for i in order], rotation=90, fontsize=6)
-    ax.set_ylabel('(Y(+10%) - Y(-10%)) / 2  [hits]')
+    ax.set_ylabel('slope $b$ (per 10%)  [hits]')
     ax.legend(fontsize=7)
     save(fig, 'oat')
 
 
 if __name__ == '__main__':
-    parser = cli.add_common(cli.parser(__doc__))
+    parser = cli.add_common(cli.parser(__doc__), fixed=True)
+    parser.set_defaults(fixed='M0:')
     parser.add_argument('--refs', default=','.join(REFS), help='references (paths.REFERENCES/<name>)')
     parser.add_argument('--out', default=VALIDATION)
     parser.add_argument('--figs', default=figures(VALIDATION))
@@ -292,33 +289,33 @@ if __name__ == '__main__':
     for d in (args.out, args.figs):
         os.makedirs(d, exist_ok=True)
     shield = MuonShield(args.muons, fields=args.fields)
+    fixed = [p for p in args.fixed.split(',') if p]
+    keep = [i for i, l in enumerate(shield.labels) if not any(l.startswith(p) for p in fixed)]
     refs = {t: Reference(t) for t in args.refs.split(',')}
     saved = os.path.join(args.out, 'predictions.npz')
     if args.replot:
         z = np.load(saved)
         preds = {t: z[f'pred_{t}'] for t in refs}
         cals = {t: tuple(z[f'cal_{t}']) for t in refs if f'cal_{t}' in z}
-        plot(refs, preds, cals, shield.labels, args.figs, report=args.figs == figures(VALIDATION))
+        plot(refs, preds, cals, shield.labels, keep, args.figs, report=args.figs == figures(VALIDATION))
         raise SystemExit(f'figures redrawn in {args.figs}')
     model = as_study(load_surrogate(args.model, shield.phi_0, args.device))
     preds, cals = {}, {}
     for t, R in refs.items():
-        if model.separable:
-            preds[t], cals[t] = R.calibration(model)
-        else:
-            preds[t] = R.predict(model)
+        preds[t], cals[t] = R.calibration(model)
     np.savez(saved, **{f'pred_{t}': v for t, v in preds.items()}, **{f'cal_{t}': np.stack(v) for t, v in cals.items()})
     scores, floors, rng = {}, {}, np.random.default_rng(0)
     for t, R in refs.items():
-        scores.update(ref_scores(R, preds[t], t))
-        floors.update(noise_floors(R, rng))
+        scores.update(ref_scores(R, preds[t], t, keep))
+        floors.update(noise_floors(R, rng, keep))
     with open(os.path.join(args.out, 'scores.json'), 'w') as f:
         json.dump(dict(model=args.model, scores=scores, noise=floors), f, indent=1)
-    lines = [f'model {args.model}; references ' + ', '.join(f'{t} ({R.n:.0e} muons, {len(R.U)} designs)' for t, R in refs.items()),
+    lines = [f'model {args.model}; one-at-a-time scores on {len(keep)} parameters (held at nominal: {args.fixed or "none"}); '
+             f'references ' + ', '.join(f'{t} ({R.n:.0e} muons, {len(R.U)} designs)' for t, R in refs.items()),
              f'{"score":20s} {"surrogate":>10s} {"noise":>10s}']
     lines += [f'{k:20s} {v:10.4f} {floors.get(k, np.nan):10.4f}' for k, v in scores.items()]
     with open(os.path.join(args.out, 'report.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
-    plot(refs, preds, cals, shield.labels, args.figs, report=args.figs == figures(VALIDATION))
+    plot(refs, preds, cals, shield.labels, keep, args.figs, report=args.figs == figures(VALIDATION))
     print(f'saved {args.out}/scores.json, report.txt, predictions.npz and the figures in {args.figs}')

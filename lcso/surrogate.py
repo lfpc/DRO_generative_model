@@ -4,21 +4,14 @@ and a muon x,
     logit(phi, x) = <branch(u), trunk(x)> + bias,   u = phi in the [-1, 1] tolerance box,
 
 where u = 0 is the nominal design and u_i = +-1 puts parameter i at +-delta of its nominal
-value. The trunk sees (px, py, pz, x, y, z, charge), positions in m (dx = 7); the first analysis'
-models saw (px, py, pz, charge) of muons all on axis at z = -1 m (dx = 4), and still load.
-
-  LCSONet         the DeepONet; stack() turns an ensemble of them into one LCSONet.
-                  Checkpoints of the earlier 7-input version load too.
-  ModelSurrogate  any network of lcso.models (e.g. a Taylor surrogate, 'taylor-res4:8'), or an
-                  ensemble of them, behind the same interface.
+value. The trunk sees (px, py, pz, x, y, z, charge), positions in m. LCSONet is the DeepONet;
+stack() turns an ensemble of them into one LCSONet.
 
 The analysis uses: dim, bias, branch_net(u), features(raw muons), denormalize_phi(u).
 """
 import os
 
 import torch
-
-from .models import Ensemble, make
 
 
 def _mlp(in_dim, hidden, out_dim, act):
@@ -27,14 +20,14 @@ def _mlp(in_dim, hidden, out_dim, act):
                                torch.nn.Linear(hidden, out_dim))
 
 
-def muon_inputs(x, dx=7):
+def muon_inputs(x):
     """The trunk's input of raw muons (..., 7): px, py, pz, x, y, z, pdg (mu+ = -13) ->
-    (px, py, pz, x, y, z, charge), or (px, py, pz, charge) for dx = 4 (the first analysis)."""
-    return torch.cat([x[..., :6 if dx == 7 else 3], -torch.sign(x[..., 6:7])], -1)
+    (px, py, pz, x, y, z, charge)."""
+    return torch.cat([x[..., :6], -torch.sign(x[..., 6:7])], -1)
 
 
 class _Box(torch.nn.Module):
-    """The tolerance box, phi <-> u, and the forward pass shared by both wrappers."""
+    """The tolerance box, phi <-> u, and the forward pass (also analysis.core.Restricted's)."""
 
     def _box(self, phi_0, delta):
         phi_0 = torch.as_tensor(phi_0, dtype=torch.float32).view(-1)
@@ -51,7 +44,7 @@ class _Box(torch.nn.Module):
 
     def features(self, x):
         """Trunk features of raw muons (..., 7)."""
-        return self.trunk_x(muon_inputs(x, self.dx))
+        return self.trunk_x(muon_inputs(x))
 
     def forward(self, phi, x):
         """Logits (B, N) of PHYSICAL designs phi (B, d) and raw muons x (B, N, 7) or (N, 7)."""
@@ -62,15 +55,15 @@ class _Box(torch.nn.Module):
 
 
 class LCSONet(_Box):
-    def __init__(self, phi_0, hidden=64, p=16, delta=0.1, dx=7):
+    def __init__(self, phi_0, hidden=64, p=16, delta=0.1):
         super().__init__()
         self._box(phi_0, delta)
-        self.hp, self.dx = {'hidden': hidden, 'p': p, 'dx': dx}, dx
+        self.hp = {'hidden': hidden, 'p': p}
         self.branch_net = _mlp(self.dim, hidden, p, torch.nn.SiLU)
-        self.trunk_net = _mlp(dx, hidden, p, torch.nn.ReLU)
+        self.trunk_net = _mlp(7, hidden, p, torch.nn.ReLU)
         self.bias = torch.nn.Parameter(torch.zeros(1))
-        self.register_buffer('x_loc', torch.zeros(dx))
-        self.register_buffer('x_scale', torch.ones(dx))
+        self.register_buffer('x_loc', torch.zeros(7))
+        self.register_buffer('x_scale', torch.ones(7))
 
     @property
     def P(self):
@@ -81,34 +74,13 @@ class LCSONet(_Box):
         return self.trunk_net((x - self.x_loc) / self.x_scale)
 
 
-class ModelSurrogate(_Box):
-    """A network of lcso.models (or an Ensemble of them) on muon_inputs rows, in the box."""
-
-    def __init__(self, net, phi_0, delta=0.1, hp=None):
-        super().__init__()
-        self._box(phi_0, delta)
-        self.net, self.hp = net, {'dx': 4, **(hp or {})}
-        self.dx = self.hp['dx']
-        self.bias = net.bias
-
-    @property
-    def P(self):
-        return self.net.P
-
-    def branch_net(self, u):
-        return self.net.branch(u)
-
-    def trunk_x(self, x):
-        return self.net.trunk(x)
-
-
 @torch.no_grad()
 def stack(models):
     """One LCSONet whose logit is the mean of the models' logits (an ensemble): the branch and
     trunk features are concatenated, with block-diagonal layers and each trunk's input
     standardization folded into its first layer."""
     K, m0 = len(models), models[0]
-    out = LCSONet(torch.zeros(m0.dim), hidden=K * m0.hp['hidden'], p=K * m0.hp['p'], delta=m0.delta, dx=m0.dx)
+    out = LCSONet(torch.zeros(m0.dim), hidden=K * m0.hp['hidden'], p=K * m0.hp['p'], delta=m0.delta)
     out.lower_bound.copy_(m0.lower_bound)
     out.upper_bound.copy_(m0.upper_bound)
     for name, scale in (('branch_net', 1 / K), ('trunk_net', 1)):        # 1/K: the mean of the K logits
@@ -129,63 +101,19 @@ def stack(models):
 
 
 def save_surrogate(model, path, **info):
-    """An LCSONet, or a ModelSurrogate (its members' weights: one network, or each of an ensemble)."""
-    config = {'delta': model.delta, **model.hp}
-    if isinstance(model, ModelSurrogate):
-        nets = list(model.net.models) if isinstance(model.net, Ensemble) else [model.net]
-        torch.save({'config': config, 'members': [n.state_dict() for n in nets],
-                    'box': [model.lower_bound, model.upper_bound], **info}, path)
-    else:
-        torch.save({'config': config, 'state_dict': model.state_dict(), **info}, path)
-
-
-def _from_7_inputs(state):
-    """A checkpoint of the earlier trunk on [(px, py, pz, x, y, z - mean) / std, -sign(pdg)]: the
-    positions are constant for the flow muons, so fold their mean and std into the first layer."""
-    W, b = state['trunk_net.0.weight'], state['trunk_net.0.bias']
-    mean, std = state.pop('muon_mean'), state.pop('muon_std')
-    z = torch.tensor([0.0, 0.0, -1.0])                                   # x, y, z of every muon
-    b = b + W[:, 3:6] @ ((z - mean[3:6]) / std[3:6])
-    state['trunk_net.0.weight'] = torch.cat([W[:, :3], W[:, 6:7]], 1)
-    state['trunk_net.0.bias'] = b
-    state['x_loc'] = torch.cat([mean[:3], torch.zeros(1)])
-    state['x_scale'] = torch.cat([std[:3], torch.ones(1)])
-    return state
-
-
-def _member_nets(obj, D):
-    """The lcso.models networks of a ModelSurrogate checkpoint."""
-    c = obj['config']
-    nets = []
-    for sd in obj['members']:
-        net = make(c['kind'], D, c.get('dx', 4), p=c['p'], hidden=c['hidden'], p_res=c.get('p_res', 16))
-        net.load_state_dict(sd)
-        nets.append(net.eval())
-    return nets
+    torch.save({'config': {'delta': model.delta, **model.hp}, 'state_dict': model.state_dict(), **info}, path)
 
 
 def load_surrogate(path, phi_0, device='cpu'):
     obj = torch.load(path, map_location='cpu', weights_only=False)
-    if 'members' in obj:                                 # a ModelSurrogate
-        nets = _member_nets(obj, len(phi_0))
-        net = nets[0] if len(nets) == 1 else Ensemble(nets)
-        return ModelSurrogate(net, phi_0, obj['config']['delta'], obj['config']).eval().to(device)
-    state = obj['state_dict']
-    if 'muon_mean' in state:
-        state = _from_7_inputs(state)
-    model = LCSONet(phi_0, **{k: obj['config'][k] for k in ('hidden', 'p', 'delta')}, dx=state['x_loc'].numel())
-    model.load_state_dict(state)
+    model = LCSONet(phi_0, **{k: obj['config'][k] for k in ('hidden', 'p', 'delta')})
+    model.load_state_dict(obj['state_dict'])
     return model.eval().to(device)
 
 
 def load_members(path, phi_0, device='cpu'):
-    """The networks an ensemble checkpoint averages, each as a surrogate; [] for one network."""
+    """The seeds an ensemble checkpoint averages (train.py --stack; found next to it), each as a
+    surrogate; [] for a single network."""
+    here = os.path.dirname(os.path.abspath(path))
     obj = torch.load(path, map_location='cpu', weights_only=False)
-    if 'members' in obj:
-        nets = _member_nets(obj, len(phi_0))
-        return ([ModelSurrogate(n, phi_0, obj['config']['delta'], obj['config']).eval().to(device) for n in nets]
-                if len(nets) > 1 else [])
-    here = os.path.dirname(os.path.abspath(path))       # member paths: as given to --stack, or next to the ensemble
-    return [load_surrogate(next((q for q in (p, os.path.join(os.path.dirname(here), p), os.path.join(here, os.path.basename(p)))
-                                 if os.path.exists(q)), p), phi_0, device)
-            for p in obj.get('stacked', [])]
+    return [load_surrogate(os.path.join(here, os.path.basename(p)), phi_0, device) for p in obj.get('stacked', [])]

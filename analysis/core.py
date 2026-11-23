@@ -39,7 +39,7 @@ class Restricted(_Box):
         self.dim, self.delta = len(keep), model.delta
         self.register_buffer('lower_bound', model.lower_bound[self.keep])
         self.register_buffer('upper_bound', model.upper_bound[self.keep])
-        self.hp, self.dx, self.bias = model.hp, model.dx, model.bias
+        self.hp, self.bias = model.hp, model.bias
 
     @property
     def P(self):
