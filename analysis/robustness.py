@@ -12,8 +12,7 @@ members (lcso/train.py --stack), sd / sqrt(K). The simulator walks use --n_muons
 sampled muons, with Poisson errors.
 
 Directions (--dirs): ascent (+grad), descent, worst (trust-region maximizer of the quadratic
-model at --t_max), worst2 (the same with the parameters of --worst2_fixed held at nominal), corner (sign of grad), pga (worst design in the box, by projected-gradient
-ascent on the surrogate), random, hess<k> and act<k> (k-th Hessian / active eigenvector).
+model at --t_max), worst2 (the same with the parameters of --worst2_fixed held at nominal), corner (sign of grad), random, hess<k> and act<k> (k-th Hessian / active eigenvector).
 
     python -m analysis.robustness --no_sim                                   # surrogate only, minutes
     python -m analysis.robustness --n_muons_sim 1000000000                   # with the simulated walks
@@ -43,10 +42,6 @@ parser.add_argument('--t_max', type=float, default=1.0, help='walk half-length (
 parser.add_argument('--n_points', type=int, default=5, help='points per walk (made odd)')
 parser.add_argument('--no_sim', dest='sim', action='store_false', help='walks on the surrogate only')
 parser.add_argument('--n_mc', type=int, default=4096, help='random designs in the box')
-parser.add_argument('--pga_restarts', type=int, default=4,
-                    help='starts of the box search: nominal, sign(grad)/2, worst direction, then random')
-parser.add_argument('--pga_steps', type=int, default=200)
-parser.add_argument('--pga_lr', type=float, default=0.05)
 parser.add_argument('--n_scan', type=int, default=8, help='parameters scanned one at a time')
 parser.add_argument('--plane', default='worst,act1', help='two directions spanning the scanned plane')
 parser.add_argument('--plane_n', type=int, default=31, help='points per side of the plane')
@@ -121,33 +116,7 @@ g_hat = unit(grad)
 # =============================================================================
 # 3. The worst directions
 # =============================================================================
-t, w = S.cache.t, S.cache.w
-
-
-def cached_h(u):
-    """Differentiable hits of one design over the cache."""
-    b = model.branch_net(u[None])[0]
-    return sum((torch.sigmoid(t[c:c + 2 ** 20].float() @ b + model.bias).double() * w[c:c + 2 ** 20]).sum()
-               for c in range(0, len(t), 2 ** 20))
-
-
 v_trs = trust_region_max(grad, hess, args.t_max)
-torch.manual_seed(args.seed + 1)
-starts = [torch.zeros(D), torch.from_numpy(np.sign(grad)).float() * 0.5, torch.from_numpy(unit(v_trs)).float()]
-starts = (starts + [torch.rand(D) * 2 - 1 for _ in range(args.pga_restarts)])[:args.pga_restarts]
-best_h, u_star = -np.inf, torch.zeros(D)
-for u0 in starts:
-    u = u0.to(args.device).clamp(-1, 1).requires_grad_(True)
-    opt = torch.optim.Adam([u], lr=args.pga_lr)
-    for _ in range(args.pga_steps + 1):
-        opt.zero_grad()
-        h = cached_h(u)
-        if float(h) > best_h:
-            best_h, u_star = float(h), u.detach().cpu().clone()
-        (-h).backward()
-        opt.step()
-        with torch.no_grad():
-            u.clamp_(-1, 1)                     # project back onto the box
 
 
 def oriented(v, g):
@@ -156,32 +125,30 @@ def oriented(v, g):
 
 
 def direction(name):
-    """(unit vector, walk half-length)."""
+    """The unit vector of a named direction."""
     if name == 'ascent':
-        return unit(grad), args.t_max
+        return unit(grad)
     if name == 'descent':
-        return -unit(grad), args.t_max
+        return -unit(grad)
     if name == 'worst':
-        return unit(v_trs), args.t_max
+        return unit(v_trs)
     if name == 'worst2':
-        return unit(restricted_worst(grad, hess, labels, args.worst2_fixed.split(','), args.t_max)), args.t_max
+        return unit(restricted_worst(grad, hess, labels, args.worst2_fixed.split(','), args.t_max))
     if name == 'corner':
-        return unit(np.sign(grad)), args.t_max
-    if name == 'pga':
-        return unit(u_star.numpy()), float(u_star.norm())
+        return unit(np.sign(grad))
     if name == 'random':
-        return unit(np.random.default_rng(args.seed + 3).standard_normal(D)), args.t_max
+        return unit(np.random.default_rng(args.seed + 3).standard_normal(D))
     if name.startswith('hess'):
-        return oriented(Qh[:, int(name[4:]) - 1], grad), args.t_max
+        return oriented(Qh[:, int(name[4:]) - 1], grad)
     if name.startswith('act'):
-        return oriented(Qa[:, int(name[3:]) - 1], grad), args.t_max
+        return oriented(Qa[:, int(name[3:]) - 1], grad)
     raise ValueError(f'unknown direction {name!r}')
 
 
 NAMES = args.dirs.split(',')
-V = np.stack([direction(nm)[0] for nm in NAMES])
+V = np.stack([direction(nm) for nm in NAMES])
 n_pts = args.n_points | 1                                # odd, so t = 0 is on the grid
-TS = np.stack([np.linspace(-1, 1, n_pts) * direction(nm)[1] for nm in NAMES])
+TS = np.tile(np.linspace(-1, 1, n_pts) * args.t_max, (len(NAMES), 1))
 AT1 = np.clip(args.t_max * V, -1, 1)
 designs = [np.zeros(D)]                                 # the walks; index 0: the nominal design
 IDX = np.zeros(TS.shape, dtype=int)
@@ -193,16 +160,16 @@ for i, (v, ts) in enumerate(zip(V, TS)):
 designs = np.stack(designs)
 U_mc = (torch.rand(args.n_mc, D, generator=torch.Generator().manual_seed(args.seed + 2)) * 2 - 1).numpy()
 
-# every design that needs a value: one-at-a-time, directions at t_max, walks, box worst
-ALL = np.concatenate([OAT, AT1, designs, u_star.numpy()[None]])
-cut = np.cumsum([0, len(OAT), len(AT1), len(designs), 1])
+# every design that needs a value: one-at-a-time, directions at t_max, walks
+ALL = np.concatenate([OAT, AT1, designs])
+cut = np.cumsum([0, len(OAT), len(AT1), len(designs)])
 
 
 def values(m, I):
     """Per network: the quantities the errors are taken over."""
     r = ratio_of(m, I, ALL)
     return dict(H0=I.H0, lin=I.grad / I.H0, mu=np.linalg.eigvalsh(I.hess)[::-1] / I.H0,
-                oat=r[cut[0]:cut[1]], at1=r[cut[1]:cut[2]], walk=r[cut[2]:cut[3]], star=r[cut[3]])
+                oat=r[cut[0]:cut[1]], at1=r[cut[1]:cut[2]], walk=r[cut[2]:cut[3]])
 
 
 main = values(model, S)
@@ -248,10 +215,6 @@ say(f'{"direction":10s} {"cos(grad)":>9s} {"slope/H_0":>9s} {"curv/H_0":>9s} {f"
 for nm, v, r, s in zip(NAMES, V, at_1, at_1_se):
     say(f'{nm:10s} {g_hat @ v:+9.3f} {grad @ v / H0:+9.3f} {v @ hess @ v / H0:+9.3f} {pm(r, s, ".4g"):>17s}  '
         + ', '.join(f'{labels[k]} {v[k]:+.2f}' for k in np.argsort(-np.abs(v))[:4]))
-star = main['star']
-say(f'worst design in the box (pga): H/H_0 = {pm(star, se["star"], ".4g")}; '
-    f'{int((u_star.abs() > 0.99).sum())}/{D} parameters on a face')
-say('  largest components: ' + ', '.join(f'{labels[k]} {u_star[k]:+.2f}' for k in u_star.abs().argsort(descending=True)[:6]))
 mc = ratio(U_mc)
 q = np.percentile(mc, [5, 50, 95, 99])
 say(f'{args.n_mc:,} random designs uniform in the box: H/H_0 median {q[1]:.3f}, 5-95% [{q[0]:.3f}, {q[2]:.3f}], '
@@ -304,7 +267,7 @@ np.savez(os.path.join(args.out_dir, 'robustness.npz'),
          hess_eigvals=mu, hess_eigval_se=mu_se, hess_eigvecs=Qh,
          act_eigvals=nu, act_eigvecs=Qa, act_participation=participation,
          oat_plus=oat_p, oat_plus_se=oat_p_se, oat_minus=oat_m, oat_minus_se=oat_m_se,
-         rank_lo=rank_lo, rank_hi=rank_hi, mc=mc, u_star=u_star.numpy(), h_star_out=star, h_star_se=se['star'],
+         rank_lo=rank_lo, rank_hi=rank_hi, mc=mc,
          dir_names=np.array(NAMES), dir_vecs=V, dir_t=TS, dir_idx=IDX, dir_at_tmax=at_1, dir_at_tmax_se=at_1_se,
          designs=designs, phis=model.denormalize_phi(torch.as_tensor(designs, dtype=torch.float32,
                                                                      device=args.device)).cpu().numpy(),

@@ -265,19 +265,15 @@ def robustness_figures(r):
         save(fig, 'robustness_calibration.png')
 
     # --- random designs in the box
-    mc, star = r['mc'], float(r['h_star_out'])
+    mc = r['mc']
     q = np.quantile(mc, [0.5, 0.95])
     fig, ax = plt.subplots(figsize=(7, 4.5), constrained_layout=True)
-    edges = np.logspace(np.log10(max(mc.min(), 1e-8) * 0.9), np.log10(max(mc.max(), star) * 1.2), 60)
+    edges = np.logspace(np.log10(max(mc.min(), 1e-8) * 0.9), np.log10(mc.max() * 1.2), 60)
     ax.hist(np.clip(mc, edges[0], edges[-1]), bins=edges, color=OK, alpha=0.8)
     ax.set_xscale('log')
     ax.axvline(1.0, color='k', lw=1.2, ls='--', label='nominal')
     ax.axvline(q[0], color=OK, lw=1, ls='-.', label=f'median {q[0]:.2f}')
     ax.axvline(q[1], color=GREY, lw=1, ls=':', label=f'95th percentile {q[1]:.1f}')
-    ax.axvline(star, color=BAD, lw=1.5, label=f'worst found by the surrogate ({star:.2g})')
-    if SIM and 'pga' in NAMES:
-        i = r['dir_idx'][NAMES.index('pga')][-1]
-        ax.axvline(sr[i], color=BAD, lw=1.5, ls='--', label=f'same design, simulated ({sr[i]:.1f})')
     ax.set(xlabel='$Y/Y_0$ (surrogate)', ylabel='designs', title=f'{len(mc):,} designs uniform in the $\\pm$10% box')
     ax.legend(fontsize=8)
     save(fig, 'robustness_mc.png')
@@ -600,21 +596,11 @@ def tolerance_figures(t, ev):
     save(fig, 'tolerance_allocation.png')
 
 
-def without(npz, key, drop):
-    """The arrays of npz with the rows of the names in drop (of npz[key]) left out, in every array
-    of as many rows as there are names."""
-    d = dict(npz)
-    names = [str(s) for s in d[key]]
-    keep = np.array([n not in drop for n in names])
-    return {k: (v[keep] if v.ndim and len(v) == len(names) else v) for k, v in d.items()}
-
-
-DROPPED = ('pga', 'box', 'box/2')      # the walks' crude box search: tolerance_boxes.py finds the box worst cases
 path = os.path.join(args.run, '{}.npz')
 if os.path.exists(path.format('robustness')):
-    robustness_figures(without(np.load(path.format('robustness')), 'dir_names', DROPPED))
+    robustness_figures(dict(np.load(path.format('robustness'))))
 if os.path.exists(path.format('worst_cases')):
-    worst_case_figures(without(np.load(path.format('worst_cases'), allow_pickle=True), 'names', DROPPED))
+    worst_case_figures(dict(np.load(path.format('worst_cases'), allow_pickle=True)))
 if os.path.exists(path.format('pz_profiles')):
     pz_profile_figure(np.load(path.format('pz_profiles')))
 for var in ('pz', 'pt', 'p', 'charge'):

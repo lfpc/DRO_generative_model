@@ -80,10 +80,9 @@ Under `outputs/` (not tracked; `paths.py`):
     models/     the surrogates: lcso.pt (four seeds stacked) and its seeds lcso_s<k>.pt;
                 lcso_first.pt, the first ensemble, whose worst cases chose the adaptive pool
     data/       simulations: pools/ (training), references/ (validation), adaptive_designs.npy,
+                simulated_designs.npz (the designs earlier analyses simulated, for flux_check),
                 field_maps/ (a cache, one folder per design; delete it when snoopy changes)
     results/    numbers and text reports: robustness/ (the analysis), robustness_first/ (the first
-                ensemble's), validation/, experiments/; robustness_p65/ and robustness_v1/ hold
-                only the designs simulated by earlier analyses (M0 free, earlier surrogates), which
-                validation/flux_check.py scores too
+                ensemble's), validation/, experiments/
     figures/    every figure, one folder per results folder
     logs/       the launchers' logs
