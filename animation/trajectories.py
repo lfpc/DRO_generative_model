@@ -118,12 +118,13 @@ P1, P2 = MuonShield.PLANES
 
 
 def plane_hits(env, x, seed):
-    """(x, y) on the last sensitive plane of the muons x that cross both planes inside them."""
+    """(x, y, |p| at production) on the last sensitive plane of the muons x that cross both planes inside them."""
+    p0 = x[:, :3].norm(dim=1).to(dev)
     for p, sd in ((P1, seed), (P2, seed + 1)):
         pos, mom, ok = propagate(env, x, p['position'] - p['dz'] / 2, sd)
         ok &= (pos[:, 0].abs() < p['dx'] / 2) & (pos[:, 1].abs() < p['dy'] / 2)
-        x = torch.cat([mom, pos, x[:, 6:7].to(dev)], 1)[ok]
-    return x[:, 3:5].cpu().numpy()
+        x, p0 = torch.cat([mom, pos, x[:, 6:7].to(dev)], 1)[ok], p0[ok]
+    return torch.cat([x[:, 3:5], p0[:, None]], 1).cpu().numpy()
 
 
 # --- the muons drawn: a sample above traj_pz, and some that hit the nominal design
