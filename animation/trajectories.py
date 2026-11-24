@@ -3,14 +3,12 @@
 The design is walked along one parameter (--param, from -range% to +range%) or along one of
 robustness.py's directions (--dir, t from -t_max to +t_max), in --frames designs. For each design:
   * the magnets' iron blocks (the simulator's ARB8s, all four quadrants) for drawing;
-  * the trajectories of muons of one batch (--n_batch sampled above --traj_pz GeV): the simulator's
-    CUDA transport run plane after plane (every --dz m), so its state at each plane is the
-    trajectory; the same seeds in every frame, so the paths change with the design, not with the
-    random numbers. Drawn: the first --n_traj of the batch, --n_hitters that hit the nominal design,
-    and --n_changers that miss it and hit other designs of the walk (those hitting in most frames),
-    all picked from these same realizations (a first pass over the frames);
+  * the trajectories of --n_traj muons sampled per p_z bin (--bins), as many per bin as the bin's
+    share of the nominal design's hits (at least --min_per_bin): the simulator's CUDA transport run
+    plane after plane (every --dz m), so its state at each plane is the trajectory; the same seeds
+    in every frame, so the paths change with the design, not with the random numbers;
   * the hits on the sensitive plane of --n_hits muons of the physical flux (the same muons in
-    every frame): their (x, y) at the last plane and their count, per 1e9 muons.
+    every frame): their (x, y) at the last plane, their p_z and their count, per 1e9 muons.
 Writes <out>/<name>.npz. Needs a GPU (MuonsAndMatter's transport, called, not changed).
 
     python -m animation.trajectories --param M7:dXOut --range 20
@@ -35,11 +33,11 @@ parser.add_argument('--dir', default='', help="walk this direction of <run>/robu
 parser.add_argument('--t_max', type=float, default=1.0, help='--dir from -t_max to +t_max (L2 norm of u; 1 = one tolerance unit)')
 parser.add_argument('--run', default=RUN)
 parser.add_argument('--frames', type=int, default=21, help='designs along the walk')
-parser.add_argument('--n_batch', type=int, default=2 * 10 ** 7, help='muons transported plane after plane, from which the drawn ones are picked')
-parser.add_argument('--n_traj', type=int, default=300, help='drawn muons taken as they come (the first of the batch)')
-parser.add_argument('--traj_pz', type=float, default=20, help='... sampled with p_z above this (GeV)')
-parser.add_argument('--n_hitters', type=int, default=40, help='drawn muons that hit the nominal design')
-parser.add_argument('--n_changers', type=int, default=40, help='drawn muons that miss the nominal design and hit others of the walk')
+parser.add_argument('--n_traj', type=int, default=600, help='muons whose trajectories are drawn')
+parser.add_argument('--bins', type=float, nargs='+', default=[10, 20, 30, 45, 75, 125, 200, 300, np.inf],
+                    help='p_z bin edges (GeV) of the drawn muons')
+parser.add_argument('--min_per_bin', type=int, default=25, help='drawn muons per bin at least')
+parser.add_argument('--n_share', type=int, default=int(2e8), help='muons whose nominal hits set the shares of the bins')
 parser.add_argument('--n_hits', type=int, default=int(1e8), help='muons of the flux for the sensitive plane, per frame')
 parser.add_argument('--block', type=int, default=int(1e7), help='muons held in memory')
 parser.add_argument('--dz', type=float, default=0.25, help='trajectory sampling step along z (m)')
@@ -132,8 +130,8 @@ P1, P2 = MuonShield.PLANES
 
 
 def plane_hits(env, x, seed):
-    """(x, y, |p| at production) on the last sensitive plane of the muons x that cross both planes inside them."""
-    p0 = x[:, :3].norm(dim=1).to(dev)
+    """(x, y, p_z at production) on the last sensitive plane of the muons x that cross both planes inside them."""
+    p0 = x[:, 2].to(dev)
     for p, sd in ((P1, seed), (P2, seed + 1)):
         pos, mom, ok = propagate(env, x, p['position'] - p['dz'] / 2, sd)
         ok &= (pos[:, 0].abs() < p['dx'] / 2) & (pos[:, 1].abs() < p['dy'] / 2)
@@ -141,15 +139,26 @@ def plane_hits(env, x, seed):
     return torch.cat([x[:, 3:5], p0[:, None]], 1).cpu().numpy()
 
 
-# --- the muons drawn: one batch of --n_batch muons above --traj_pz, transported plane after plane in
-# every frame with the same seeds. Whether a muon hits depends mostly on its random scattering, so the
-# muons are picked from these realizations (a first pass, hit flags only), not by a separate search,
-# and a second pass records the paths of the picked ones
-torch.manual_seed(args.seed)
-batch = shield.sample(args.n_batch, pz_band=(args.traj_pz, np.inf))
 ZP = [p['position'] - p['dz'] / 2 for p in (P1, P2)]
 zs = np.union1d(np.arange(0, ZP[1], args.dz), ZP)      # the transport stops at a plane only at z >= 0
 iz = [1 + int(np.searchsorted(zs, z)) for z in ZP]      # their index in the trajectories
+
+# --- the muons drawn: per p_z bin, in proportion to the bin's share of the nominal design's hits
+edges = np.asarray(args.bins, dtype=float)
+env0, _ = environment(shield.phi_0)
+pz_hit = []
+for lo in range(0, args.n_share, args.block):
+    torch.manual_seed(args.seed + 10 ** 6 + lo)
+    pz_hit.append(plane_hits(env0, shield.sample(min(args.block, args.n_share - lo)).to(dev), args.seed * 1000 + 55 + lo)[:, 2])
+del env0
+share = np.histogram(np.concatenate(pz_hit), edges)[0].astype(float)
+share /= share.sum()
+n_bin = np.maximum(args.min_per_bin, np.round(args.n_traj * share)).astype(int)
+torch.manual_seed(args.seed)
+muons = torch.cat([shield.sample(int(n), pz_band=(lo, hi)) for n, lo, hi in zip(n_bin, edges[:-1], edges[1:])])
+bin_id = np.repeat(np.arange(len(n_bin)), n_bin)
+for k in range(len(n_bin)):
+    print(f'  p_z {edges[k]:g}-{edges[k + 1]:g} GeV: {100 * share[k]:.1f}% of the nominal hits, {n_bin[k]} drawn')
 
 
 def magnet_z(phi):
@@ -163,31 +172,12 @@ def magnet_z(phi):
 
 
 SEED = args.seed * 1000 + 7
-nom = int(np.argmin(np.abs(s)))
-HF = []
-for f in range(args.frames):                            # pass 1: which muons of the batch hit, per frame
-    env, _ = environment(phis[f])
-    HF.append(trajectories(env, batch, zs, SEED)[0])
-    print(f'pass 1, frame {f + 1}/{args.frames} ({s[f]:+.2f}): {HF[-1].sum()} of the batch hit', flush=True)
-    del env
-    torch.cuda.empty_cache()
-HF = np.array(HF)
-gain = np.where(~HF[nom] & HF.any(0))[0]
-gain = gain[np.argsort(-HF[:, gain].sum(0), kind='stable')][:args.n_changers]   # those hitting in most frames
-hold = np.where(HF[nom])[0][:args.n_hitters]
-rand = np.setdiff1d(np.arange(args.n_traj), np.r_[hold, gain])
-sel = np.r_[rand, hold, gain]
-kind = np.r_[np.zeros(len(rand), int), np.ones(len(hold), int), np.full(len(gain), 2)]   # 0 random, 1 hit nominal, 2 start hitting
-print(f'drawn: {len(rand)} random, {len(hold)} that hit the nominal design (of {HF[nom].sum()}), '
-      f'{len(gain)} that miss it and hit elsewhere on the walk (of {(~HF[nom] & HF.any(0)).sum()})')
-
-T, BLOCKS, HX, NH = [], [], [], []
-for f in range(args.frames):                            # pass 2: their paths, and the plane's hits
+T, HF, BLOCKS, HX, NH = [], [], [], [], []
+for f in range(args.frames):
     env, blocks = environment(phis[f])
-    hf, t = trajectories(env, batch, zs, SEED, sel)
-    if (hf != HF[f]).any():
-        print(f'  warning: {(hf != HF[f]).sum()} hit flags differ from pass 1 (transport not reproducible)')
+    hf, t = trajectories(env, muons, zs, SEED, np.arange(len(muons)))
     T.append(t)
+    HF.append(hf)
     hx = []
     for lo in range(0, args.n_hits, args.block):
         torch.manual_seed(args.seed + 1 + lo)
@@ -196,17 +186,16 @@ for f in range(args.frames):                            # pass 2: their paths, a
     HX.append(hx)
     NH.append(len(hx) * 1e9 / args.n_hits)
     BLOCKS.append(blocks)
-    print(f'frame {f + 1}/{args.frames} ({s[f]:+.2f}): {HF[f, sel].sum()} of the drawn muons hit; '
+    print(f'frame {f + 1}/{args.frames} ({s[f]:+.2f}): {hf.sum()} of the drawn muons hit; '
           f'Y = {NH[-1]:.0f} per 1e9 ({len(hx)} hits)', flush=True)
     del env
     torch.cuda.empty_cache()
-muons, HF, candidate = batch[torch.as_tensor(sel)], HF[:, sel], kind > 0
 
 os.makedirs(args.out, exist_ok=True)
 out = os.path.join(args.out, f'{name}.npz')
 np.savez_compressed(out, s=s, xlabel=xlabel, U=U, zs=zs, traj=np.array(T, dtype=np.float32),
-                    p=muons[:, :3].norm(dim=1).numpy(), charge=-muons[:, 6].numpy() / 13, candidate=candidate, kind=kind,
-                    hit=HF,
-                    blocks=np.array(BLOCKS, dtype=np.float32), mag_z=np.array([magnet_z(p) for p in phis]), hits_xy=np.array(HX, dtype=object), Y=np.array(NH),
+                    pz=muons[:, 2].numpy(), charge=-muons[:, 6].numpy() / 13, bin=bin_id, edges=edges, share=share,
+                    hit=np.array(HF), blocks=np.array(BLOCKS, dtype=np.float32),
+                    mag_z=np.array([magnet_z(p) for p in phis]), hits_xy=np.array(HX, dtype=object), Y=np.array(NH),
                     n_hits=args.n_hits, planes=np.array([[p['position'], p['dx'], p['dy']] for p in (P1, P2)]))
 print(f'saved {out}')

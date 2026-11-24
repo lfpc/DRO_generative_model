@@ -1,14 +1,12 @@
 """Render an animation of animation/trajectories.py's npz: the shield from above (x-z) and from
 the side (y-z) with the muons' trajectories, the hits on the sensitive plane, and Y along the
-walk. Trajectories and hits are coloured by the muon's momentum at production (log scale);
-muons that hit in the frame are drawn bold. The designs play forward and back (--loop). The
-video is VP9 (WebM): this machine's ffmpeg has no working H.264, and MPEG-4 part 2 shows as a
-green screen in many players.
+walk. The drawn muons are sampled per p_z bin; each bin has its colour (trajectories and hits on
+the plane), and a line's width grows with log p_z. A dot marks where a trajectory hits the plane.
+The designs play forward and back (--loop). The video is VP9 (WebM): this machine's ffmpeg has no
+working H.264, and MPEG-4 part 2 shows as a green screen in many players.
 
     python -m animation.render outputs/results/animations/param_M7_dXOut.npz
     python -m animation.render <npz> --gif --fps 3
-
-Needs hits_xy with the momentum (x, y, |p|): trajectories.py from 2026-11-24 on.
 """
 import os
 
@@ -18,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter, PillowWriter
 from matplotlib.collections import LineCollection, PolyCollection
-from matplotlib.colors import LogNorm
+from matplotlib.lines import Line2D
 from scipy.spatial import ConvexHull
 
 import cli
@@ -30,11 +28,9 @@ parser.add_argument('--fps', type=float, default=4)
 parser.add_argument('--loop', action='store_true', default=True, help='play forward then back')
 parser.add_argument('--no_loop', dest='loop', action='store_false')
 parser.add_argument('--gif', action='store_true', help='a GIF instead of a WebM')
-parser.add_argument('--p_range', type=float, nargs=2, default=[10, 400], help='momentum colour scale (GeV)')
-parser.add_argument('--cmap', default='viridis')
-parser.add_argument('--n_lost', type=int, default=200, help='drawn muons taken as they come (mostly lost)')
-parser.add_argument('--n_hit', type=int, default=40, help='drawn muons that hit the nominal design')
-parser.add_argument('--n_gain', type=int, default=40, help='drawn muons that miss the nominal design and hit others of the walk')
+parser.add_argument('--cmap', default='viridis', help='sequential colour map of the p_z bins')
+parser.add_argument('--lw', type=float, nargs=2, default=[0.25, 1.2], help='line width at the lowest and highest p_z')
+parser.add_argument('--alpha', type=float, default=0.45, help='opacity of the trajectories')
 parser.add_argument('--xmax', type=float, default=5, help='half-width of the top view (m)')
 parser.add_argument('--ymax', type=float, default=4, help='half-height of the side view (m)')
 parser.add_argument('--zmax', type=float, default=93, help='end of the views (m)')
@@ -43,22 +39,29 @@ parser.add_argument('--out', default=os.path.join(FIGURES, 'animations'))
 args = parser.parse_args()
 
 r = np.load(args.npz, allow_pickle=True)
-s, traj, hitf, mom, Y = r['s'], r['traj'], r['hit'], r['p'], r['Y']
-F = len(s)
+s, traj, hitf, pz, Y = r['s'], r['traj'], r['hit'], r['pz'], r['Y']
+edges, bin_id = r['edges'], r['bin']
+F, K = len(s), len(edges) - 1
 nom = int(np.argmin(np.abs(s)))
-kind = r['kind'] if 'kind' in r else r['candidate'].astype(int)     # 0 random, 1 hit nominal, 2 hit elsewhere
-gain = (kind == 2) & ~hitf[nom] & hitf.any(0)            # miss the nominal design, hit somewhere on the walk
-hitf_nom = (kind == 1) & hitf[nom]
-pick = np.r_[np.where(kind == 0)[0][:args.n_lost], np.where(hitf_nom)[0][:args.n_hit],
-             np.where(gain)[0][:args.n_gain]]
-print(f'drawn: {min(args.n_lost, (kind == 0).sum())} random, {min(args.n_hit, hitf_nom.sum())} '
-      f'hitting the nominal design, {min(args.n_gain, gain.sum())} that start hitting along the walk')
-traj, hitf, mom = traj[:, pick], hitf[:, pick], mom[pick]
+srt = np.argsort(pz, kind='stable')                    # the hard muons drawn on top
+traj, hitf, pz, bin_id = traj[:, srt], hitf[:, srt], pz[srt], bin_id[srt]
 planes = r['planes']                                     # (position, dx, dy) of each sensitive plane
-NORM = LogNorm(*args.p_range)
-CMAP = matplotlib.colors.ListedColormap(plt.get_cmap(args.cmap)(np.linspace(0, 0.85, 256)))   # no pale yellow on white
-COL = CMAP(NORM(mom))                                    # per drawn muon
+BIN_COL = plt.get_cmap(args.cmap)(np.linspace(0, 0.85, K))   # no pale yellow on white
+COL = BIN_COL[bin_id]
+lo_p, hi_p = np.log(edges[0]), np.log(edges[-2] if np.isinf(edges[-1]) else edges[-1])
+
+
+def width(p):
+    return args.lw[0] + (args.lw[1] - args.lw[0]) * np.clip((np.log(p) - lo_p) / (hi_p - lo_p), 0, 1)
+
+
+LW = width(pz)
 IRON = '0.55'
+
+
+def bin_label(k):
+    a, b = edges[k], edges[k + 1]
+    return f'{a:g}+ GeV' if np.isinf(b) else f'{a:g}-{b:g} GeV'
 
 
 def outlines(blocks, a):
@@ -74,7 +77,7 @@ def outlines(blocks, a):
 
 
 fig = plt.figure(figsize=(14, 7.2))
-gs = fig.add_gridspec(2, 2, width_ratios=[2.6, 1], height_ratios=[1.35, 1], wspace=0.18, hspace=0.32)
+gs = fig.add_gridspec(2, 2, width_ratios=[2.6, 1], height_ratios=[1.35, 1], wspace=0.18, hspace=0.32, left=0.06, right=0.87)
 ax_top, ax_side = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[1, 0])
 ax_plane, ax_y = fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, 1])
 
@@ -90,11 +93,8 @@ ax_side.set_title('side view', fontsize=10, loc='left')
 ax_side.set_xlabel('z [m]')
 ax_top.text(planes[-1][0], args.xmax * 0.92, 'sensitive\nplanes', ha='center', va='top', fontsize=8)
 iron = [ax.add_collection(PolyCollection([], facecolor=IRON, edgecolor='0.35', lw=0.4, zorder=1)) for ax in (ax_top, ax_side)]
-lines = [[ax.add_collection(LineCollection([], zorder=z)) for z in (2, 3)] for ax in (ax_top, ax_side)]
-ends = [ax.scatter([], [], s=14, zorder=5) for ax in (ax_top, ax_side)]
-ax_top.plot([], [], color='0.3', lw=0.5, alpha=0.5, label='lost')
-ax_top.plot([], [], color='0.3', lw=1.8, label='hits the plane')
-ax_top.legend(loc='lower right', fontsize=8, ncol=2, frameon=True)
+lines = [ax.add_collection(LineCollection([], zorder=2)) for ax in (ax_top, ax_side)]
+ends = [ax.scatter([], [], s=18, zorder=5, edgecolors='k', linewidths=0.4) for ax in (ax_top, ax_side)]
 
 z_last, dx, dy = planes[-1]
 ax_plane.add_patch(plt.Rectangle((-dx / 2, -dy / 2), dx, dy, fill=False, color='k', lw=1.2))
@@ -103,12 +103,13 @@ ax_plane.set_ylim(-dy / 2 - 0.3, dy / 2 + 0.3)
 ax_plane.set_aspect('equal')
 ax_plane.set_xlabel('x [m]')
 ax_plane.set_ylabel('y [m]')
-pts = ax_plane.scatter([], [], s=7, c=[], cmap=CMAP, norm=NORM, alpha=0.8, lw=0)
-cb = fig.colorbar(plt.cm.ScalarMappable(NORM, CMAP), ax=ax_plane, fraction=0.06, pad=0.04)
-cb.set_ticks([t for t in (10, 20, 50, 100, 200, 400, 1000) if NORM.vmin <= t <= NORM.vmax])
-cb.set_ticklabels([f'{t:g}' for t in cb.get_ticks()])
-cb.minorticks_off()
-cb.set_label(r'$|p|$ at production [GeV]' '\n(lines and points)')
+pts = ax_plane.scatter([], [], s=7, alpha=0.85, lw=0)
+n_per = np.bincount(bin_id, minlength=K)
+handles = [Line2D([], [], color=BIN_COL[k], lw=width(np.sqrt(edges[k] * (edges[k + 1] if np.isfinite(edges[k + 1]) else 2 * edges[k]))),
+                  label=f'{bin_label(k)} ({n_per[k]})') for k in range(K)]
+handles.append(Line2D([], [], ls='', marker='o', mfc='0.7', mec='k', mew=0.4, ms=5, label='hits the plane'))
+ax_plane.legend(handles=handles, loc='upper left', bbox_to_anchor=(1.03, 1.02), fontsize=8, frameon=False,
+                title='$p_z$ at production\n(drawn muons)', title_fontsize=8)
 
 ax_y.axvline(0, color='red', ls='--', lw=1.2, label='nominal')
 ax_y.plot(s, Y, color='0.75', lw=1, zorder=1)
@@ -127,21 +128,19 @@ def draw(f):
     for k, (ax, a) in enumerate(((ax_top, 0), (ax_side, 1))):
         iron[k].set_verts(outlines(r['blocks'][f], a))
         segs = [t[np.isfinite(t[:, 0])][:, [2, a]] for t in traj[f]]
-        for j, sel in enumerate((~hit, hit)):
-            idx = np.where(sel)[0]
-            lines[k][j].set_segments([segs[i] for i in idx])
-            lines[k][j].set_color(COL[idx])
-            lines[k][j].set_linewidth(0.5 if j == 0 else 1.8)
-            lines[k][j].set_alpha(0.45 if j == 0 else 1.0)
+        lines[k].set_segments(segs)
+        lines[k].set_color(COL)
+        lines[k].set_linewidth(LW)
+        lines[k].set_alpha(args.alpha)
         last = np.array([sg[-1] if len(sg) else (np.nan, np.nan) for sg in segs])
         ends[k].set_offsets(last[hit] if hit.any() else np.empty((0, 2)))
-        ends[k].set_color(COL[hit])
+        ends[k].set_facecolor(COL[hit])
     if 'mag_z' in r:
         for m, t in enumerate(labels):
             t.set_x(r['mag_z'][f, m].mean())
     xy = np.asarray(r['hits_xy'][f]).reshape(-1, 3)
     pts.set_offsets(xy[:, :2])
-    pts.set_array(xy[:, 2])
+    pts.set_facecolor(BIN_COL[np.clip(np.searchsorted(edges, xy[:, 2], side='right') - 1, 0, K - 1)])
     ax_plane.set_title(f'hits at z = {z_last:g} m: {len(xy)} of {r["n_hits"]:.0e} muons', fontsize=10)
     cur.set_data([s[f]], [Y[f]])
     title.set_text(f'{r["xlabel"]}: {s[f]:+.1f}     Y = {Y[f]:.0f} per $10^9$ muons')
