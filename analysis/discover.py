@@ -193,7 +193,11 @@ for b in range(nb):
     for i in np.argsort(-np.abs(vec[:, b].mean(0)))[:4]:
         if i not in rows:
             rows.append(i)
-rows = sorted(rows, key=lambda i: (labels[i][1], COLUMNS.index(labels[i][3:])))
+for i_ in np.ravel(pairs):                                   # every paired field and length, M1 included
+    if i_ not in rows:
+        rows.append(i_)
+PAIR_FIRST = {'Z_len': 0, 'NI': 1}                          # per magnet: length, field, then the others
+rows = sorted(rows, key=lambda i: (labels[i][1], PAIR_FIRST.get(labels[i][3:], 2), COLUMNS.index(labels[i][3:])))
 say(f'\n3. the first direction per bin, on the {len(rows)} parameters that lead in some bin')
 for b in range(nb):
     say(f'  {bin_labels[b]:>8}: ' + ' '.join(f'{labels[i]} {vec[:, b, i].mean():+.2f}' for i in rows if abs(vec[:, b, i].mean()) > 0.15))
@@ -316,6 +320,13 @@ def p_regimes(a, big):
             if abs(M[i, j]) > 0.2:
                 a.text(j, i, f'{M[i, j]:+.2f}'.replace('0.', '.'), ha='center', va='center', fontsize=6 if not big else 8,
                        color='w' if abs(M[i, j]) > 0.5 * v else 'k')
+    mag = [labels[i][:2] for i in rows]
+    for k in range(1, len(rows)):
+        if mag[k] != mag[k - 1]:
+            a.axhline(k - 0.5, color='k', lw=1.2)
+    for k, i in enumerate(rows):
+        if labels[i].endswith(':NI') and k and rows[k - 1] == labels.index(labels[i][:3] + 'Z_len'):
+            a.add_patch(plt.Rectangle((-0.5, k - 1.5), nb, 2, fill=False, ec='k', lw=0.6, ls='--'))
     plt.colorbar(im, ax=a, fraction=0.04, pad=0.02, label='loading (+: fewer hits)')
 
 
