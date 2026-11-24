@@ -35,6 +35,13 @@ nohup bash run_analysis.sh > outputs/logs/run_analysis.log 2>&1 &   # the analys
 SIM=0 bash run_analysis.sh                                     # the same on the surrogate alone (minutes)
 ```
 
+Animations (one GPU for the trajectories, then any machine for the video):
+
+```bash
+python -m animation.trajectories --param M7:dXOut --range 20     # or --dir act1 (robustness.py's directions)
+python -m animation.render outputs/results/animations/param_M7_dXOut.npz   # -> outputs/figures/animations/*.mp4
+```
+
 `run_all.sh` (resumable: every step skips what is done):
 
 1. simulates the training pools (`lcso/simulate_pools.py`): many designs around the nominal one
@@ -62,7 +69,8 @@ The settings (muon source, pools, architecture, simulated muons) are at the top 
 | `muons.py` | muon sources: the generative flow (sampled, or as a quadrature grid), or stored muons (`--muons file:<muons.npy>`); another generator plugs in as a class with `sample()` |
 | `paths.py`, `cli.py` | where things are; the shared command-line options (`--model`, `--muons`, `--device`) |
 | `lcso/` | the surrogate: architectures (`models.py`), the trained model as the analysis sees it (`surrogate.py`), training (`training.py`, `train.py`), the pools (`data.py`, `simulate_pools.py`, `adaptive_designs.py`) |
-| `analysis/` | the robustness analysis (`python -m analysis.<script>`): `robustness`, `worst_cases`, `bins`, `tolerance_boxes`, `scan_sim`, `pz_profiles`, `plots`; shared machinery in `core.py` |
+| `analysis/` | the robustness analysis (`python -m analysis.<script>`): `robustness`, `worst_cases`, `bins`, `tolerance_boxes`, `scan_sim`, `pz_profiles`, `plots`; `relations` (which physical quantities, e.g. the B*L of M1-M4, explain each momentum bin's sensitivity), `noise_scan` (one parameter walked in small steps, each design simulated once: the simulator's noise); shared machinery in `core.py` |
+| `animation/` | animations of the shield while a parameter or direction changes: `trajectories.py` (GPU: the muons' paths, plane after plane, and the hits on the sensitive plane per design), `render.py` (the MP4/GIF: top and side views, the plane's hits, Y along the walk) |
 | `validation/` | reference designs simulated on stored muons, and the surrogate scored on them (`validate.py`); the surrogate scored on every design the analyses simulated at the physical flux (`flux_check.py`) |
 | `experiments/` | the studies of how to integrate over the muons (quadrature vs. sampling, importance sampling, the training proposal) |
 | `report/` | the report |

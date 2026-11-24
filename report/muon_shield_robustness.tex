@@ -338,6 +338,7 @@ while the strong parameters stand well above it. The mesh is set in \texttt{snoo
 
 %==============================================================================
 \section{Method}
+\label{sec:method}
 %==============================================================================
 
 From the surrogate we compute
@@ -1021,6 +1022,101 @@ to M2's entrance width ($+107\%$ vs.\ $+56\%$).
   \label{fig:pt}
 \end{figure}
 
+\subsection{Physical relations in the surrogate}
+\label{sec:relations}
+
+The surrogate is a smooth function of the parameters, so one can ask whether its response
+follows from a few physical combinations of them. The obvious candidate is the field integral:
+a muon of momentum $p$ crossing a magnet of field $B$ and length $L$ is bent by
+$\theta\approx0.3\,BL/p$ (T, m, GeV), so a muon that the upstream magnets must sweep out should see the
+design only through $Q=\sum_{m=1}^{4}B_mL_m$. If $Y_b=f(Q)$, then in logarithms
+\begin{equation}
+  \frac{\partial\log Y_b}{\partial u_{B_m}}=\frac{\partial\log Y_b}{\partial u_{L_m}}=a\,\delta\,w_m,
+  \qquad w_m=\frac{B_mL_m}{Q},\quad a=\frac{d\log Y_b}{d\log Q},\quad\delta=0.1,
+  \label{eq:bl}
+\end{equation}
+with one number, the elasticity $a$, for all eight parameters, and at second order the field and
+length of the same magnet couple with
+$\partial^2\log Y_b/\partial u_{B_m}\partial u_{L_m}=\delta\,g_m+c\,g_{B_m}g_{L_m}$, where
+$g=\nabla_u\log Y_b$ and $c$ (from the curvature of $f$) is the same for all pairs, also those of
+different magnets, where only the second term appears.
+
+\paragraph{Method.}
+For each $p_z$ bin the gradient $\nabla_u\log Y_b$ is fitted by a few quantities $q_j$,
+$\nabla_u\log Y_b\approx\sum_ja_j\nabla_u\log q_j$, chosen by greedy forward selection from a
+library: $B\cdot L$ of each magnet and summed over M1--M4, M6--M7 and all, the total length and
+that of M1--M4, the field in each return yoke ($B\cdot dX/dX_\mathrm{yoke}$, flux conservation), the
+apertures $dX\cdot dY$, the iron cross-sections, and the 58 parameters themselves. The selection
+stops at six quantities or $97\%$ of $\|\nabla\log Y_b\|^2$. The log-Hessian
+$\nabla^2\log Y_b=\nabla^2Y_b/Y_b-gg^\top$ is then fitted on the parameters the quantities involve,
+by the curvature term $\sum_ja_j\nabla^2\log q_j$ plus a symmetric combination of the products
+$\nabla\log q_j\nabla\log q_l^\top$; the gain from the curvature term tests whether the quantities
+are the right ones and not only their directions.
+
+\paragraph{Above $125$\,GeV the surrogate has learned $\sum BL$.}
+$\sum_{m=1}^4B_mL_m$ alone explains $80$--$84\%$ of the gradient in every bin above $125$\,GeV,
+with elasticity $a=-7.5$ ($125$--$175$\,GeV), $-15$ ($175$--$225$), $-14$ ($225$--$300$) and
+$-32$ (above $300$\,GeV; Fig.~\ref{fig:relations_pz}): above $300$\,GeV the hits scale as
+$Q^{-32}$, $-27\%$ for $1\%$ more field integral. The field and length gradients of each magnet
+are nearly equal and follow its share $w_m$ of $Q$ ($562$, $841$, $855$ and $850$\,T\,cm for
+M1--M4; Fig.~\ref{fig:relations_bl}, left), as Eq.~\eqref{eq:bl} requires. The next terms are
+small: the total length ($a\approx-5$ to $-7$, more iron to cross at the same $BL$), and M7's
+entrance and $BL$ with positive $a$. At second order the curvature term raises the explained
+fraction of the log-Hessian from $47$ to $64\%$ above $300$\,GeV, $58$ to $72\%$ at
+$175$--$225$\,GeV, $70$ to $74\%$ and $89$ to $93\%$ in the other two bins, and the cross terms of
+$B_m$ and $L_m$ follow the prediction (Fig.~\ref{fig:relations_bl}, middle): above $300$\,GeV
+$-0.06$ to $-0.12$ against $-0.09$ to $-0.14$ predicted, two to three times the generic product
+term $c\,g_{B_m}g_{L_m}$ alone ($-0.02$ to $-0.05$); below $225$\,GeV both are below $0.04$.
+
+\paragraph{Simulated.}
+Four changes of M1--M4 (each applied to all four magnets) were simulated on the same $4\times10^7$
+muons with $p_z>125$\,GeV (Fig.~\ref{fig:relations_bl}, right): $B$ up $5\%$, $L$ down by $1.05$,
+and the two at constant $BL$ ($B$ up $5\%$ with $L/1.05$, and $B$ down $5\%$ with $L/0.95$).
+Above $300$\,GeV, $5\%$ more field gives $\times0.20$ (surrogate $\times0.20$; $1.05^{-32}=0.21$)
+and $5\%$ less length $\times5.1$ (surrogate $\times4.9$), while at constant $BL$ the hits change
+by only $\times1.34$ and $\times0.87$ (surrogate $\times1.24$ and $\times0.83$), the residual being
+the length term: the shorter, stronger shield lets more through. In the lower bins the simulation
+agrees within $2\sigma$ of its Poisson error. Field and length of M1--M4 thus trade against each
+other one for one for the high-momentum muons, and what a tolerance must hold is their product.
+
+\paragraph{Below $125$\,GeV there is no single combination.}
+The intermediate and soft muons, which give most hits, are not swept by the upstream fields
+alone: the apertures of M2 and M3, the fields in the return yokes of M3, M4 and M7 and M7's widths
+enter with comparable weights, six quantities explain $70$--$90\%$ of the gradient, and only
+$40\%$ of the log-Hessian at $75$--$125$\,GeV. Over all muons $\sum BL$ of all magnets explains
+$43\%$ ($a=-8$), M7's yoke and exit widths most of the rest; this is the geometry of
+Sec.~\ref{sec:momentum}, where M7 acts on the muons that the fields have already bent and that
+pass close to the iron.
+
+These relations are read off the surrogate and hold to the extent the surrogate is right; the
+simulation confirms the one tested here. They give no new physics, but they show that the
+surrogate's response above $125$\,GeV is the textbook one, and that its second-order model
+(Sec.~\ref{sec:method}) encodes the coupling of field and length.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{relations_bl.pdf}
+  \caption{The field integral of M1--M4. Left: gradient of $\log Y_b$ above $300$\,GeV with
+  respect to the field and length of each magnet, and the prediction $a\,\delta\,w_m$ of
+  $Y_b=f(\sum BL)$ with the fitted $a=-32$. Middle: the surrogate's cross term of $B_m$ and $L_m$
+  against $\delta\,g_m+c\,g_{B_m}g_{L_m}$ ($c$ fitted on pairs of different magnets), per bin above
+  $125$\,GeV. Right: four changes of M1--M4, simulated on $4\times10^7$ muons with $p_z>125$\,GeV
+  (dots, Poisson errors) and on the surrogate (bars, ensemble spread): $B$ up $5\%$, $L$ down by
+  $1.05$, and the two at constant $BL$.}
+  \label{fig:relations_bl}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.8\linewidth]{relations_pz.pdf}
+  \caption{Physical quantities fitted to $\nabla\log Y_b$ per $p_z$ bin. Top: elasticity
+  $a_j=\partial\log Y_b/\partial\log q_j$ of the combined quantities selected (up to six per bin
+  with the single parameters, not shown; blank: not selected). Bottom: the fraction of $\|\nabla\log Y_b\|^2$ the selected quantities explain,
+  and of the log-Hessian on their parameters. \emph{yoke B} is the field in the return yoke,
+  $B\cdot dX/dX_\mathrm{yoke}$.}
+  \label{fig:relations_pz}
+\end{figure}
+
 \clearpage
 %==============================================================================
 \section{Conclusions}
@@ -1064,6 +1160,13 @@ to M2's entrance width ($+107\%$ vs.\ $+56\%$).
         the upstream magnets the high-momentum ones; M2's and M3's entrances the soft ones. The
         worst direction acts on the intermediate and soft muons and leaves the high-momentum ones
         nearly unchanged.
+  \item \textbf{For high-momentum muons the surrogate has learned the field integral.} Above
+        $125$\,GeV, $\sum BL$ of M1--M4 alone explains $80$--$84\%$ of the gradient, with the hits
+        scaling as $(\sum BL)^{-32}$ above $300$\,GeV, and the second-order model carries the
+        coupling of field and length. Simulated: $5\%$ more field gives $\times0.20$, $5\%$
+        less length $\times5.1$, both together (constant $BL$) only $\times1.34$. A tolerance
+        on M1--M4 must hold the product of field and length; below $125$\,GeV no single
+        combination describes the response.
   \item \textbf{The surrogate is quantitative within $\pm1\%$ and on single parameters.} On the
         483 designs the analyses simulated, its median error is $5\%$; it reproduces every
         parameter alone to $10\%$ (31 of 32 scan points within $3\sigma$), the walks within one
