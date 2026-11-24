@@ -33,7 +33,7 @@ parser.add_argument('--loop', action='store_true', default=True, help='play forw
 parser.add_argument('--no_loop', dest='loop', action='store_false')
 parser.add_argument('--gif', action='store_true', help='a GIF instead of a WebM')
 parser.add_argument('--cmap', default='viridis', help='sequential colour map of the p_z bins')
-parser.add_argument('--map_cmap', default='Blues', help='sequential colour map of the two maps (its palest 15%% cut)')
+parser.add_argument('--map_cmap', default='Blues_r', help='sequential colour map of the two maps, light = high (its palest 15%% cut)')
 parser.add_argument('--lw', type=float, nargs=2, default=[0.25, 1.2], help='line width at the lowest and highest p_z')
 parser.add_argument('--alpha', type=float, nargs=2, default=[0.25, 0.9], help='opacity of the context and of the hit trajectories')
 parser.add_argument('--p_min', type=float, default=1e-8, help='lowest hit probability of its colour scale')
@@ -71,8 +71,8 @@ sur_h = np.where(sur_h > 0, sur_h, np.nan)
 PNORM = LogNorm(args.p_min, np.nanmax(sur_p))
 HNORM = LogNorm(np.nanmax(sur_h) / 10 ** args.h_decades, np.nanmax(sur_h))
 _c = plt.get_cmap(args.map_cmap)
-MCMAP = matplotlib.colors.LinearSegmentedColormap.from_list('map', _c(np.linspace(0.15, 1, 256)))
-MCMAP.set_under(_c(0.15))
+MCMAP = matplotlib.colors.LinearSegmentedColormap.from_list('map', _c(np.linspace(0, 0.85, 256)))
+MCMAP.set_under(_c(0))
 DOT = '#e8590c'                                          # the simulated hits: orange on the blues
 
 
@@ -133,8 +133,8 @@ for m, ax, lab in ((meshes[0], ax_sur, 'P(hit) per muon'), (meshes[1], ax_sim, f
     cb = fig.colorbar(m, cax=ax.inset_axes([1.03, 0, 0.04, 1]), extend='min')
     cb.set_label(lab, fontsize=8, labelpad=2)
     cb.ax.tick_params(labelsize=7)
-sim_pts = ax_sim.scatter([], [], s=6, color=DOT, edgecolors='white', linewidths=0.3, zorder=3)
-ax_sim.legend(handles=[Line2D([], [], ls='', marker='o', mfc=DOT, mec='white', ms=4, label='a simulated hit')],
+sim_pts = ax_sim.scatter([], [], s=7, color=DOT, edgecolors='k', linewidths=0.3, zorder=3)
+ax_sim.legend(handles=[Line2D([], [], ls='', marker='o', mfc=DOT, mec='k', ms=4, label='a simulated hit')],
               loc='upper right', fontsize=7, frameon=True, framealpha=0.8)
 
 z_last, dx, dy = planes[-1]
