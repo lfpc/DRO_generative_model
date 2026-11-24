@@ -4,8 +4,9 @@ hits come from, for animation/render.py.
 The design is walked along one parameter (--param, from -range% to +range%) or along one of
 robustness.py's directions (--dir, t from -t_max to +t_max), in --frames designs. Every muon is
 transported by the simulator's CUDA transport plane after plane (every --dz m), so its state at
-each plane is its trajectory; the seeds are the same in every frame, so the paths change with the
-design, not with the random numbers. For each design:
+each plane is its trajectory. Every muon draws its random numbers from its own stream (the seed of
+the plane and its index), the same in every frame, so a path changes only where the design does,
+not with the random numbers. For each design:
   * the magnets' iron blocks (the simulator's ARB8s, all four quadrants) for drawing;
   * context: the trajectories of --n_ctx muons sampled per p_z bin (--bins), as many per bin as the
     bin's share of the nominal design's hits (from the surrogate), at least --min_per_bin; the same
@@ -16,10 +17,11 @@ design, not with the random numbers. For each design:
     per muon, the same in every frame), so a muon that keeps hitting stays drawn, and the number of
     drawn hits follows Y. The hits and their trajectories are the same simulation: the hit flags
     come from a first pass of each block, the shown paths from a second pass with the same seeds;
-  * the probability of a hit per (p_z, p_t) cell (--pz_edges, --pt_edges): from the surrogate
-    (its p averaged over the flux in the cell, on the quadrature grid --cache_grid), and from the
-    simulation (hits / muons of the cell). The surrogate was trained with the old hit cut, which
-    kept ~0.75 of the crossings (report, Setup), so its p is ~0.75 of the simulation's.
+  * the probability of a hit per (p_z, p_t) cell (--pz_edges, --pt_edges) and the expected hits
+    per cell, from the surrogate (its p averaged over the flux in the cell, on the quadrature grid
+    --cache_grid); the simulation's hits per cell too, though at ~1e-6 hits per muon 1e8 muons fill
+    few cells (render.py draws the simulated hits as points instead). The surrogate was trained
+    with the old hit cut, which kept ~0.75 of the crossings (report, Setup).
 Writes <out>/<name>.npz. Needs a GPU (MuonsAndMatter's transport, called, not changed).
 
     python -m animation.trajectories --param M7:dXOut --range 20
@@ -53,9 +55,9 @@ parser.add_argument('--min_per_bin', type=int, default=15, help='context muons p
 parser.add_argument('--n_hits', type=int, default=int(1e8), help='muons of the flux for the hits, per frame')
 parser.add_argument('--block', type=int, default=int(1e7), help='muons held in memory')
 parser.add_argument('--show', type=float, default=0.2, help='fraction of the hits whose trajectories are drawn')
-parser.add_argument('--pz_edges', type=float, nargs=3, default=[15, 400, 12], help='map: log p_z from, to, cells')
-parser.add_argument('--pt_edges', type=float, nargs=3, default=[0, 5, 10], help='map: p_t from, to, cells')
-parser.add_argument('--cache_grid', default='201x64', help="the surrogate's map: muon quadrature grid (muons.py)")
+parser.add_argument('--pz_edges', type=float, nargs=3, default=[15, 370, 40], help='map: log p_z from, to, cells')
+parser.add_argument('--pt_edges', type=float, nargs=3, default=[0, 5, 30], help='map: p_t from, to, cells')
+parser.add_argument('--cache_grid', default='401x32', help="the surrogate's map: muon quadrature grid (muons.py)")
 parser.add_argument('--dz', type=float, default=0.25, help='trajectory sampling step along z (m)')
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--out', default=os.path.join(RESULTS, 'animations'))
@@ -164,8 +166,9 @@ def trajectories(env, x, seed, keep=()):
     """Transport the muons x plane after plane (zs): (hit flags (n,), (x, y) on the last plane (n, 2),
     positions of the muons keep (len(keep), 1 + len(zs), 3)): the production point, then at each
     plane; a muon that stops (absorbed, turned back) before a plane gets the point where it stopped
-    there and NaN after. The random numbers depend on the seed and on the muons transported, so the
-    same x and seed give the same paths: what keep records does not change them."""
+    there and NaN after. Muon i draws its random numbers from curand(seed + plane, i) whatever the
+    design and the other muons, so a muon's path changes between designs only where the iron does
+    (common random numbers); what keep records does not change them."""
     keep = torch.as_tensor(np.asarray(keep, dtype=np.int64), device=dev)
     out = torch.full((len(keep), len(zs) + 1, 3), float('nan'), device=dev)
     pos, mom, q = x[:, 3:6].to(dev).clone(), x[:, :3].to(dev).clone(), x[:, 6].to(dev)
@@ -174,9 +177,13 @@ def trajectories(env, x, seed, keep=()):
     inside = torch.ones(len(x), dtype=torch.bool, device=dev)
     xy = torch.full((len(x), 2), float('nan'), device=dev)
     for k, z in enumerate(zs):
-        go = (alive & (pos[:, 2] < z)).nonzero().squeeze(1)
+        gm = alive & (pos[:, 2] < z)
+        go = gm.nonzero().squeeze(1)
         if len(go):
-            p, m, ok = propagate(env, torch.cat([mom[go], pos[go], q[go, None]], 1), z, seed + k)
+            # every muon keeps its index in the kernel, whose random numbers are curand(seed, index):
+            # the same stream for a muon in every design (the others get p = 0 and stop at once)
+            p, m, ok = propagate(env, torch.cat([torch.where(gm[:, None], mom, 0.0), pos, q[:, None]], 1), z, seed + k)
+            p, m, ok = p[go], m[go], ok[go]
             pos[go], mom[go] = p, m
             alive[go[~ok]] = False
             moved = torch.zeros(len(x), dtype=torch.bool, device=dev)
@@ -273,5 +280,5 @@ np.savez_compressed(out, s=s, xlabel=xlabel, U=U, zs=zs,
                     blocks=np.array(BLOCKS, dtype=np.float32), mag_z=np.array([magnet_z(p) for p in phis]),
                     hits_xy=obj(HX), Y=np.array(NH), n_hits=args.n_hits,
                     planes=np.array([[p['position'], p['dx'], p['dy']] for p in (P1, P2)]),
-                    map_pz=PZ, map_pt=PT, sur_p=sur_p, sur_n=sur_n, sim_hits=np.array(SH), sim_n=sim_n)
+                    map_pz=PZ, map_pt=PT, sur_p=sur_p, sur_n=sur_n, sur_hits=sur_hits, sim_hits=np.array(SH), sim_n=sim_n)
 print(f'saved {out}')

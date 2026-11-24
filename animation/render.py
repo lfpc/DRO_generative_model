@@ -1,8 +1,9 @@
 """Render an animation of animation/trajectories.py's npz. Top left: the shield from above (x-z)
 with the trajectories of context muons (sampled per p_z bin, faint) and of a fixed fraction of the
 hits (opaque, a dot where they reach the plane); each p_z bin has its colour, and a line's width
-grows with log p_z. Bottom left: the probability of a hit per (p_z, p_t) cell, from the surrogate
-and from the simulation (hits / muons of the cell; grey: no hit). Right: the hits on the last
+grows with log p_z. Bottom left: the surrogate's probability of a hit per (p_z, p_t) cell, and its
+expected hits per cell with the simulation's hits on top (one point each; at ~1e-6 hits per muon,
+1e8 simulated muons are too few for a per-cell probability). Right: the hits on the last
 sensitive plane and Y along the walk. The designs play forward and back (--loop). The video is VP9
 (WebM): this machine's ffmpeg has no working H.264, and MPEG-4 part 2 shows as a green screen in
 many players.
@@ -32,10 +33,11 @@ parser.add_argument('--loop', action='store_true', default=True, help='play forw
 parser.add_argument('--no_loop', dest='loop', action='store_false')
 parser.add_argument('--gif', action='store_true', help='a GIF instead of a WebM')
 parser.add_argument('--cmap', default='viridis', help='sequential colour map of the p_z bins')
-parser.add_argument('--map_cmap', default='magma_r', help='colour map of the hit probability')
+parser.add_argument('--map_cmap', default='Blues', help='sequential colour map of the two maps (its palest 15%% cut)')
 parser.add_argument('--lw', type=float, nargs=2, default=[0.25, 1.2], help='line width at the lowest and highest p_z')
 parser.add_argument('--alpha', type=float, nargs=2, default=[0.25, 0.9], help='opacity of the context and of the hit trajectories')
-parser.add_argument('--p_min', type=float, default=1e-8, help='lowest hit probability of the maps\' colour scale')
+parser.add_argument('--p_min', type=float, default=1e-8, help='lowest hit probability of its colour scale')
+parser.add_argument('--h_decades', type=float, default=3, help='decades of the expected hits\' colour scale')
 parser.add_argument('--xmax', type=float, default=5, help='half-width of the top view (m)')
 parser.add_argument('--zmax', type=float, default=93, help='end of the top view (m)')
 parser.add_argument('--dpi', type=int, default=120)
@@ -63,11 +65,15 @@ srt = np.argsort(r['ctx_pz'], kind='stable')             # the hard muons drawn 
 ctx_traj, ctx_pz, ctx_hit = r['ctx_traj'][:, srt], r['ctx_pz'][srt], r['ctx_hit'][:, srt]
 IRON = '0.55'
 PZ, PT = r['map_pz'], r['map_pt']
-sur_p = r['sur_p']
-with np.errstate(invalid='ignore', divide='ignore'):
-    sim_p = r['sim_hits'] / np.where(r['sim_n'] > 0, r['sim_n'], np.nan)[None]
-sim_p = np.where(sim_p > 0, sim_p, np.nan)               # no hit: grey
-MNORM = LogNorm(args.p_min, np.nanmax([np.nanmax(sur_p), np.nanmax(sim_p)]))
+sur_p = np.where(r['sur_p'] > 0, r['sur_p'], np.nan)
+sur_h = r['sur_hits'] * r['n_hits'] / 1e9                # expected hits per cell among the simulated muons
+sur_h = np.where(sur_h > 0, sur_h, np.nan)
+PNORM = LogNorm(args.p_min, np.nanmax(sur_p))
+HNORM = LogNorm(np.nanmax(sur_h) / 10 ** args.h_decades, np.nanmax(sur_h))
+_c = plt.get_cmap(args.map_cmap)
+MCMAP = matplotlib.colors.LinearSegmentedColormap.from_list('map', _c(np.linspace(0.15, 1, 256)))
+MCMAP.set_under(_c(0.15))
+DOT = '#e8590c'                                          # the simulated hits: orange on the blues
 
 
 def bin_label(k):
@@ -88,7 +94,7 @@ def outlines(blocks, a):
 
 
 fig = plt.figure(figsize=(15, 8.4))
-gs = fig.add_gridspec(2, 3, width_ratios=[1.25, 1.25, 1], height_ratios=[1.1, 1], wspace=0.4, hspace=0.32,
+gs = fig.add_gridspec(2, 3, width_ratios=[1.25, 1.25, 1], height_ratios=[1.1, 1], wspace=0.45, hspace=0.32,
                       left=0.05, right=0.88, top=0.9, bottom=0.08)
 ax_top = fig.add_subplot(gs[0, :2])
 ax_sur, ax_sim = fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])
@@ -109,18 +115,27 @@ hit_lines = ax_top.add_collection(LineCollection([], zorder=3))
 ends = ax_top.scatter([], [], s=14, zorder=5, edgecolors='k', linewidths=0.3)
 
 meshes = []
-for ax, lab in ((ax_sur, 'surrogate'), (ax_sim, 'simulation')):
-    ax.set_facecolor('0.9')
-    meshes.append(ax.pcolormesh(PZ, PT, np.full((len(PT) - 1, len(PZ) - 1), np.nan), cmap=args.map_cmap, norm=MNORM))
+for ax, norm, lab in ((ax_sur, PNORM, 'surrogate: probability of a hit'),
+                      (ax_sim, HNORM, 'expected hits (surrogate) and simulated hits')):
+    ax.set_facecolor('white')
+    meshes.append(ax.pcolormesh(PZ, PT, np.full((len(PT) - 1, len(PZ) - 1), np.nan), cmap=MCMAP, norm=norm,
+                                rasterized=True))
     ax.set_xscale('log')
+    ax.set_xlim(PZ[0], PZ[-1])
+    ax.set_ylim(PT[0], PT[-1])
     ax.set_xlabel('$p_z$ [GeV]')
-    ax.set_xticks([20, 50, 100, 200, 400])
-    ax.set_xticklabels(['20', '50', '100', '200', '400'])
+    ax.set_xticks([20, 50, 100, 200])
+    ax.set_xticklabels(['20', '50', '100', '200'])
     ax.minorticks_off()
-    ax.set_title(f'P(hit) per cell: {lab}', fontsize=10, loc='left')
+    ax.set_title(lab, fontsize=10, loc='left')
 ax_sur.set_ylabel('$p_t$ [GeV]')
-cb = fig.colorbar(meshes[1], cax=ax_sim.inset_axes([1.04, 0, 0.05, 1]))
-cb.set_label('probability of a hit')
+for m, ax, lab in ((meshes[0], ax_sur, 'P(hit) per muon'), (meshes[1], ax_sim, f'hits per cell (of {r["n_hits"]:.0e})')):
+    cb = fig.colorbar(m, cax=ax.inset_axes([1.03, 0, 0.04, 1]), extend='min')
+    cb.set_label(lab, fontsize=8, labelpad=2)
+    cb.ax.tick_params(labelsize=7)
+sim_pts = ax_sim.scatter([], [], s=6, color=DOT, edgecolors='white', linewidths=0.3, zorder=3)
+ax_sim.legend(handles=[Line2D([], [], ls='', marker='o', mfc=DOT, mec='white', ms=4, label='a simulated hit')],
+              loc='upper right', fontsize=7, frameon=True, framealpha=0.8)
 
 z_last, dx, dy = planes[-1]
 ax_plane.add_patch(plt.Rectangle((-dx / 2, -dy / 2), dx, dy, fill=False, color='k', lw=1.2))
@@ -173,7 +188,9 @@ def draw(f):
     ends.set_offsets(last)
     ends.set_facecolor(BIN_COL[bin_of(hp)] if len(hp) else 'k')
     meshes[0].set_array(sur_p[f].T.ravel())
-    meshes[1].set_array(sim_p[f].T.ravel())
+    meshes[1].set_array(sur_h[f].T.ravel())
+    hm = np.asarray(r['hits_xy'][f]).reshape(-1, 4)
+    sim_pts.set_offsets(hm[:, 2:4])
     if 'mag_z' in r:
         for m, t in enumerate(labels):
             t.set_x(r['mag_z'][f, m].mean())
