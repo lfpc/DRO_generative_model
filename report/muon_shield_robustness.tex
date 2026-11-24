@@ -27,7 +27,8 @@ each with its momentum and its production point in the target. A neural surrogat
 hit probability (an ensemble of four DeepONets, trained with simulations targeted at the muons of
 $30$--$60$\,GeV that make most hits) gives the gradient, the Hessian and candidate worst-case
 directions, and every conclusion is checked with the full simulation on $10^9$ muons. The nominal
-design gives about $1170$ hits per $10^9$ muons. If every parameter may be off by up to
+design gives about $1170$ hits per $10^9$ muons (three quarters of the muons that cross the last
+plane, a cut explained in Sec.~\ref{sec:setup}; the ratios are unaffected). If every parameter may be off by up to
 $\varepsilon$, the worst design found within these tolerances (searched on the surrogate, then
 simulated) multiplies the hits by $1.61\pm0.06$ at $\varepsilon=1\%$, $2.61\pm0.09$ at $2\%$,
 $23.5\pm0.7$ at $3\%$, $890\pm30$ at $5\%$ and $3800\pm110$ at $10\%$. Up to $\pm2\%$ it narrows
@@ -51,7 +52,7 @@ noise of $10^9$ muons.
 \tableofcontents
 
 %==============================================================================
-\section{Setup}
+\section{Setup}\label{sec:setup}
 %==============================================================================
 
 \paragraph{The shield.}
@@ -98,6 +99,16 @@ $\pm35$; the transport is stochastic) and four runs on independent muons $1157$-
 rate of $1.2\times10^{-6}$; the surrogate gives $1201$. Every simulator number uses $10^9$ muons,
 the same ones for all designs of a table, with Poisson errors (the transport is stochastic, so
 this holds even on shared muons).
+
+All these counts, the surrogate's training labels included, keep only about three quarters of the
+muons that cross the plane. The transport stops a muon at the first $2$\,cm step that reaches
+$z\geq91-\mathrm{d}z/2=90.995$\,m, so it ends anywhere in $[90.995,91.015]$\,m, and the hit
+selection then also required $|z-91|\leq\mathrm{d}z=0.01$\,m, dropping the muons whose last step
+ended beyond $91.010$\,m: $0.015/0.02=75\%$ are kept if the end point is uniform over the step
+($104$ of $136$ crossings, $76.5\%$, on $10^8$ muons). Which muons are dropped does not depend on the
+design, so every ratio $Y/Y_0$, every worst case and every tolerance holds as it is; the absolute
+numbers are $\approx0.75$ of the crossings (nominal $\approx1550$ crossings per $10^9$ muons). The
+selection has since been corrected to $z\geq90.995$\,m, the transport's own.
 
 \paragraph{Why a surrogate.}
 The transport is stochastic, and at this hit rate the noise of one simulation is large against

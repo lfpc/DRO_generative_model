@@ -70,7 +70,7 @@ class MuonShield:
     """The design problem: its free parameters (phi_0, labels, units), the simulator (__call__)
     and the muons it is simulated with (self.muons, any source of muons.py)."""
     PLANES = [{'dz': 0.01, 'dx': 4, 'dy': 6, 'position': 82},      # sensitive planes (m);
-              {'dz': 0.01, 'dx': 4, 'dy': 6, 'position': 91}]      # a hit is a muon inside the last
+              {'dz': 0.01, 'dx': 4, 'dy': 6, 'position': 91}]      # a hit is a muon crossing the last
     DELTA = 0.1                                                    # u_i = +-1 is +-10%
 
     def __init__(self, muons='flow', fields='map', map_dir=FIELD_MAPS, map_workers=4, map_cores=8):
@@ -174,7 +174,7 @@ class MuonShield:
             seed=None)
         p = self.PLANES[-1]
         return ((out['x'].abs() <= p['dx'] / 2) & (out['y'].abs() <= p['dy'] / 2)
-                & ((out['z'] - p['position']).abs() <= p['dz']))
+                & (out['z'] >= p['position'] - p['dz'] / 2))    # as run_from_params: z stops in [pos - dz/2, pos - dz/2 + step]
 
 
 if __name__ == '__main__':
