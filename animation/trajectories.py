@@ -3,10 +3,13 @@ hits come from, for animation/render.py.
 
 The design is walked along one parameter (--param, from -range% to +range%) or along one of
 robustness.py's directions (--dir, t from -t_max to +t_max), in --frames designs. Every muon is
-transported by the simulator's CUDA transport plane after plane (every --dz m), so its state at
-each plane is its trajectory. Every muon draws its random numbers from its own stream (the seed of
-the plane and its index), the same in every frame, so a path changes only where the design does,
-not with the random numbers. For each design:
+transported by the simulator's CUDA transport plane after plane (every --dz m through the magnets,
+every --dz_far m after them), so its state at each plane is its trajectory. Every muon draws its
+random numbers from its own stream (the seed of the plane and its index), the same in every frame,
+so a path changes only where the design does, not with the random numbers. The part of the shield
+that the walk does not change (up to the end of the magnet before the first one that changes:
+M0 for the directions, M6 for an M7 parameter) is transported once and shared by every frame.
+For each design:
   * the magnets' iron blocks (the simulator's ARB8s, all four quadrants) for drawing;
   * context: the trajectories of --n_ctx muons sampled per p_z bin (--bins), as many per bin as the
     bin's share of the nominal design's hits (from the surrogate), at least --min_per_bin; the same
@@ -48,7 +51,7 @@ parser.add_argument('--dir', default='', help="walk this direction of <run>/robu
 parser.add_argument('--t_max', type=float, default=1.0, help='--dir from -t_max to +t_max (L2 norm of u; 1 = one tolerance unit)')
 parser.add_argument('--run', default=RUN)
 parser.add_argument('--frames', type=int, default=21, help='designs along the walk')
-parser.add_argument('--n_ctx', type=int, default=300, help='context muons whose trajectories are drawn in every frame')
+parser.add_argument('--n_ctx', type=int, default=500, help='context muons whose trajectories are drawn in every frame')
 parser.add_argument('--bins', type=float, nargs='+', default=[10, 20, 30, 45, 75, 125, 200, 300, np.inf],
                     help='p_z bin edges (GeV) of the context muons (and of the colours)')
 parser.add_argument('--min_per_bin', type=int, default=15, help='context muons per bin at least')
@@ -58,7 +61,8 @@ parser.add_argument('--show', type=float, default=0.2, help='fraction of the hit
 parser.add_argument('--pz_edges', type=float, nargs=3, default=[15, 370, 40], help='map: log p_z from, to, cells')
 parser.add_argument('--pt_edges', type=float, nargs=3, default=[0, 5, 30], help='map: p_t from, to, cells')
 parser.add_argument('--cache_grid', default='401x32', help="the surrogate's map: muon quadrature grid (muons.py)")
-parser.add_argument('--dz', type=float, default=0.25, help='trajectory sampling step along z (m)')
+parser.add_argument('--dz', type=float, default=0.25, help='trajectory sampling step along z through the magnets (m)')
+parser.add_argument('--dz_far', type=float, default=2.0, help='the step after the last magnet (straight paths) (m)')
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--out', default=os.path.join(RESULTS, 'animations'))
 args = parser.parse_args()
@@ -156,47 +160,6 @@ def propagate(env, x, z_to, seed):
     return pos, mom, pos[:, 2] >= z_to
 
 
-P1, P2 = MuonShield.PLANES
-ZP = [p['position'] - p['dz'] / 2 for p in (P1, P2)]
-zs = np.union1d(np.arange(0, ZP[1], args.dz), ZP)      # the transport stops at a plane only at z >= 0
-iz = [1 + int(np.searchsorted(zs, z)) for z in ZP]      # their index in the trajectories
-
-
-def trajectories(env, x, seed, keep=()):
-    """Transport the muons x plane after plane (zs): (hit flags (n,), (x, y) on the last plane (n, 2),
-    positions of the muons keep (len(keep), 1 + len(zs), 3)): the production point, then at each
-    plane; a muon that stops (absorbed, turned back) before a plane gets the point where it stopped
-    there and NaN after. Muon i draws its random numbers from curand(seed + plane, i) whatever the
-    design and the other muons, so a muon's path changes between designs only where the iron does
-    (common random numbers); what keep records does not change them."""
-    keep = torch.as_tensor(np.asarray(keep, dtype=np.int64), device=dev)
-    out = torch.full((len(keep), len(zs) + 1, 3), float('nan'), device=dev)
-    pos, mom, q = x[:, 3:6].to(dev).clone(), x[:, :3].to(dev).clone(), x[:, 6].to(dev)
-    out[:, 0] = pos[keep]
-    alive = torch.ones(len(x), dtype=torch.bool, device=dev)
-    inside = torch.ones(len(x), dtype=torch.bool, device=dev)
-    xy = torch.full((len(x), 2), float('nan'), device=dev)
-    for k, z in enumerate(zs):
-        gm = alive & (pos[:, 2] < z)
-        go = gm.nonzero().squeeze(1)
-        if len(go):
-            # every muon keeps its index in the kernel, whose random numbers are curand(seed, index):
-            # the same stream for a muon in every design (the others get p = 0 and stop at once)
-            p, m, ok = propagate(env, torch.cat([torch.where(gm[:, None], mom, 0.0), pos, q[:, None]], 1), z, seed + k)
-            p, m, ok = p[go], m[go], ok[go]
-            pos[go], mom[go] = p, m
-            alive[go[~ok]] = False
-            moved = torch.zeros(len(x), dtype=torch.bool, device=dev)
-            moved[go] = True
-            mk = moved[keep]
-            out[mk, k + 1] = pos[keep[mk]]
-        for kp, pl in zip(iz, (P1, P2)):
-            if k + 1 == kp:
-                inside &= alive & (pos[:, 2] >= z) & (pos[:, 0].abs() < pl['dx'] / 2) & (pos[:, 1].abs() < pl['dy'] / 2)
-                xy = pos[:, :2].clone()
-    return inside.cpu().numpy(), xy[inside].cpu().numpy(), out.cpu().numpy()
-
-
 def magnet_z(phi):
     """(8, 2): start and end of each magnet along z (m)."""
     z, out = 0.0, []
@@ -205,6 +168,62 @@ def magnet_z(phi):
         out.append((z, z + 2 * row[1] / 100))
         z += 2 * row[1] / 100
     return out
+
+
+P1, P2 = MuonShield.PLANES
+ZP = [p['position'] - p['dz'] / 2 for p in (P1, P2)]
+MAG_Z = np.array([magnet_z(p) for p in phis])
+z_fine = MAG_Z[:, -1, 1].max() + 1                      # past the last magnet: straight lines, coarser steps
+zs = np.union1d(np.r_[np.arange(0, z_fine, args.dz), np.arange(z_fine, ZP[1], args.dz_far)], ZP)
+iz = [1 + int(np.searchsorted(zs, z)) for z in ZP]      # their index in the trajectories
+# the part of the shield that no design of the walk changes: up to the end of the magnet before the
+# first one that changes (its gap included in the change); there every frame has the same paths
+D = np.stack([shield.full_design(p).numpy() for p in phis])
+changed = np.abs(D - D[nom]).max(axis=(0, 2)) > 1e-6
+m0 = int(np.argmax(changed)) if changed.any() else 8
+z_shared = MAG_Z[nom, m0 - 1, 1] if m0 > 0 else 0.0
+K0 = int(np.searchsorted(zs, z_shared, side='right'))   # steps k < K0 end at zs[k] <= z_shared
+print(f'{len(zs)} steps; M{m0} is the first magnet that changes: steps up to z = {zs[K0 - 1] if K0 else 0:.2f} m '
+      f'transported once, in the nominal design')
+
+
+def start(x):
+    """Transport state of the muons x at production."""
+    n = len(x)
+    return dict(pos=x[:, 3:6].to(dev).clone(), mom=x[:, :3].to(dev).clone(), q=x[:, 6].to(dev),
+                alive=torch.ones(n, dtype=torch.bool, device=dev), inside=torch.ones(n, dtype=torch.bool, device=dev),
+                xy=torch.full((n, 2), float('nan'), device=dev))
+
+
+def advance(env, st, seed, k0, k1, move=None, keep=None, out=None):
+    """Transport the state st through the steps k0..k1-1 (to zs[k]), in place. move: the muons
+    moved (bool, default all); keep, out: record the positions of the muons keep in out[:, k + 1].
+    Every muon keeps its index in the kernel, whose random numbers are curand(seed + k, index) (the
+    others get p = 0 and stop at once): a muon's path does not depend on the design elsewhere or
+    on which other muons are moved (common random numbers). A muon that stops (absorbed, turned
+    back) keeps the point where it stopped and NaN after; inside: it crossed both planes inside."""
+    pos, mom, alive = st['pos'], st['mom'], st['alive']
+    for k in range(k0, k1):
+        z = zs[k]
+        gm = alive & (pos[:, 2] < z)
+        if move is not None:
+            gm &= move
+        go = gm.nonzero().squeeze(1)
+        if len(go):
+            p, m, ok = propagate(env, torch.cat([torch.where(gm[:, None], mom, 0.0), pos, st['q'][:, None]], 1), z, seed + k)
+            pos[go], mom[go] = p[go], m[go]
+            alive[go[~ok[go]]] = False
+            if keep is not None:
+                mk = gm[keep]
+                out[mk, k + 1] = pos[keep[mk]]
+        for kp, pl in zip(iz, (P1, P2)):
+            if k + 1 == kp:
+                st['inside'] &= alive & (pos[:, 2] >= z) & (pos[:, 0].abs() < pl['dx'] / 2) & (pos[:, 1].abs() < pl['dy'] / 2)
+                st['xy'] = pos[:, :2].clone()
+
+
+def clone(st, device=dev):
+    return {k: v.to(device).clone() for k, v in st.items()}
 
 
 def block(lo):
@@ -222,35 +241,61 @@ ctx = torch.cat([shield.sample(int(n), pz_band=(lo, hi)) for n, lo, hi in zip(n_
 for k in range(len(n_bin)):
     print(f'  p_z {EDGES[k]:g}-{EDGES[k + 1]:g} GeV: {100 * share[k]:.1f}% of the nominal hits, {n_bin[k]} context muons')
 
-# the simulation's muons per cell (the same muons in every frame)
-sim_n = np.zeros(NZ * NT + 1)
-for lo in range(0, args.n_hits, args.block):
-    x, _ = block(lo)
-    sim_n += np.bincount(cell(x[:, 2], x[:, :2].norm(dim=1)).numpy(), minlength=NZ * NT + 1)
-sim_n = sim_n[:-1].reshape(NZ, NT)
-
+# --- the shared part, once: the context muons' paths and every block's state at z_shared
 SEED = args.seed * 1000 + 7
+env0, _ = environment(phis[nom])
+ALL = torch.arange(len(ctx), device=dev)
+ctx_out = torch.full((len(ctx), len(zs) + 1, 3), float('nan'), device=dev)
+ctx_out[:, 0] = ctx[:, 3:6].to(dev)
+ctx_st = start(ctx)
+advance(env0, ctx_st, SEED, 0, K0, keep=ALL, out=ctx_out)
+sim_n = np.zeros(NZ * NT + 1)                            # the simulation's muons per cell
+BLK = []
+for lo in range(0, args.n_hits, args.block):
+    x, r = block(lo)
+    sim_n += np.bincount(cell(x[:, 2], x[:, :2].norm(dim=1)).numpy(), minlength=NZ * NT + 1)
+    st = start(x)
+    advance(env0, st, args.seed * 1000 + 99 + lo, 0, K0)
+    BLK.append((x, r, clone(st, 'cpu')))
+    del st
+    print(f'  block {lo // args.block + 1}: {BLK[-1][2]["alive"].float().mean():.3f} of the muons alive at z = {z_shared:.2f} m', flush=True)
+sim_n = sim_n[:-1].reshape(NZ, NT)
+torch.cuda.empty_cache()
+
 CT, CH, HT, HP, HX, SH, BLOCKS, NH = [], [], [], [], [], [], [], []
 for f in range(args.frames):
     env, blocks = environment(phis[f])
-    hf, _, t = trajectories(env, ctx, SEED, np.arange(len(ctx)))
-    CT.append(t)
-    CH.append(hf)
+    st, t = clone(ctx_st), ctx_out.clone()
+    advance(env, st, SEED, K0, len(zs), keep=ALL, out=t)
+    CT.append(t.cpu().numpy())
+    CH.append(st['inside'].cpu().numpy())
     ht, hp, hx, sh = [], [], [], np.zeros(NZ * NT + 1)
-    for lo in range(0, args.n_hits, args.block):
-        x, r = block(lo)
-        sd = args.seed * 1000 + 99 + lo
-        hit, xy, _ = trajectories(env, x, sd)                       # pass 1: which hit
+    for b, (x, r, st0) in enumerate(BLK):
+        sd = args.seed * 1000 + 99 + b * args.block
+        st = clone(st0)
+        advance(env, st, sd, K0, len(zs))                           # pass 1: which hit
+        hit = st['inside'].cpu().numpy()
+        xy = st['xy'][st['inside']].cpu().numpy()
+        del st
         mom = x[hit, :3]
         hx.append(np.c_[xy, mom[:, 2].numpy(), mom[:, :2].norm(dim=1).numpy()])
         sh += np.bincount(cell(mom[:, 2], mom[:, :2].norm(dim=1)).numpy(), minlength=NZ * NT + 1)
         sel = np.where(hit & (r < args.show))[0]
         if len(sel):                                                # pass 2: the paths of the shown ones
-            hit2, _, t = trajectories(env, x, sd, sel)
-            if not hit2[sel].all():
-                print(f'  warning: {(~hit2[sel]).sum()} shown hits do not repeat (transport not reproducible)')
-            ht.append(t)
+            keep = torch.as_tensor(sel, device=dev)
+            move = torch.zeros(len(x), dtype=torch.bool, device=dev)
+            move[keep] = True
+            out = torch.full((len(sel), len(zs) + 1, 3), float('nan'), device=dev)
+            out[:, 0] = x[sel, 3:6].to(dev)
+            st = start(x)
+            advance(env0, st, sd, 0, K0, move, keep, out)
+            advance(env, st, sd, K0, len(zs), move, keep, out)
+            hit2 = st['inside'][keep].cpu().numpy()
+            if not hit2.all():
+                print(f'  warning: {(~hit2).sum()} shown hits do not repeat (transport not reproducible)')
+            ht.append(out.cpu().numpy())
             hp.append(x[sel, 2].numpy())
+            del st, out
     hx = np.concatenate(hx)
     HT.append(np.concatenate(ht) if ht else np.zeros((0, len(zs) + 1, 3), np.float32))
     HP.append(np.concatenate(hp) if hp else np.zeros(0, np.float32))
@@ -277,7 +322,7 @@ def obj(a):
 np.savez_compressed(out, s=s, xlabel=xlabel, U=U, zs=zs,
                     ctx_traj=np.array(CT, dtype=np.float32), ctx_pz=ctx[:, 2].numpy(), ctx_hit=np.array(CH),
                     hit_traj=obj(HT), hit_pz=obj(HP), show=args.show, edges=EDGES, share=share,
-                    blocks=np.array(BLOCKS, dtype=np.float32), mag_z=np.array([magnet_z(p) for p in phis]),
+                    blocks=np.array(BLOCKS, dtype=np.float32), mag_z=MAG_Z,
                     hits_xy=obj(HX), Y=np.array(NH), n_hits=args.n_hits,
                     planes=np.array([[p['position'], p['dx'], p['dy']] for p in (P1, P2)]),
                     map_pz=PZ, map_pt=PT, sur_p=sur_p, sur_n=sur_n, sur_hits=sur_hits, sim_hits=np.array(SH), sim_n=sim_n)
