@@ -202,6 +202,63 @@ say(f'\n3. the first direction per bin, on the {len(rows)} parameters that lead 
 for b in range(nb):
     say(f'  {bin_labels[b]:>8}: ' + ' '.join(f'{labels[i]} {vec[:, b, i].mean():+.2f}' for i in rows if abs(vec[:, b, i].mean()) > 0.15))
 
+
+# 3b. Which length goes with which field: every pairing, design by design. For a sum of terms
+# B_m L_sigma(m) (z_s - z_m), field m's share of the exponent follows its own term's share
+# (slope 1, nothing fitted): the variance of the field shares that each pairing explains.
+import itertools
+perms = list(itertools.permutations(range(len(mags))))
+lev0 = zs[0] - zm
+
+
+def pairing_r2(k, b, perm):
+    gB = X[k, :, b][:, iB]
+    sB = gB / gB.sum(1, keepdims=True)
+    T = phi[:, iB] * phi[:, iL[list(perm)]] * lev0
+    w = T / T.sum(1, keepdims=True)
+    ds, dw = sB - sB.mean(0), w - w.mean(0)
+    return 1 - ((ds - dw) ** 2).sum() / (ds ** 2).sum()
+
+
+pr2 = np.array([[[pairing_r2(k, b, p) for p in perms] for k in range(K)] for b in hi])    # (bins, K, perms)
+ident = perms.index(tuple(range(len(mags))))
+say('\n3b. pairing: variance of the field shares across the designs explained by each pairing of fields and lengths (no fit)')
+for n, b in enumerate(hi):
+    m_ = pr2[n].mean(0)
+    o = np.argsort(-m_)
+    say(f'  {bin_labels[b]:>8} GeV: own magnet {m_[ident]:.2f} +- {pr2[n, :, ident].std(ddof=1):.2f}; best other '
+        f'{m_[o[o != ident][0]]:.2f}; rank of own magnet {list(o).index(ident) + 1} of {len(perms)}')
+sym = np.array([[((X[k, :, b][:, i] - X[k, :, b][:, j]) ** 2).mean() / (X[k, :, b][:, [i, j]] ** 2).sum(1).mean()
+                 for i, j in pairs] for k in range(K) for b in [fb]])
+say('  product symmetry dlogY/dlogB_m = dlogY/dlogL_m on every design, residual: '
+    + ' '.join(f'M{m} {x:.3f}' for m, x in zip(mags, sym.mean(0))))
+
+# 3c. The soft muons: the two entrance widths that lead at 10-30 GeV. Equal and opposite loadings
+# in log phi: one antisymmetric combination. A ratio d3/d2 has dlogY/dlog d2 = -dlogY/dlog d3 on
+# every design; a difference d2 - d3 has dY/dd2 = -dY/dd3 (in cm). Family:
+# dlogY/dlog d3 = -(d3/d2)^s dlogY/dlog d2, s = 0 ratio, 1 difference.
+from scipy.optimize import minimize_scalar
+soft = [b for b in range(nb) if 10 <= np.r_[0, edges][b] < 30]
+lead = {b: list(np.argsort(-np.abs(vec[:, b].mean(0)))[:2]) for b in soft}
+step_pair = sorted(lead[soft[0]], key=lambda i: labels[i])
+i2, i3 = step_pair
+qd = phi[:, i3] / phi[:, i2]
+say(f'\n3c. soft muons: {labels[i2]} and {labels[i3]} (nominal {phi0[i2]:g} and {phi0[i3]:g} cm)')
+step = {}
+for b in soft:
+    v_ = vec[:, b].mean(0)
+    say(f'  {bin_labels[b]:>6} GeV: loadings {v_[i2]:+.2f} {v_[i3]:+.2f} ({v_[i2] ** 2 + v_[i3] ** 2:.0%} of the direction)')
+    rr, rd, ss = [], [], []
+    for k in range(K):
+        gl = X[k, :, b][:, [i2, i3]]
+        ga = gl / phi[:, [i2, i3]]
+        rr.append((gl.sum(1) ** 2).mean() / (gl ** 2).sum(1).mean())
+        rd.append((ga.sum(1) ** 2).mean() / (ga ** 2).sum(1).mean())
+        ss.append(minimize_scalar(lambda s: ((gl[:, 1] + qd ** s * gl[:, 0]) ** 2).mean(), bounds=(-5, 5), method='bounded').x)
+    step[b] = (np.array(rr), np.array(rd), np.array(ss))
+    say(f'          antisymmetry residual on the designs: as a ratio {np.mean(rr):.3f}, as a difference {np.mean(rd):.3f}; '
+        f's = {np.mean(ss):+.1f} +- {np.std(ss, ddof=1):.1f} (0 ratio, 1 difference)')
+
 # =============================================================================
 # 4. Sum or product: the shares across the designs
 # =============================================================================
@@ -397,16 +454,57 @@ def p_sim(a, big):
     a.legend(frameon=False, loc='upper left', fontsize='small')
 
 
+
+def p_pairing(a, big):
+    m_ = pr2.mean(1)                                       # (bins, perms)
+    o = np.argsort(-m_[hi.index(fb)])
+    x = np.arange(len(perms))
+    for n, b in enumerate(hi):
+        if n == 0:
+            continue
+        a.plot(x, m_[n][o], 'o-', ms=3 if not big else 4, lw=0.8, color=BINC[n], label=f'{bin_labels[b]} GeV')
+    a.plot([list(o).index(ident)], [m_[hi.index(fb)][ident]], 'k*', ms=14 if big else 11, zorder=5, label='own magnet')
+    a.set_xticks(x, [''.join(f'{p + 1}' for p in perms[i]) for i in o], rotation=90, fontsize='x-small')
+    a.set_xlabel(r'pairing: the length of M$_{\sigma(1)}$..M$_{\sigma(4)}$ with the fields of M1..M4')
+    a.set_ylabel('variance of the field shares explained')
+    a.axhline(0, color=GREY, lw=0.6)
+    a.legend(frameon=False, loc='upper right', fontsize='small')
+
+
+def p_step(a, big):
+    for n, b in enumerate(soft):
+        g = X[:, :, b].mean(0)
+        a.scatter(g[:, i2], g[:, i3], s=4 if not big else 6, alpha=0.4, color=BINC[n], rasterized=True,
+                  label=f'{bin_labels[b]} GeV')
+    gg = np.concatenate([X[:, :, b].mean(0)[:, [i2, i3]] for b in soft])
+    lim = np.abs(gg).max() * 1.05
+    t_ = np.linspace(-lim, lim, 2)
+    a.plot(t_, -t_, 'k-', lw=1.2, label=f'ratio {labels[i3][3:]}$_3$/{labels[i2][3:]}$_2$')
+    a.plot(t_, -phi0[i3] / phi0[i2] * t_, 'k--', lw=1.2, label='difference (nominal widths)')
+    a.set_xlim(min(gg[:, 0].min(), 0) - 2, gg[:, 0].max() + 2)       # the quadrant the designs are in
+    a.set_ylim(gg[:, 1].min() - 2, max(gg[:, 1].max(), 0) + 2)
+    a.set_aspect('equal', adjustable='datalim')
+    a.axhline(0, color=GREY, lw=0.5)
+    a.axvline(0, color=GREY, lw=0.5)
+    a.set_xlabel(f'$\\partial\\log Y/\\partial\\log$ {labels[i2]}')
+    a.set_ylabel(f'$\\partial\\log Y/\\partial\\log$ {labels[i3]}')
+    a.legend(frameon=False, loc='lower left', markerscale=3, fontsize='small')
+
+
 f1, f3 = frac[:, fb, 0].mean(), rho[hi.index(fb)].mean()
 PANELS = {   # name: (panel, report title, slide title)
     'dimension': (p_dimension, 'how many directions, per muon',
                   f'Above {edges[4]:g} GeV every muon sees the design through one variable'),
     'direction': (p_direction, f'the direction, $p_z$ {args.focus} GeV',
                   'That variable is field and length of M1-M4, in equal measure'),
-    'regimes': (p_regimes, 'the direction per $p_z$ bin',
-                'Two regimes: apertures for soft muons, field integral for hard ones'),
+    'pairing': (p_pairing, 'which length goes with which field',
+                "Each field pairs with its own magnet's length: B_m L_m"),
     'weights': (p_weights, "the magnets' shares: the lever arm",
                 'Each magnet counts by B L times its distance to the detector'),
+    'regimes': (p_regimes, 'the direction per $p_z$ bin',
+                'Two regimes: apertures for soft muons, field integral for hard ones'),
+    'step': (p_step, 'soft muons: the two entrances, across 1024 designs',
+             'Soft muons see the step between the entrances of M2 and M3'),
     'sum': (p_sum, 'sum or product, across 1024 designs',
             f'The magnets add up: a sum, not a product ($\\rho={f3:.2f}$)'),
     'collapse': (p_collapse, 'collapse on 1024 random designs',
@@ -430,7 +528,7 @@ def compose(names, name, shape, size):
     plt.close(fig)
 
 
-compose(['dimension', 'direction', 'regimes', 'weights'], 'discover_variable', (2, 2), (12, 8.6))
+compose(['dimension', 'direction', 'pairing', 'weights', 'regimes', 'step'], 'discover_variable', (3, 2), (12, 12.6))
 compose(['sum', 'collapse', 'sim'], 'discover_action', (1, 3), (15, 4.6))
 slides = os.path.join(figures(args.run), 'discover_slides')
 os.makedirs(slides, exist_ok=True)

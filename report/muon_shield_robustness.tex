@@ -1041,36 +1041,63 @@ one. Two objects are used:
 \end{itemize}
 Uncertainties are the spread of the four ensemble members.
 
+\paragraph{Reading a direction.}
+In logarithmic coordinates a direction is a set of exponents, and the simple ways in which
+parameters combine leave recognisable patterns in it (Table~\ref{tab:reading}). At one design
+these are hypotheses only: a sum and a product, or a ratio and a difference, have the same
+gradient there. They differ in how the exponents change from design to design, and each reading
+below is tested that way, on the 1024 designs, with nothing fitted where possible.
+
+\begin{table}[h]
+  \centering\small
+  \begin{tabular}{lll}
+    \toprule
+    hidden variable & exponents at one design & across the designs \\
+    \midrule
+    product $\phi_i\phi_j$ & equal & equal on every design \\
+    ratio $\phi_i/\phi_j$ & equal and opposite & equal and opposite on every design \\
+    difference $\phi_i-\phi_j$ & opposite, in proportion $\phi_i:\phi_j$ & the proportion follows $\phi_i/\phi_j$ \\
+    sum $\sum_mc_mP_m$ & in proportion to the terms $c_mP_m$ & each term's share follows its own $P_m$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{How a hidden variable shows in the exponents $\partial\log Y/\partial\log\phi$.}
+  \label{tab:reading}
+\end{table}
+
 \paragraph{1. Every high-momentum muon sees one variable.}
 Above $75$\,GeV the first eigenvector of $C_b$ carries $96$--$99.6\%$ of
 $\mathbb{E}|\nabla_up|^2$ ($99.6\%$ above $300$\,GeV; Fig.~\ref{fig:discover_variable}a). Not
 only the hits of the bin but each muon depends on the design through one and the same
 combination of the parameters, whatever its own function of it.
 
-\paragraph{2. The variable is field times length of M1--M4.}
+\paragraph{2. The variable is made of field and length of M1--M4.}
 Above $300$\,GeV the first direction (Fig.~\ref{fig:discover_variable}b) is concentrated on
-eight parameters, the field and the length of M1--M4 (loadings $0.25$--$0.37$). Next come
-M7's entrance, field and exit with opposite sign ($-0.24$, $-0.16$, $-0.14$: a wider or weaker M7
-lets more through), and nothing else above $0.10$; the other 45 parameters carry $4.6\%$ of the
-direction. Within each magnet, field and length have nearly the same loading (the smaller over
-the larger $0.97$, $0.97$, $0.84$ and $0.72$ for M1--M4), so they enter as the product
-$P_m=B_mL_m$. The lengths of M3 and M4 count somewhat more than their fields: a longer magnet
-also adds iron.
+eight parameters, the field and the length of M1--M4 (loadings $0.25$--$0.37$, all of one sign:
+more field or more length, fewer hits). Next come M7's entrance, field and exit with opposite
+sign ($-0.24$, $-0.16$, $-0.14$: a wider or weaker M7 lets more through), and nothing else above
+$0.10$; the other 45 parameters carry $4.6\%$ of the direction. Within each magnet, field and
+length have nearly the same loading (the smaller over the larger $0.97$, $0.97$, $0.84$ and $0.72$
+for M1--M4): by Table~\ref{tab:reading}, a product. On the 1024 designs
+$\partial\log Y/\partial\log B_m=\partial\log Y/\partial\log L_m$ holds to $0.4$--$1.1\%$ of the
+variance for M1--M3 and $4.5\%$ for M4, whose length counts somewhat more than its field (a
+longer magnet also adds iron).
 
-\paragraph{3. Two regimes.}
-The first direction per bin (Fig.~\ref{fig:discover_variable}c) is the same from $75$\,GeV up.
-Below, it is a different one: at $10$--$30$\,GeV, where it carries $88$--$97\%$, it is the
-entrance width of M3 against that of M2 (loadings $+0.65$ and $-0.59$ at $10$--$20$\,GeV), close
-to their ratio, the step in the aperture between the two magnets. At $30$--$75$\,GeV the two
-entrances, yokes and fields of M2 and M3 mix ($81$--$88\%$). These are the populations of
-Sec.~\ref{sec:momentum}.
+\paragraph{3. Each field pairs with its own magnet's length.}
+Equal exponents alone do not say which length goes with which field: all eight are of similar
+size, so the field of one magnet and the length of the next are nearly equal too. The pairing
+shows across the designs. If the variable is a sum of terms $B_mL_{\sigma(m)}$, field $m$'s share
+of the exponent follows its own term's share, $B_mL_{\sigma(m)}/\sum$, with slope one and nothing
+fitted. Of the 24 ways of pairing the four fields with the four lengths, the one with each
+magnet's own length explains most of the variance of the field shares in every bin above
+$175$\,GeV ($0.51$--$0.58$, the next best $0.34$--$0.38$; Fig.~\ref{fig:discover_variable}c).
+The variables are $P_m=B_mL_m$.
 
 \paragraph{4. The lever arm.}
 How the direction splits between the four magnets (Fig.~\ref{fig:discover_variable}d) is
-$0.201$, $0.285$, $0.265$, $0.249$ ($\pm0.003$) for M1--M4. The plain field integral
-$B_mL_m/\sum BL$ gives $0.181$, $0.271$, $0.275$, $0.274$ (fields in tesla, lengths in cm): the
-upstream magnets count more. A kick at $z$ moves the muon at the sensitive plane by
-$\theta\,(z_s-z)$, and weighting each magnet by its distance to the plane,
+$0.201$, $0.285$, $0.265$, $0.249$ ($\pm0.003$) for M1--M4. For a sum, these are the shares of
+the terms. The plain field integral $B_mL_m/\sum BL$ gives $0.181$, $0.271$, $0.275$, $0.274$
+(fields in tesla, lengths in cm): the upstream magnets count more. A kick at $z$ moves the muon at
+the sensitive plane by $\theta\,(z_s-z)$, and weighting each magnet by its distance to the plane,
 $B_mL_m(z_s-z_m)/\sum$ with $z_s=82$\,m, gives $0.199$, $0.283$, $0.269$, $0.250$, within $0.004$
 of the surrogate. Fitted freely, the weights fall to zero at $z_0=76\pm5$\,m, close to the
 planes at $82$ and $91$\,m. The variable is the first moment of the field,
@@ -1104,6 +1131,24 @@ $\times1.24$ and $\times0.83$); what remains is the extra weight of the length. 
 of M1--M4 trade one for one for the high-momentum muons, and what a tolerance must hold is their
 product.
 
+\paragraph{8. Soft muons: a second variable.}
+The same reading at low momentum finds something else (Fig.~\ref{fig:discover_variable}e). At
+$10$--$20$\,GeV one direction carries $97\%$ of the muons' gradients and at $20$--$30$\,GeV
+$88\%$; it is led by the entrance widths of M2 and M3, with loadings $-0.59$ and $+0.65$
+($-0.62$ and $+0.57$; $78\%$ and $71\%$ of the direction), then M3's field and M2's yoke. Equal and
+opposite exponents mean the two widths act through one antisymmetric combination: wider M2 and
+narrower M3 give more hits, and equal changes of both nearly cancel. M2 is rectangular, so its
+entrance is also its exit ($70$\,cm) and M3's entrance ($64$\,cm) is a step inward: the soft
+muons see the step between the two apertures. Across the designs the antisymmetry holds to
+$7$--$11\%$ of the variance (Fig.~\ref{fig:discover_variable}f). Whether it is the ratio of the
+widths or their difference (the step in cm) the surrogate does not resolve: at the nominal
+widths the two differ by $9\%$ in the exponents, and the fitted interpolation (exponent of
+$d_3/d_2$ in their proportion, $0$ for the ratio, $1$ for the difference) gives $-0.2\pm0.3$ at
+$10$--$20$\,GeV and $2.5\pm0.3$ at $20$--$30$\,GeV, where the surrogate is least precise
+(Sec.~\ref{sec:validation}). Between $30$ and $75$\,GeV, where most hits are, the entrances,
+yokes and fields of M2 and M3 mix ($81$--$88\%$ in the first direction) and no single simple
+variable appears; these are the populations of Sec.~\ref{sec:momentum}.
+
 The steps use only the surrogate; the physics enters only to name what they find: a sum over the
 magnets of field times length, weighted by the distance to the detector. That a surrogate trained
 on 58 numbers per design returns the field integral and its lever arm is a check that it learned
@@ -1116,13 +1161,17 @@ predicts, but couplings of each field with its own yoke and aperture are as larg
 \begin{figure}[p]
   \centering
   \includegraphics[width=\linewidth]{discover_variable.pdf}
-  \caption{The variable, from the surrogate's per-muon gradients at the nominal design. (a)
-  Share of $\mathbb{E}_x|\nabla_up|^2$ in the first three directions of the active subspace, per
-  $p_z$ bin. (b) The first direction above $300$\,GeV for the 58 parameters, grouped by magnet;
-  error bars: the ensemble members' spread. (c) The first direction per bin, on the parameters
-  that lead in some bin and the field and length of M1--M4, grouped by magnet with length and field
-  adjacent (positive: increasing it lowers the hits). (d) Each of M1--M4's share
-  of the direction above $300$\,GeV, against $B_mL_m$ and against $B_mL_m(z_s-z_m)$.}
+  \caption{The variables, from the surrogate alone. (a) Share of $\mathbb{E}_x|\nabla_up|^2$ in
+  the first three directions of the per-muon active subspace at the nominal design, per $p_z$
+  bin. (b) The first direction above $300$\,GeV for the 58 parameters, grouped by magnet; error
+  bars: the ensemble members' spread. (c) The 24 pairings of the fields of M1--M4 with their
+  lengths, ranked by the variance of the field shares each explains across the 1024 designs (no
+  fit); star: each field with its own magnet's length. (d) Each of M1--M4's share of the direction
+  above $300$\,GeV, against $B_mL_m$ and against $B_mL_m(z_s-z_m)$. (e) The first direction per
+  bin, on the parameters that lead in some bin and the field and length of M1--M4, grouped by
+  magnet (positive: increasing it lowers the hits). (f) The exponents of the entrance widths of
+  M2 and M3 for the soft muons, on each of the 1024 designs, against the ratio and the difference
+  of the two widths.}
   \label{fig:discover_variable}
 \end{figure}
 
