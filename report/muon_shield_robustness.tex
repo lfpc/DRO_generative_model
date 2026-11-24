@@ -99,6 +99,28 @@ rate of $1.2\times10^{-6}$; the surrogate gives $1201$. Every simulator number u
 the same ones for all designs of a table, with Poisson errors (the transport is stochastic, so
 this holds even on shared muons).
 
+\paragraph{Why a surrogate.}
+The transport is stochastic, and at this hit rate the noise of one simulation is large against
+the effect of a small change of the design. Fig.~\ref{fig:noise_scan} walks one parameter, the
+inner yoke width of M1, from $-20\%$ to $+20\%$ in steps of $1\%$, each design simulated once on
+the same $10^9$ muons. The hits jump between neighbouring designs by up to $101$ (RMS of the
+differences $45$, as expected from two Poisson errors of $\sqrt{Y}\approx34$), while the trend
+underneath moves by $2.3$ hits per $1\%$ at nominal and by about $10\%$ over the whole range;
+around a quadratic trend the points scatter with $\chi^2/\text{ndf}=0.84$. A gradient from finite
+differences of single simulations would need steps of $\sim15\%$ to see this parameter at one
+standard deviation, and 58 parameters, their curvatures and the search for worst cases multiply
+that cost. The surrogate gives smooth derivatives and fast evaluations instead, and every
+conclusion drawn from it is checked with the simulator on $10^9$ muons.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.75\linewidth]{noise_scan.pdf}
+  \caption{The simulator's noise. The inner yoke width of M1 walked from $-20\%$ to $+20\%$ of its
+  nominal value in steps of $1\%$, all other parameters at nominal; each design simulated once on
+  the same $10^9$ muons, with Poisson errors. Red: the nominal design.}
+  \label{fig:noise_scan}
+\end{figure}
+
 \paragraph{Changes from the previous analysis.}
 The previous analysis had 50 parameters around a different nominal design, uniform fields per
 iron block, a fixed M0 and a tapered M4. Here the nominal design is the new one, every design
