@@ -32,8 +32,9 @@ parser.add_argument('--no_loop', dest='loop', action='store_false')
 parser.add_argument('--gif', action='store_true', help='a GIF instead of a WebM')
 parser.add_argument('--p_range', type=float, nargs=2, default=[10, 400], help='momentum colour scale (GeV)')
 parser.add_argument('--cmap', default='viridis')
-parser.add_argument('--n_lost', type=int, default=200, help='drawn muons that do not hit (the first ones)')
+parser.add_argument('--n_lost', type=int, default=200, help='drawn muons taken as they come (mostly lost)')
 parser.add_argument('--n_hit', type=int, default=40, help='drawn muons that hit the nominal design')
+parser.add_argument('--n_gain', type=int, default=40, help='drawn muons that miss the nominal design and hit others of the walk')
 parser.add_argument('--xmax', type=float, default=5, help='half-width of the top view (m)')
 parser.add_argument('--ymax', type=float, default=4, help='half-height of the side view (m)')
 parser.add_argument('--zmax', type=float, default=93, help='end of the views (m)')
@@ -45,8 +46,13 @@ r = np.load(args.npz, allow_pickle=True)
 s, traj, hitf, mom, Y = r['s'], r['traj'], r['hit'], r['p'], r['Y']
 F = len(s)
 nom = int(np.argmin(np.abs(s)))
-cand = r['candidate']
-pick = np.r_[np.where(~cand)[0][:args.n_lost], np.where(cand & hitf[nom])[0][:args.n_hit]]
+kind = r['kind'] if 'kind' in r else r['candidate'].astype(int)     # 0 random, 1 hit nominal, 2 hit elsewhere
+gain = (kind == 2) & ~hitf[nom] & hitf.any(0)            # miss the nominal design, hit somewhere on the walk
+hitf_nom = (kind == 1) & hitf[nom]
+pick = np.r_[np.where(kind == 0)[0][:args.n_lost], np.where(hitf_nom)[0][:args.n_hit],
+             np.where(gain)[0][:args.n_gain]]
+print(f'drawn: {min(args.n_lost, (kind == 0).sum())} random, {min(args.n_hit, hitf_nom.sum())} '
+      f'hitting the nominal design, {min(args.n_gain, gain.sum())} that start hitting along the walk')
 traj, hitf, mom = traj[:, pick], hitf[:, pick], mom[pick]
 planes = r['planes']                                     # (position, dx, dy) of each sensitive plane
 NORM = LogNorm(*args.p_range)
