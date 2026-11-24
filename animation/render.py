@@ -1,6 +1,7 @@
 """Render an animation of animation/trajectories.py's npz. Top left: the shield from above (x-z)
-with the trajectories of context muons (sampled per p_z bin, faint) and of a fixed fraction of the
-hits (opaque, a dot where they reach the plane); each p_z bin has its colour, and a line's width
+with the trajectories of context muons (sampled per p_z bin, faint) and of tracked muons, the same
+in every frame, that hit in some design of the walk (opaque where they hit, with a dot on the
+plane, half-transparent where they miss); each p_z bin has its colour, and a line's width
 grows with log p_z. Bottom left: the surrogate's probability of a hit per (p_z, p_t) cell, and its
 expected hits per cell with the simulation's hits on top (one point each; at ~1e-6 hits per muon,
 1e8 simulated muons are too few for a per-cell probability). Right: the hits on the last
@@ -35,7 +36,7 @@ parser.add_argument('--gif', action='store_true', help='a GIF instead of a WebM'
 parser.add_argument('--cmap', default='viridis', help='sequential colour map of the p_z bins')
 parser.add_argument('--map_cmap', default='Blues_r', help='sequential colour map of the two maps, light = high (its palest 15%% cut)')
 parser.add_argument('--lw', type=float, nargs=2, default=[0.25, 1.2], help='line width at the lowest and highest p_z')
-parser.add_argument('--alpha', type=float, nargs=2, default=[0.25, 0.9], help='opacity of the context and of the hit trajectories')
+parser.add_argument('--alpha', type=float, nargs=3, default=[0.25, 0.9, 0.4], help='opacity of the context muons, of the tracked ones that hit and that miss')
 parser.add_argument('--p_min', type=float, default=1e-8, help='lowest hit probability of its colour scale')
 parser.add_argument('--h_decades', type=float, default=3, help='decades of the expected hits\' colour scale')
 parser.add_argument('--xmax', type=float, default=5, help='half-width of the top view (m)')
@@ -61,6 +62,7 @@ def bin_of(p):
     return np.clip(np.searchsorted(edges, p, side='right') - 1, 0, K - 1)
 
 
+tpz = r['track_pz']
 srt = np.argsort(r['ctx_pz'], kind='stable')             # the hard muons drawn on top
 ctx_traj, ctx_pz, ctx_hit = r['ctx_traj'][:, srt], r['ctx_pz'][srt], r['ctx_hit'][:, srt]
 IRON = '0.55'
@@ -106,7 +108,8 @@ ax_top.set_ylabel('x [m]')
 ax_top.set_xlabel('z [m]', labelpad=1)
 for z, dx, dy in planes:
     ax_top.plot([z, z], [-dx / 2, dx / 2], color='k', lw=2.5, solid_capstyle='butt', zorder=4)
-ax_top.set_title(f'top view: context muons (faint) and {100 * float(r["show"]):g}% of the hits (opaque)',
+ax_top.set_title(f'top view: context muons (faint) and {len(r["track_pz"])} muons that hit in some design '
+                 '(opaque where they hit)',
                  fontsize=10, loc='left', pad=14)
 ax_top.text(planes[-1][0], args.xmax * 0.92, 'sensitive\nplanes', ha='center', va='top', fontsize=8)
 iron = ax_top.add_collection(PolyCollection([], facecolor=IRON, edgecolor='0.35', lw=0.4, zorder=1))
@@ -176,17 +179,17 @@ def draw(f):
     ctx_lines.set_color(BIN_COL[bin_of(ctx_pz)])
     ctx_lines.set_linewidth(width(ctx_pz))
     ctx_lines.set_alpha(args.alpha[0])
-    hp = np.asarray(r['hit_pz'][f])
-    o = np.argsort(hp, kind='stable')
-    hseg = segments(np.asarray(r['hit_traj'][f])[o]) if len(hp) else []
-    hp = hp[o]
+    th = r['track_hit'][f]
+    o = np.lexsort((tpz, th))                            # the hitting ones on top, the hard ones above
+    hseg = segments(r['track_traj'][f][o])
+    col = BIN_COL[bin_of(tpz[o])].copy()
+    col[:, 3] = np.where(th[o], args.alpha[1], args.alpha[2])
     hit_lines.set_segments(hseg)
-    hit_lines.set_color(BIN_COL[bin_of(hp)] if len(hp) else 'k')
-    hit_lines.set_linewidth(width(hp) if len(hp) else 1)
-    hit_lines.set_alpha(args.alpha[1])
-    last = np.array([sg[-1] for sg in hseg]) if hseg else np.empty((0, 2))
-    ends.set_offsets(last)
-    ends.set_facecolor(BIN_COL[bin_of(hp)] if len(hp) else 'k')
+    hit_lines.set_color(col)
+    hit_lines.set_linewidth(width(tpz[o]))
+    hh = np.where(th[o])[0]
+    ends.set_offsets(np.array([hseg[i][-1] for i in hh]).reshape(-1, 2))
+    ends.set_facecolor(BIN_COL[bin_of(tpz[o][hh])] if len(hh) else 'k')
     meshes[0].set_array(sur_p[f].T.ravel())
     meshes[1].set_array(sur_h[f].T.ravel())
     hm = np.asarray(r['hits_xy'][f]).reshape(-1, 4)

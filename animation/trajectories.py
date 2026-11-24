@@ -15,11 +15,11 @@ For each design:
     bin's share of the nominal design's hits (from the surrogate), at least --min_per_bin; the same
     muons in every frame;
   * the hits: --n_hits muons of the physical flux (the same muons in every frame), their hits on
-    the last sensitive plane (x, y, p_z, p_t), Y per 1e9 muons, and the trajectories of a fixed
-    fraction --show of the hits. Which hits are shown is decided per muon once (a uniform number
-    per muon, the same in every frame), so a muon that keeps hitting stays drawn, and the number of
-    drawn hits follows Y. The hits and their trajectories are the same simulation: the hit flags
-    come from a first pass of each block, the shown paths from a second pass with the same seeds;
+    the last sensitive plane (x, y, p_z, p_t), Y per 1e9 muons;
+  * tracked muons: about --n_track of the muons that hit in at least one design of the walk (a
+    fixed draw per muon), whose trajectories are recorded in every frame, hitting or not, so a
+    beam can be seen moving onto the plane. The hits and the paths are the same simulation: a
+    first pass over all frames gives the hit flags, a second the tracked paths, with the same seeds;
   * the probability of a hit per (p_z, p_t) cell (--pz_edges, --pt_edges) and the expected hits
     per cell, from the surrogate (its p averaged over the flux in the cell, on the quadrature grid
     --cache_grid); the simulation's hits per cell too, though at ~1e-6 hits per muon 1e8 muons fill
@@ -51,13 +51,13 @@ parser.add_argument('--dir', default='', help="walk this direction of <run>/robu
 parser.add_argument('--t_max', type=float, default=1.0, help='--dir from -t_max to +t_max (L2 norm of u; 1 = one tolerance unit)')
 parser.add_argument('--run', default=RUN)
 parser.add_argument('--frames', type=int, default=21, help='designs along the walk')
-parser.add_argument('--n_ctx', type=int, default=500, help='context muons whose trajectories are drawn in every frame')
+parser.add_argument('--n_ctx', type=int, default=350, help='context muons whose trajectories are drawn in every frame')
 parser.add_argument('--bins', type=float, nargs='+', default=[10, 20, 30, 45, 75, 125, 200, 300, np.inf],
                     help='p_z bin edges (GeV) of the context muons (and of the colours)')
 parser.add_argument('--min_per_bin', type=int, default=15, help='context muons per bin at least')
 parser.add_argument('--n_hits', type=int, default=int(1e8), help='muons of the flux for the hits, per frame')
 parser.add_argument('--block', type=int, default=int(1e7), help='muons held in memory')
-parser.add_argument('--show', type=float, default=0.2, help='fraction of the hits whose trajectories are drawn')
+parser.add_argument('--n_track', type=int, default=150, help='about this many muons that hit somewhere along the walk, drawn in every frame')
 parser.add_argument('--pz_edges', type=float, nargs=3, default=[15, 370, 40], help='map: log p_z from, to, cells')
 parser.add_argument('--pt_edges', type=float, nargs=3, default=[0, 5, 30], help='map: p_t from, to, cells')
 parser.add_argument('--cache_grid', default='401x32', help="the surrogate's map: muon quadrature grid (muons.py)")
@@ -227,7 +227,7 @@ def clone(st, device=dev):
 
 
 def block(lo):
-    """The muons lo:lo + block of the hits' sample (the same in every frame) and their draw for --show."""
+    """The muons lo:lo + block of the hits' sample (the same in every frame) and their draw for --n_track."""
     torch.manual_seed(args.seed + 1 + lo)
     x = shield.sample(min(args.block, args.n_hits - lo))
     r = torch.rand(len(x), generator=torch.Generator().manual_seed(args.seed + 2 + lo)).numpy()
@@ -262,49 +262,72 @@ for lo in range(0, args.n_hits, args.block):
 sim_n = sim_n[:-1].reshape(NZ, NT)
 torch.cuda.empty_cache()
 
-CT, CH, HT, HP, HX, SH, BLOCKS, NH = [], [], [], [], [], [], [], []
+# --- pass 1, every frame: the context paths and which muons hit
+CT, CH, HX, SH, BLOCKS, NH, HIT = [], [], [], [], [], [], []
 for f in range(args.frames):
     env, blocks = environment(phis[f])
     st, t = clone(ctx_st), ctx_out.clone()
     advance(env, st, SEED, K0, len(zs), keep=ALL, out=t)
     CT.append(t.cpu().numpy())
     CH.append(st['inside'].cpu().numpy())
-    ht, hp, hx, sh = [], [], [], np.zeros(NZ * NT + 1)
+    hx, sh, hits = [], np.zeros(NZ * NT + 1), []
     for b, (x, r, st0) in enumerate(BLK):
-        sd = args.seed * 1000 + 99 + b * args.block
         st = clone(st0)
-        advance(env, st, sd, K0, len(zs))                           # pass 1: which hit
+        advance(env, st, args.seed * 1000 + 99 + b * args.block, K0, len(zs))
         hit = st['inside'].cpu().numpy()
         xy = st['xy'][st['inside']].cpu().numpy()
         del st
         mom = x[hit, :3]
         hx.append(np.c_[xy, mom[:, 2].numpy(), mom[:, :2].norm(dim=1).numpy()])
         sh += np.bincount(cell(mom[:, 2], mom[:, :2].norm(dim=1)).numpy(), minlength=NZ * NT + 1)
-        sel = np.where(hit & (r < args.show))[0]
-        if len(sel):                                                # pass 2: the paths of the shown ones
-            keep = torch.as_tensor(sel, device=dev)
-            move = torch.zeros(len(x), dtype=torch.bool, device=dev)
-            move[keep] = True
-            out = torch.full((len(sel), len(zs) + 1, 3), float('nan'), device=dev)
-            out[:, 0] = x[sel, 3:6].to(dev)
-            st = start(x)
-            advance(env0, st, sd, 0, K0, move, keep, out)
-            advance(env, st, sd, K0, len(zs), move, keep, out)
-            hit2 = st['inside'][keep].cpu().numpy()
-            if not hit2.all():
-                print(f'  warning: {(~hit2).sum()} shown hits do not repeat (transport not reproducible)')
-            ht.append(out.cpu().numpy())
-            hp.append(x[sel, 2].numpy())
-            del st, out
+        hits.append(np.where(hit)[0])
     hx = np.concatenate(hx)
-    HT.append(np.concatenate(ht) if ht else np.zeros((0, len(zs) + 1, 3), np.float32))
-    HP.append(np.concatenate(hp) if hp else np.zeros(0, np.float32))
     HX.append(hx)
+    HIT.append(hits)
     SH.append(sh[:-1].reshape(NZ, NT))
     NH.append(len(hx) * 1e9 / args.n_hits)
     BLOCKS.append(blocks)
-    print(f'frame {f + 1}/{args.frames} ({s[f]:+.2f}): Y = {NH[-1]:.0f} per 1e9 ({len(hx)} hits, {len(HP[-1])} drawn); '
+    print(f'frame {f + 1}/{args.frames} ({s[f]:+.2f}): Y = {NH[-1]:.0f} per 1e9 ({len(hx)} hits); '
           f'surrogate {sur_hits[f].sum():.0f} in the map', flush=True)
+    del env
+    torch.cuda.empty_cache()
+
+# --- the tracked muons: a fixed draw (r) among those that hit in some frame
+UNION = [np.unique(np.concatenate([HIT[f][b] for f in range(args.frames)])) for b in range(len(BLK))]
+n_union = sum(len(u) for u in UNION)
+q = min(1.0, args.n_track / max(n_union, 1))
+TRACK = [u[BLK[b][1][u] < q] for b, u in enumerate(UNION)]
+print(f'{n_union} muons hit in some frame; {sum(len(t) for t in TRACK)} tracked', flush=True)
+track_pz = np.concatenate([BLK[b][0][t, 2].numpy() for b, t in enumerate(TRACK)])
+
+# --- pass 2, every frame: the tracked muons' paths (the same seeds, so the same hits)
+HT, TH = [], []
+for f in range(args.frames):
+    env, _ = environment(phis[f])
+    ht, th = [], []
+    for b, (x, r, st0) in enumerate(BLK):
+        sel = TRACK[b]
+        if not len(sel):
+            continue
+        sd = args.seed * 1000 + 99 + b * args.block
+        keep = torch.as_tensor(sel, device=dev)
+        move = torch.zeros(len(x), dtype=torch.bool, device=dev)
+        move[keep] = True
+        out = torch.full((len(sel), len(zs) + 1, 3), float('nan'), device=dev)
+        out[:, 0] = x[sel, 3:6].to(dev)
+        st = start(x)
+        advance(env0, st, sd, 0, K0, move, keep, out)
+        advance(env, st, sd, K0, len(zs), move, keep, out)
+        h2 = st['inside'][keep].cpu().numpy()
+        h1 = np.isin(sel, HIT[f][b])
+        if (h1 != h2).any():
+            print(f'  warning: frame {f + 1}: {(h1 != h2).sum()} tracked muons hit differently in pass 2')
+        ht.append(out.cpu().numpy())
+        th.append(h2)
+        del st, out
+    HT.append(np.concatenate(ht) if ht else np.zeros((0, len(zs) + 1, 3), np.float32))
+    TH.append(np.concatenate(th) if th else np.zeros(0, bool))
+    print(f'tracked, frame {f + 1}/{args.frames}: {TH[-1].sum()} of {len(TH[-1])} hit', flush=True)
     del env
     torch.cuda.empty_cache()
 
@@ -321,7 +344,7 @@ def obj(a):
 
 np.savez_compressed(out, s=s, xlabel=xlabel, U=U, zs=zs,
                     ctx_traj=np.array(CT, dtype=np.float32), ctx_pz=ctx[:, 2].numpy(), ctx_hit=np.array(CH),
-                    hit_traj=obj(HT), hit_pz=obj(HP), show=args.show, edges=EDGES, share=share,
+                    track_traj=np.array(HT, dtype=np.float32), track_pz=track_pz, track_hit=np.array(TH), n_union=n_union, edges=EDGES, share=share,
                     blocks=np.array(BLOCKS, dtype=np.float32), mag_z=MAG_Z,
                     hits_xy=obj(HX), Y=np.array(NH), n_hits=args.n_hits,
                     planes=np.array([[p['position'], p['dx'], p['dy']] for p in (P1, P2)]),
