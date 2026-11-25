@@ -11,6 +11,9 @@ many players.
 
     python -m animation.render outputs/results/animations/param_M7_dXOut.npz
     python -m animation.render <npz> --gif --fps 3
+
+Also writes <name>.html: every design as a frame, chosen by hand with a slider (or the arrow
+keys), self-contained (the frames inline as WebP), to open in any browser.
 """
 import os
 
@@ -33,6 +36,9 @@ parser.add_argument('--fps', type=float, default=4)
 parser.add_argument('--loop', action='store_true', default=True, help='play forward then back')
 parser.add_argument('--no_loop', dest='loop', action='store_false')
 parser.add_argument('--gif', action='store_true', help='a GIF instead of a WebM')
+parser.add_argument('--no_html', dest='html', action='store_false',
+                    help='no HTML page with a slider over the designs (one self-contained file, WebP frames)')
+parser.add_argument('--html_quality', type=int, default=88, help='WebP quality of the HTML frames')
 parser.add_argument('--cmap', default='viridis', help='sequential colour map of the p_z bins')
 parser.add_argument('--map_cmap', default='Blues_r', help='sequential colour map of the two maps, light = high (its palest 15%% cut)')
 parser.add_argument('--lw', type=float, nargs=2, default=[0.25, 1.2], help='line width at the lowest and highest p_z')
@@ -219,3 +225,78 @@ with writer.saving(fig, out, dpi=args.dpi):
 draw(nom)
 fig.savefig(out.rsplit('.', 1)[0] + '_nominal.png', dpi=args.dpi)
 print(f'saved {out} ({len(order)} frames) and the nominal frame as PNG')
+
+
+def html_page(path):
+    """One page: the frames inline (WebP), a slider over the designs, arrow keys, play/pause."""
+    import base64
+    import io
+    import json
+
+    from PIL import Image
+    frames = []
+    for f in range(F):
+        draw(f)
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=args.dpi)
+        im, out = Image.open(io.BytesIO(buf.getvalue())).convert('RGB'), io.BytesIO()
+        im.save(out, format='webp', quality=args.html_quality, method=6)
+        frames.append('data:image/webp;base64,' + base64.b64encode(out.getvalue()).decode())
+    labels = [f'{v:+.2f}' if 'dir' in os.path.basename(path) else f'{v:+.1f}%' for v in s]
+    name = os.path.splitext(os.path.basename(path))[0]
+    page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{name}</title>
+<style>
+  body {{ margin: 0; font: 15px system-ui, sans-serif; background: #fff; color: #222; }}
+  .bar {{ position: sticky; top: 0; background: #fff; display: flex; align-items: center; gap: 14px;
+          padding: 10px 16px; border-bottom: 1px solid #ddd; flex-wrap: wrap; }}
+  input[type=range] {{ flex: 1; min-width: 200px; }}
+  button {{ font: inherit; padding: 4px 12px; }}
+  .val {{ font-variant-numeric: tabular-nums; min-width: 16ch; }}
+  img {{ display: block; max-width: 100%; height: auto; margin: 0 auto; }}
+  .hint {{ color: #777; font-size: 13px; }}
+</style></head><body>
+<div class="bar">
+  <b>{r['xlabel']}</b>
+  <button id="prev" title="previous (left arrow)">&#9664;</button>
+  <input id="s" type="range" min="0" max="{F - 1}" step="1" value="{nom}">
+  <button id="next" title="next (right arrow)">&#9654;</button>
+  <span class="val" id="v"></span>
+  <button id="play">play</button>
+  <span class="hint">arrow keys step, Home = nominal</span>
+</div>
+<img id="im" alt="frame">
+<script>
+const F = {json.dumps(frames)};
+const L = {json.dumps(labels)};
+const Y = {json.dumps([round(float(y)) for y in Y])};
+const s = document.getElementById('s'), im = document.getElementById('im'), v = document.getElementById('v');
+function show(i) {{ i = Math.max(0, Math.min(F.length - 1, i)); s.value = i; im.src = F[i];
+  v.textContent = L[i] + '   Y = ' + Y[i] + ' per 1e9'; }}
+s.oninput = () => show(+s.value);
+document.getElementById('prev').onclick = () => show(+s.value - 1);
+document.getElementById('next').onclick = () => show(+s.value + 1);
+let timer = null, dir = 1;
+document.getElementById('play').onclick = (e) => {{
+  if (timer) {{ clearInterval(timer); timer = null; e.target.textContent = 'play'; return; }}
+  e.target.textContent = 'pause';
+  timer = setInterval(() => {{ let i = +s.value + dir; if (i < 0 || i >= F.length) {{ dir = -dir; i = +s.value + dir; }} show(i); }}, {int(1000 / args.fps)});
+}};
+document.addEventListener('keydown', (e) => {{
+  if (e.key === 'ArrowLeft') show(+s.value - 1);
+  else if (e.key === 'ArrowRight') show(+s.value + 1);
+  else if (e.key === 'Home') show({nom});
+  else return;
+  e.preventDefault();
+}});
+show({nom});
+</script></body></html>
+"""
+    with open(path, 'w') as fh:
+        fh.write(page)
+    print(f'saved {path} ({F} designs, {os.path.getsize(path) / 1e6:.1f} MB)')
+
+
+if args.html:
+    html_page(out.rsplit('.', 1)[0] + '.html')

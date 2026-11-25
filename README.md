@@ -39,7 +39,7 @@ Animations (one GPU for the trajectories, then any machine for the video):
 
 ```bash
 python -m animation.trajectories --param M7:dXOut --range 20     # or --dir act1 (robustness.py's directions)
-python -m animation.render outputs/results/animations/param_M7_dXOut.npz   # -> outputs/figures/animations/*.webm (VP9)
+python -m animation.render outputs/results/animations/param_M7_dXOut.npz   # -> outputs/figures/animations/*.webm (VP9) and *.html (a slider over the designs)
 ```
 
 `run_all.sh` (resumable: every step skips what is done):
