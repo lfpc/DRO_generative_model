@@ -31,7 +31,7 @@ from lcso.data import to_x
 from lcso.models import derivatives
 from lcso.surrogate import load_surrogate
 from paths import VALIDATION, figures, save_figure
-from shield import MuonShield
+from shield import MuonShield, pretty
 from validation import references
 
 REFS = {'T1': 'validation: nominal muons', 'T1.5': 'hot check sample (T = 1.5, as in training)'}
@@ -271,7 +271,7 @@ def plot(refs, preds, cals, labels, keep, out, report=False):
     ax.errorbar(np.arange(D), sim[order], yerr=err[order], fmt='s', color='0.25', ms=4, label='simulator (1 s.d.)')
     ax.plot(np.arange(D), hat[order], 'o', mfc='none', mec=color, ms=6, mew=1.5, label='surrogate')
     ax.axhline(0, color='0.7', lw=0.8)
-    ax.set_xticks(range(D), [labels[i] for i in order], rotation=90, fontsize=6)
+    ax.set_xticks(range(D), [pretty(labels[i]) for i in order], rotation=90, fontsize=6)
     ax.set_ylabel('slope $b$ (per 10%)  [hits]')
     ax.legend(fontsize=7)
     save(fig, 'oat')

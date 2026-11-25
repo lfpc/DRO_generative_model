@@ -43,7 +43,7 @@ from scipy.optimize import least_squares
 import cli
 from analysis.core import Report
 from paths import RUN, figures, save_figure
-from shield import COLUMNS, NOMINAL, MuonShield
+from shield import COLUMNS, NOMINAL, MuonShield, pretty
 
 parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.set_defaults(fixed='M0:')
@@ -435,7 +435,7 @@ def p_regimes(a, big):
     M = vec.mean(0)[:, rows].T                              # (rows, bins)
     v = np.abs(M).max()
     im = a.imshow(M, cmap='RdBu_r', vmin=-v, vmax=v, aspect='auto')
-    a.set_yticks(range(len(rows)), [labels[i] for i in rows], fontsize='x-small' if not big else 'small')
+    a.set_yticks(range(len(rows)), [pretty(labels[i]) for i in rows], fontsize='x-small' if not big else 'small')
     a.set_xticks(range(nb), bin_labels, rotation=45)
     a.set_xlabel('$p_z$ bin [GeV]')
     for j in range(nb):
@@ -571,15 +571,15 @@ def p_step(a, big):
     gg = np.concatenate([X[:, :, b].mean(0)[:, [i2, i3]] for b in soft])
     lim = np.abs(gg).max() * 1.05
     t_ = np.linspace(-lim, lim, 2)
-    a.plot(t_, -t_, 'k-', lw=1.2, label=f'ratio {labels[i3][3:]}$_3$/{labels[i2][3:]}$_2$')
+    a.plot(t_, -t_, 'k-', lw=1.2, label=r'ratio $X_\mathrm{core}^{(3)}/X_\mathrm{core}^{(2)}$')
     a.plot(t_, -phi0[i3] / phi0[i2] * t_, 'k--', lw=1.2, label='difference (nominal widths)')
     a.set_xlim(min(gg[:, 0].min(), 0) - 2, gg[:, 0].max() + 2)       # the quadrant the designs are in
     a.set_ylim(gg[:, 1].min() - 2, max(gg[:, 1].max(), 0) + 2)
     a.set_aspect('equal', adjustable='datalim')
     a.axhline(0, color=GREY, lw=0.5)
     a.axvline(0, color=GREY, lw=0.5)
-    a.set_xlabel(f'$\\partial\\log Y/\\partial\\log$ {labels[i2]}')
-    a.set_ylabel(f'$\\partial\\log Y/\\partial\\log$ {labels[i3]}')
+    a.set_xlabel(f'$\\partial\\log Y/\\partial\\log$ {pretty(labels[i2])}')
+    a.set_ylabel(f'$\\partial\\log Y/\\partial\\log$ {pretty(labels[i3])}')
     a.legend(frameon=False, loc='lower left', markerscale=3, fontsize='small')
 
 

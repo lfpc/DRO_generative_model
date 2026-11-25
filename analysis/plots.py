@@ -21,6 +21,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from analysis.core import BAD, GREY, OK
+from shield import pretty, pretty_text
 import cli
 from paths import RUN, figures, save_figure
 
@@ -72,7 +73,7 @@ def robustness_figures(r):
     y = np.arange(D)
     fig, ax = plt.subplots(1, 2, figsize=(13, 9), constrained_layout=True, sharey=True)
     ax[0].barh(y, lin[o], color=[(BAD if v > 0 else OK) if res else GREY for v, res in zip(lin[o], resolved[o])])
-    ax[0].set_yticks(y, [labels[k] for k in o], fontsize=7)
+    ax[0].set_yticks(y, [pretty(labels[k]) for k in o], fontsize=7)
     ax[0].axvline(0, color='k', lw=0.8)
     ax[0].set(xlabel='$(\\partial Y/\\partial u_i)\\,/\\,Y_0$   (per full tolerance)', title='First-order sensitivity')
     ax[1].hlines(y, om[o], op[o], color=GREY, lw=1)
@@ -119,7 +120,7 @@ def robustness_figures(r):
     fig, ax = plt.subplots(figsize=(max(9, D * 0.28), 1.4 + 0.55 * len(NAMES)), constrained_layout=True)
     lim = np.abs(M).max()
     im = ax.imshow(M, cmap='RdBu_r', vmin=-lim, vmax=lim, aspect='auto')
-    ax.set_xticks(np.arange(D), labels, rotation=90, fontsize=7)
+    ax.set_xticks(np.arange(D), [pretty(l) for l in labels], rotation=90, fontsize=7)
     ax.set_yticks(np.arange(len(NAMES)), NAMES)
     fig.colorbar(im, ax=ax, label='component (unit $\\ell_2$)')
     ax.set_title('Directions in parameter space')
@@ -129,11 +130,11 @@ def robustness_figures(r):
     # kinds of parameter, grouped; columns: magnets, those whose exit differs from their entrance
     # (an Out parameter is free) split into an entrance and an exit column. A whole-magnet parameter
     # (a length, a height, the field) spans both.
-    GROUPS = [('core', [('dX', 'width  dX'), ('dY', 'height  dY')]),
-              ('yoke', [('dXYoke', 'width  dXYoke'), ('dY_yoke', 'height  dY_yoke')]),
-              ('gaps, length', [('gap', 'core-yoke gap'), ('Xmgap', 'middle gap'), ('Z_gap', 'gap  Z_gap'),
-                                ('Z_len', 'length  Z_len')]),
-              ('field', [('NI', 'B_goal  (NI)')])]
+    GROUPS = [('core', [('dX', r'$X_\mathrm{core}$'), ('dY', r'$Y_\mathrm{core}$')]),
+              ('yoke', [('dXYoke', r'$X_\mathrm{yoke}$'), ('dY_yoke', r'$Y_\mathrm{yoke}$')]),
+              ('gaps, length', [('gap', r'$X_\mathrm{gap}$'), ('Xmgap', r'$X_\mathrm{mgap}$'),
+                                ('Z_gap', r'$Z_\mathrm{gap}$'), ('Z_len', r'$Z_\mathrm{len}$')]),
+              ('field', [('NI', r'$B_\mathrm{goal}$')])]
     KIND = {'dXIn': ('dX', 'In'), 'dXOut': ('dX', 'Out'), 'dYIn': ('dY', None), 'gapIn': ('gap', 'In'),
             'gapOut': ('gap', 'Out'), 'dXYokeIn': ('dXYoke', 'In'), 'dXYokeOut': ('dXYoke', 'Out'),
             'dY_yokeIn': ('dY_yoke', None), 'XmgapIn': ('Xmgap', None), 'Z_gap': ('Z_gap', None),
@@ -297,7 +298,7 @@ def robustness_figures(r):
                             label='simulator' if i == 0 else None)
         ax.axhline(1, color='k', lw=0.8, ls=':')
         ax.axvline(0, color=GREY, lw=0.8, ls='--')
-        ax.set_title(labels[k], fontsize=10)
+        ax.set_title(pretty(labels[k]), fontsize=10)
         if j % axes.shape[1] == 0:
             ax.set_ylabel('$Y/Y_0$')
         if j >= axes.shape[1]:
@@ -351,7 +352,7 @@ def worst_case_figures(w):
         d = idx[nm]
         if nm.startswith('single'):
             k = np.flatnonzero(U[d])[0]
-            return f'{labels[k]} {10 * U[d][k]:+.0f}% ({phis[d][k] - phis[0][k]:+.3g} {units[k]})'
+            return f'{pretty(labels[k])} {10 * U[d][k]:+.0f}% ({phis[d][k] - phis[0][k]:+.3g} {units[k]})'
         if nm.startswith('worst-top'):
             return f'worst, top {nm[9:]} only'
         if nm.startswith('worst@-'):
@@ -434,8 +435,8 @@ def pz_profile_figure(z):
     def nice(j, n):
         if n.startswith('single'):
             k = int(np.argmax(np.abs(U[j])))
-            return f'{labels[k]} {10 * U[j][k]:+.0f}% alone (most sensitive parameter)' if n == 'single1' else \
-                f'{labels[k]} {10 * U[j][k]:+.0f}% alone'
+            return f'{pretty(labels[k])} {10 * U[j][k]:+.0f}% alone (most sensitive parameter)' if n == 'single1' else \
+                f'{pretty(labels[k])} {10 * U[j][k]:+.0f}% alone'
         return NICE.get(n, n)
 
     fig, ax = plt.subplots(figsize=(10, 5.6), constrained_layout=True)
@@ -490,7 +491,7 @@ def bin_figures(b):
         fig.colorbar(a.imshow(M, cmap='RdBu_r', vmin=-lim, vmax=lim, aspect='auto'), ax=a)
         a.set_xticks(xb, SHORT, rotation=45, ha='right', fontsize=8)
         a.set_title(title, fontsize=10)
-    ax[0].set_yticks(np.arange(D), [labels[k] for k in o], fontsize=7)
+    ax[0].set_yticks(np.arange(D), [pretty(labels[k]) for k in o], fontsize=7)
     fig.suptitle(f'Sensitivity per parameter and muon region ({var})')
     save(fig, f'{var}_bins_sensitivity.png')
 
@@ -585,7 +586,7 @@ def tolerance_figures(t, ev):
         lab = f'worst $\\leq$ {nm[5:]} $Y_0$ (surr. {pred[i]:.2f}' + (f', sim. {sim[i] / S0:.2f})' if SIM[i] else ')')
         ax.barh(y + 0.4 - (j + 0.5) * h, 10 * path_e[st][tight], h, color=cmap(j / max(1, len(alloc) - 1)), label=lab)
     ax.axvline(10, color='k', lw=0.8, ls=':')
-    ax.set_yticks(y, [labels[k] for k in tight], fontsize=8)
+    ax.set_yticks(y, [pretty(labels[k]) for k in tight], fontsize=8)
     ax.set(xlabel='allowed tolerance ($\\pm$%); every other parameter $\\pm$10%', xlim=(0, 10.5),
            title='Tolerance allocation (greedy, surrogate)')
     ax.legend(fontsize=8, loc='lower right')
@@ -637,7 +638,7 @@ def muon_kind_figures(k):
     top = top[np.argsort([labels[i] for i in top])]
     im = ax[1].imshow(V[top], cmap='RdBu_r', vmin=-0.8, vmax=0.8, aspect='auto')
     ax[1].set_xticks(range(len(B) + 1), [PZN[b] for b in B] + ['"worst"'], rotation=45, ha='right')
-    ax[1].set_yticks(range(len(top)), [labels[i] for i in top], fontsize=8.5)
+    ax[1].set_yticks(range(len(top)), [pretty(labels[i]) for i in top], fontsize=8.5)
     ax[1].axvline(len(B) - 0.5, color='k', lw=1.5)
     ax[1].set(xlabel='worst design of the $p_z$ bin [GeV]', title='What the worst designs are made of (unit vectors)')
     cb = fig.colorbar(im, ax=ax[1], shrink=0.8)

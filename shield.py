@@ -28,6 +28,35 @@ COLUMNS = ['Z_gap', 'Z_len', 'dXIn', 'dXOut', 'dYIn', 'dYOut', 'gapIn', 'gapOut'
            'dXYokeIn', 'dXYokeOut', 'dY_yokeIn', 'dY_yokeOut', 'XmgapIn', 'XmgapOut', 'NI']
 UNITS = {c: 'cm' for c in COLUMNS} | {'NI': 'T'}
 
+# the parameters' names in figures and slides (the code keeps COLUMNS): (symbol, entrance/exit or
+# None); M6 and M7 have separate entrance and exit widths, so theirs carry a superscript in/out
+# (the heights have one value per magnet)
+SYMBOL = {'Z_gap': ('Z', 'gap', None), 'Z_len': ('Z', 'len', None), 'dXIn': ('X', 'core', 'in'),
+          'dXOut': ('X', 'core', 'out'), 'dYIn': ('Y', 'core', None), 'dYOut': ('Y', 'core', None),
+          'gapIn': ('X', 'gap', 'in'), 'gapOut': ('X', 'gap', 'out'), 'dXYokeIn': ('X', 'yoke', 'in'),
+          'dXYokeOut': ('X', 'yoke', 'out'), 'dY_yokeIn': ('Y', 'yoke', None), 'dY_yokeOut': ('Y', 'yoke', None),
+          'XmgapIn': ('X', 'mgap', 'in'), 'XmgapOut': ('X', 'mgap', 'out'), 'NI': ('B', 'goal', None)}
+TAPERED = (6, 7)                                         # magnets whose entrance and exit differ
+
+
+def pretty(label, mode='tex'):
+    """'M7:dXOut' -> 'M7 $X_\\mathrm{core}^\\mathrm{out}$' (mode 'tex', matplotlib mathtext and LaTeX),
+    'M7 X<sub>core</sub><sup>out</sup>' ('html'); anything else is returned as it is."""
+    mag, _, col = str(label).partition(':')
+    if col not in SYMBOL or not mag.startswith('M'):
+        return str(label)
+    letter, sub, end = SYMBOL[col]
+    sup = end if end and int(mag[1:]) in TAPERED else None
+    if mode == 'html':
+        return f'{mag} {letter}<sub>{sub}</sub>' + (f'<sup>{sup}</sup>' if sup else '')
+    return f'{mag} ${letter}_\\mathrm{{{sub}}}' + (f'^\\mathrm{{{sup}}}' if sup else '') + '$'
+
+
+def pretty_text(text, mode='tex'):
+    """Every 'M<k>:<column>' in a string, as pretty()."""
+    import re
+    return re.sub(r'M\d:[A-Za-z_]+', lambda m: pretty(m.group(0), mode), str(text))
+
 # the nominal design (of 2026-10-28; the earlier analyses used 'try_opt'): one row per magnet
 NOMINAL = torch.tensor([
     [0.0, 115.0, 40.0, 40.0, 119.0, 119.0, 61.5, 61.5, 61.5, 61.5, 50.0, 50.0, 0.0, 0.0, 1.9875],

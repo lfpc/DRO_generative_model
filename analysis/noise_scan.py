@@ -20,6 +20,7 @@ import numpy as np
 
 import cli
 from paths import RUN, figures, save_figure
+from shield import pretty_text
 
 parser = cli.add_common(cli.parser(__doc__))
 parser.add_argument('--param', default='M1:dXYokeIn', help='the parameter walked (label M<i>:<column>)')
@@ -58,7 +59,7 @@ fig, ax = plt.subplots(figsize=(6.4, 3.6))
 ax.axvline(0, color='red', ls='--', lw=1.2, label='nominal')
 ax.errorbar(pct, y, yerr=np.sqrt(y), fmt='o', ms=4, color='k', ecolor='0.6', elinewidth=1, capsize=0,
             label=r'simulated, $\pm\sqrt{Y}$')
-ax.set_xlabel(f'change of {r["param"]} [%]')
+ax.set_xlabel(f'change of {pretty_text(r["param"])} [%]')
 ax.set_ylabel(fr'$Y$ per ${r["n_muons"] / 1e9:g}\times10^9$ muons')
 ax.grid(alpha=0.3)
 ax.legend(frameon=False, loc='best')

@@ -29,6 +29,7 @@ from scipy.spatial import ConvexHull
 
 import cli
 from paths import FIGURES
+from shield import pretty_text
 
 parser = cli.parser(__doc__)
 parser.add_argument('npz', help='animation/trajectories.py output')
@@ -165,7 +166,7 @@ ax_y.axvline(0, color='red', ls='--', lw=1.2, label='nominal')
 ax_y.plot(s, Y, color='0.75', lw=1, zorder=1)
 ax_y.scatter(s, Y, s=10, color='0.6', zorder=2)
 cur, = ax_y.plot([], [], 'o', color='k', ms=8, zorder=3)
-ax_y.set_xlabel(str(r['xlabel']))
+ax_y.set_xlabel(pretty_text(r['xlabel']))
 ax_y.set_ylabel(r'$Y$ per $10^9$ muons')
 ax_y.yaxis.set_label_position('right')
 ax_y.yaxis.tick_right()
@@ -208,7 +209,7 @@ def draw(f):
     pts.set_facecolor(BIN_COL[bin_of(xy[:, 2])])
     ax_plane.set_title(f'hits at z = {z_last:g} m: {len(xy)} of {r["n_hits"]:.0e} muons', fontsize=10)
     cur.set_data([s[f]], [Y[f]])
-    title.set_text(f'{r["xlabel"]}: {s[f]:+.1f}     Y = {Y[f]:.0f} per $10^9$ muons')
+    title.set_text(f'{pretty_text(r["xlabel"])}: {s[f]:+.1f}     Y = {Y[f]:.0f} per $10^9$ muons')
 
 
 order = list(range(F)) + (list(range(F - 2, 0, -1)) if args.loop else [])
@@ -258,7 +259,7 @@ def html_page(path):
   .hint {{ color: #777; font-size: 13px; }}
 </style></head><body>
 <div class="bar">
-  <b>{r['xlabel']}</b>
+  <b>{pretty_text(r['xlabel'], 'html')}</b>
   <button id="prev" title="previous (left arrow)">&#9664;</button>
   <input id="s" type="range" min="0" max="{F - 1}" step="1" value="{nom}">
   <button id="next" title="next (right arrow)">&#9654;</button>

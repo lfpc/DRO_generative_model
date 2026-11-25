@@ -33,7 +33,7 @@ import torch
 import cli
 from analysis.core import Report
 from paths import RUN, figures, save_figure
-from shield import COLUMNS, FREE, NOMINAL, MuonShield
+from shield import COLUMNS, FREE, NOMINAL, MuonShield, pretty_text
 
 parser = cli.add_common(cli.parser(__doc__), fixed=True)
 parser.set_defaults(fixed='M0:')
@@ -197,7 +197,7 @@ if phys:
     for (i, c), e in np.ndenumerate(E):
         if np.isfinite(e):
             ax.text(c, i, f'{e:+.1f}', ha='center', va='center', fontsize=7)
-    ax.set_yticks(range(len(phys)), phys, fontsize=8)
+    ax.set_yticks(range(len(phys)), [pretty_text(p_) for p_ in phys], fontsize=8)
     fig.colorbar(im, ax=ax, label=r'$\partial\log Y/\partial\log\phi$', fraction=0.03)
     x = np.arange(len(cols))
     bx.bar(x - 0.2, [fits[n]['frac'][-1] for n in cols], 0.4, color='0.4', label=r'$|\nabla\log Y|^2$')
