@@ -40,11 +40,12 @@ def figures(results):
 
 def save_figure(fig, folder, name, report_name=None, dpi=150):
     """fig as <folder>/<name>.png, to look at; with report_name, also as report/figs/<report_name>.pdf
-    when the report includes that file (vector; layers drawn with rasterized=True stay pixels)."""
+    when the report includes that file (vector; layers drawn with rasterized=True stay pixels).
+    Both with a transparent background, for slides of any colour."""
     os.makedirs(folder, exist_ok=True)
-    fig.savefig(os.path.join(folder, f'{name}.png'), dpi=dpi)
+    fig.savefig(os.path.join(folder, f'{name}.png'), dpi=dpi, transparent=True)
     if report_name and os.path.exists(REPORT) and f'{{{report_name}.pdf}}' in open(REPORT).read():
-        fig.savefig(os.path.join(REPORT_FIGS, f'{report_name}.pdf'), dpi=2 * dpi)
+        fig.savefig(os.path.join(REPORT_FIGS, f'{report_name}.pdf'), dpi=2 * dpi, transparent=True)
         print(f'  -> {REPORT_FIGS}/{report_name}.pdf')
 
 
