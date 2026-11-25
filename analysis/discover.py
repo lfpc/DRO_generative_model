@@ -10,17 +10,21 @@ next builds on it. Two objects, both from the surrogate alone:
 
   1. dimension: if C_b's first eigenvalue carries almost everything, every muon of the bin sees
      the design through one and the same combination of the parameters;
-  2. the combination: its parameters (the first eigenvector), how they pair (equal loadings: a
-     product), and how its weights split between the pairs (against B_m L_m and against
-     B_m L_m (z_s - z_m), the lever arm to the sensitive plane);
-  3. the regimes: the first eigenvector per bin;
-  4. sum or product: at the nominal design a sum and a product of the pairs have the same
-     gradient; across the designs a pair's share of the exponent follows its own B_m L_m for a
-     sum and is fixed for a product. Fitted with the CES aggregate (sum c_m P_m^rho)^(1/rho);
-  5. collapse: log Y_b against the discovered variable on the random designs;
-  6. the simulated check of analysis.relations --sim (<run>/relations_sim.npz), if present.
+  2. its ingredients: the first eigenvector's support, and per magnet the two largest loadings;
+  3. product and pairing: Y depends on B and L only through B L exactly when dlogY/dlogB =
+     dlogY/dlogL on every design; its residual for every field with every length, and the
+     assignment of lengths to fields with the smallest total;
+  4. sum or product of the pairs P_m: at the nominal design they have the same gradient; across the
+     designs a pair's share of the exponent follows its own P_m for a sum and is fixed for a
+     product (CES aggregate (sum c_m P_m^rho)^(1/rho) fitted);
+  4b. the weights: for a sum, dY/dP_m : dY/dP_n = c_m : c_n on every design, so c_m is measured;
+     then a line in the magnets' positions, and where it reaches zero (the lever arm);
+  5. collapse: log Y_b against Xi = sum c_m P_m on the random designs;
+  6. second order: the nominal log-Hessian on the fields and lengths against f(log Xi);
+  7. the simulated check of analysis.relations --sim (<run>/relations_sim.npz), if present;
+  and the regimes (the first direction per bin) and the soft muons' entrance step.
 
-Figures: discover_variable (1-3) and discover_action (4-6) for the report, and one PNG per step,
+Figures: discover_variable (steps 1-5) and discover_action (6, 7, the regimes, the soft muons) for the report, and one PNG per step,
 with larger type and a one-line conclusion as title, in <figures>/discover_slides/.
 
     python -m analysis.discover                      # surrogate on the designs and the muons, then plots
@@ -173,17 +177,6 @@ for row in NOMINAL.numpy():
     z += 2 * row[1] / 100
 zm = np.array(zc)[mags]                                     # centres of the paired magnets (m)
 zs = [p['position'] for p in MuonShield.PLANES]
-share = (vec[:, :, iB] + vec[:, :, iL]) / (vec[:, :, iB] + vec[:, :, iL]).sum(-1, keepdims=True)   # (K, bins, M)
-w_bl = P[0] / P[0].sum()
-w_lev = {s: P[0] * (s - zm) / (P[0] * (s - zm)).sum() for s in zs}
-say(f'  the pairs\' shares of the direction ({args.focus} GeV) against B_m L_m and B_m L_m (z_s - z_m):')
-say('    eigenvector   ' + ' '.join(f'{x:.3f}' for x in share[:, fb].mean(0)) + '  (+- ' + ' '.join(f'{x:.3f}' for x in share[:, fb].std(0, ddof=1)) + ')')
-say('    B L           ' + ' '.join(f'{x:.3f}' for x in w_bl))
-for s in zs:
-    say(f'    B L (z_s - z), z_s = {s:g} m ' + ' '.join(f'{x:.3f}' for x in w_lev[s]))
-lam = np.array([np.polyfit(zm, share[k, fb] / w_bl, 1) for k in range(K)])
-z0 = -lam[:, 1] / lam[:, 0]
-say(f'  eigenvector / B L on a line in z through zero at z0 = {z0.mean():.0f} +- {z0.std(ddof=1):.0f} m; the planes at {zs[0]:g}, {zs[1]:g} m')
 
 # =============================================================================
 # 3. The regimes: the first direction per bin
@@ -203,35 +196,54 @@ for b in range(nb):
     say(f'  {bin_labels[b]:>8}: ' + ' '.join(f'{labels[i]} {vec[:, b, i].mean():+.2f}' for i in rows if abs(vec[:, b, i].mean()) > 0.15))
 
 
-# 3b. Which length goes with which field: every pairing, design by design. For a sum of terms
-# B_m L_sigma(m) (z_s - z_m), field m's share of the exponent follows its own term's share
-# (slope 1, nothing fitted): the variance of the field shares that each pairing explains.
+# 3b. Product and pairing, from one identity. Y depends on B and L only through B L exactly when
+# dlogY/dlogB = dlogY/dlogL on every design (the characteristics of x df/dx = y df/dy are xy =
+# const). Its residual over the designs, for every field with every length: the pairing is the
+# assignment of lengths to fields with the smallest total residual.
 import itertools
+from scipy.optimize import linear_sum_assignment
+
+# Which length goes with which field, across the designs: for a sum of terms B_m L_sigma(m), field
+# m's share of the exponent follows its own term's share (slope 1, nothing fitted, no weights): the
+# variance of the field shares that each of the 24 pairings explains.
 perms = list(itertools.permutations(range(len(mags))))
-lev0 = zs[0] - zm
+ident = perms.index(tuple(range(len(mags))))
 
 
 def pairing_r2(k, b, perm):
     gB = X[k, :, b][:, iB]
     sB = gB / gB.sum(1, keepdims=True)
-    T = phi[:, iB] * phi[:, iL[list(perm)]] * lev0
+    T = phi[:, iB] * phi[:, iL[list(perm)]]
     w = T / T.sum(1, keepdims=True)
     ds, dw = sB - sB.mean(0), w - w.mean(0)
     return 1 - ((ds - dw) ** 2).sum() / (ds ** 2).sum()
 
 
 pr2 = np.array([[[pairing_r2(k, b, p) for p in perms] for k in range(K)] for b in hi])    # (bins, K, perms)
-ident = perms.index(tuple(range(len(mags))))
-say('\n3b. pairing: variance of the field shares across the designs explained by each pairing of fields and lengths (no fit)')
+
+
+def identity_residual(k, b):
+    a_, c_ = X[k, :, b][:, iB], X[k, :, b][:, iL]
+    return np.array([[((a_[:, m] - c_[:, n]) ** 2).mean() / ((a_[:, m] ** 2 + c_[:, n] ** 2) / 2).mean()
+                      for n in range(len(mags))] for m in range(len(mags))])
+
+
+IDR = np.array([[identity_residual(k, b) for k in range(K)] for b in hi])        # (bins, K, M, M)
+assign = [linear_sum_assignment(IDR[n].mean(0))[1] for n in range(len(hi))]
+say('\n3b. pairing: variance of the field shares across the designs explained by each pairing of fields and lengths (no fit, no weights)')
 for n, b in enumerate(hi):
     m_ = pr2[n].mean(0)
     o = np.argsort(-m_)
     say(f'  {bin_labels[b]:>8} GeV: own magnet {m_[ident]:.2f} +- {pr2[n, :, ident].std(ddof=1):.2f}; best other '
-        f'{m_[o[o != ident][0]]:.2f}; rank of own magnet {list(o).index(ident) + 1} of {len(perms)}')
-sym = np.array([[((X[k, :, b][:, i] - X[k, :, b][:, j]) ** 2).mean() / (X[k, :, b][:, [i, j]] ** 2).sum(1).mean()
-                 for i, j in pairs] for k in range(K) for b in [fb]])
-say('  product symmetry dlogY/dlogB_m = dlogY/dlogL_m on every design, residual: '
-    + ' '.join(f'M{m} {x:.3f}' for m, x in zip(mags, sym.mean(0))))
+        f'{m_[o[o != ident][0]]:.2f}; median {np.median(m_):.2f}; rank of own magnet {list(o).index(ident) + 1} of {len(perms)}')
+say('    product: residual of dlogY/dlogB_m = dlogY/dlogL_n over the designs (rows: fields, columns: lengths)')
+for n, b in enumerate(hi):
+    Rm = IDR[n].mean(0)
+    say(f'  {bin_labels[b]:>8} GeV: assignment ' + ' '.join(f'B{mags[m]}-L{mags[a_]}' for m, a_ in enumerate(assign[n]))
+        + f'; own magnet {np.trace(Rm) / len(mags):.3f} per pair, best other assignment '
+        + f'{min(sum(Rm[m, p[m]] for m in range(len(mags))) for p in itertools.permutations(range(len(mags))) if list(p) != list(range(len(mags)))) / len(mags):.3f}')
+    for m in range(len(mags)):
+        say(f'      B{mags[m]}: ' + ' '.join(f'{x:.3f}' for x in Rm[m]))
 
 # 3c. The soft muons: the two entrance widths that lead at 10-30 GeV. Equal and opposite loadings
 # in log phi: one antisymmetric combination. A ratio d3/d2 has dlogY/dlog d2 = -dlogY/dlog d3 on
@@ -287,10 +299,34 @@ for n, b in enumerate(hi):
     say(f'  {bin_labels[b]:>8} GeV: rho = {rho[n].mean():.2f} +- {rho[n].std(ddof=1):.2f}   c = '
         + ' '.join(f'{x:.3f}' for x in cw[n].mean(0)) + '  (+- ' + ' '.join(f'{x:.3f}' for x in cw[n].std(0, ddof=1)) + ')')
 
+# 4b. The weights. For a sum s = sum_m c_m P_m the ratio of the plain derivatives dY/dP_m : dY/dP_n
+# is c_m : c_n on every design: the weights are measured, not fitted. Then what they depend on:
+# a line in the magnet's position z_m, and where it reaches zero.
+def weights(k, b):
+    eP = (X[k, :, b][:, iB] + X[k, :, b][:, iL]) / 2           # dlogY/dlogP_m
+    dP = eP / P                                                 # proportional to dY/dP_m
+    w_ = (dP / dP.mean(1, keepdims=True)).mean(0)
+    return w_ / w_.mean(), (dP / dP.mean(1, keepdims=True)).std(0) / w_
+
+
+CW = np.array([[weights(k, b)[0] for k in range(K)] for b in hi])               # (bins, K, M)
+CWv = np.array([[weights(k, b)[1] for k in range(K)] for b in hi])
+LINE = np.array([[np.polyfit(zm, CW[n, k], 1) for k in range(K)] for n in range(len(hi))])   # (bins, K, 2)
+Z0 = -LINE[..., 1] / LINE[..., 0]
+LRES = np.array([[np.abs(np.polyval(LINE[n, k], zm) - CW[n, k]).max() for k in range(K)] for n in range(len(hi))])
+say(f'\n4b. the weights per unit B L, c_m from dY/dP_m : dY/dP_n (mean 1), at the magnets\' centres z = '
+    + ' '.join(f'{z_:.2f}' for z_ in zm) + ' m')
+for n, b in enumerate(hi):
+    say(f'  {bin_labels[b]:>8} GeV: c = ' + ' '.join(f'{x:.3f}' for x in CW[n].mean(0)) + '  (+- '
+        + ' '.join(f'{x:.3f}' for x in CW[n].std(0, ddof=1)) + f'); spread over the designs {CWv[n].mean():.0%}; '
+        f'a line in z: max residual {LRES[n].mean():.3f}, zero at z0 = {Z0[n].mean():.0f} +- {Z0[n].std(ddof=1):.0f} m')
+say(f'  the sensitive planes at {zs[0]:g} and {zs[1]:g} m: the weight is the distance from the magnet to near the detector')
+c_xi = CW[hi.index(fb)].mean(0)
+
 # =============================================================================
 # 5. Collapse
 # =============================================================================
-xi = (P * w_lev[zs[0]] / w_bl).sum(1)                     # sum_m B_m L_m (z_s - z_m), up to a constant
+xi = (P * c_xi).sum(1)                                      # sum_m c_m B_m L_m, the measured weights
 lx = np.log(xi / xi[0])
 ly = LY.mean(0) - LY.mean(0)[0]
 lphi = np.log(1 + DELTA * U)
@@ -306,7 +342,7 @@ def poly(v, n=3):
     return np.stack([v ** k for k in range(1, n + 1)], 1)
 
 
-say(f'\n5. collapse: R^2 of log Y_b over the {N} designs; Xi = sum B_m L_m (z_s - z_m), z_s = {zs[0]:g} m')
+say(f'\n5. collapse: R^2 of log Y_b over the {N} designs; Xi = sum c_m B_m L_m, c_m measured in 4b ({args.focus} GeV)')
 R2 = {'cubic in log Xi': [r2(ly[:, b], poly(lx)) for b in hi],
       'best single parameter (cubic)': [max(r2(ly[:, b], poly(lphi[:, i])) for i in range(D)) for b in hi],
       'cubic in log Xi + the others linear': [r2(ly[:, b], np.c_[poly(lx), lphi[:, others]]) for b in hi],
@@ -320,6 +356,36 @@ for b in hi:
     partial[b] = ly[:, b] - lphi[:, others] @ c[3:3 + len(others)] - c[-1]
     elast[b] = c[0]
 say('  dlogY/dlogXi at nominal: ' + ' '.join(f'{bin_labels[b]}: {elast[b]:.1f}' for b in hi))
+
+# 6. Second order. If log Y = f(log Xi), the Hessian of log Y at nominal on the fields and lengths
+# of M1-M4 is f' Hess(log Xi) + f'' q q^T, q = grad log Xi: Hess(log Xi) holds each magnet's
+# field-length cross term (the product) and -q q^T (the sum); f' is the gradient along Xi, f''
+# the one number fitted. On bins.py's Hessian (the ensemble mean, --grid points), in u; the NI
+# diagonals are left out, B(NI) being nonlinear (saturation).
+pzb = np.load(os.path.join(args.run, f'{args.bins}_bins.npz'))
+idx8 = [i for pr in pairs for i in pr]
+HES = {}
+say(f'\n6. second order: the log-Hessian of Y_b on the {len(idx8)} fields and lengths at nominal, against log Y = f(log Xi)')
+for b in hi:
+    Yb, gb, Hb = pzb['H_b'][b], pzb['grad_b'][b], pzb['hess_b'][b]
+    gl = gb / Yb
+    Lm = (Hb / Yb - np.outer(gl, gl))[np.ix_(idx8, idx8)]
+    f1 = np.mean(gl[iL] / (DELTA * c_xi * P[0] / (c_xi * P[0]).sum()))    # f' from the lengths' gradient
+    q = gl[idx8] / f1
+    sh = c_xi * P[0] / (c_xi * P[0]).sum()
+    Cx = np.zeros((len(idx8), len(idx8)))
+    for m in range(len(mags)):
+        Cx[2 * m, 2 * m + 1] = Cx[2 * m + 1, 2 * m] = q[2 * m] * q[2 * m + 1] / sh[m]
+    Q = np.outer(q, q)
+    A0 = f1 * (Cx - Q)
+    keep = ~(np.eye(len(idx8), dtype=bool) & (np.arange(len(idx8)) % 2 == 0)[:, None])
+    f2 = ((Lm - A0)[keep] @ Q[keep]) / (Q[keep] @ Q[keep])
+    tot = ((Lm[keep] - Lm[keep].mean()) ** 2).sum()
+    R2h = lambda M_: 1 - ((Lm - M_)[keep] ** 2).sum() / tot
+    f2q = (Lm[keep] @ Q[keep]) / (Q[keep] @ Q[keep])
+    HES[b] = dict(meas=Lm, pred=A0 + f2 * Q, keep=keep, r2=R2h(A0 + f2 * Q), r2_noprod=R2h(f2q * Q))
+    say(f'  {bin_labels[b]:>8} GeV: f\' = {f1:.1f}, f\'\' = {f2:+.1f} (fitted); R^2 {HES[b]["r2"]:.2f}; '
+        f'without the products\' cross terms (f\'\' q q^T alone) {HES[b]["r2_noprod"]:.2f}')
 say.save(os.path.join(args.run, 'discover_report.txt'))
 
 # =============================================================================
@@ -388,16 +454,25 @@ def p_regimes(a, big):
 
 
 def p_weights(a, big):
-    x = np.arange(len(mags))
-    a.bar(x, share[:, fb].mean(0), width=0.6, color='0.3', yerr=share[:, fb].std(0, ddof=1), capsize=3,
-          label=f'first direction, {args.focus} GeV')
-    a.plot(x, w_bl, 's', color=COL_L, ms=8 if big else 6, label=r'$B_mL_m/\sum BL$')
-    a.plot(x, w_lev[zs[0]], 'D', color=COL_B, ms=8 if big else 6, label=fr'$B_mL_m(z_s-z_m)/\sum$, $z_s={zs[0]:g}$ m')
-    a.set_xticks(x, [f'M{m}\n$z={z_:.1f}$ m' for m, z_ in zip(mags, zm)])
-    a.set_ylabel("magnet's share of the direction")
-    lo = min(share[:, fb].mean(0).min(), w_bl.min()) * 0.85
-    a.set_ylim(lo, max(share[:, fb].mean(0).max(), w_bl.max()) * 1.13)
-    a.legend(frameon=False, loc='upper left', fontsize='small')
+    zz = np.linspace(0, max(zs[1], Z0.mean() + 5), 2)
+    for n, b in enumerate(hi):
+        if n == 0:
+            continue
+        cm_, ce_ = CW[n].mean(0), CW[n].std(0, ddof=1)
+        a.errorbar(zm + (n - 2) * 0.25, cm_, yerr=ce_, fmt='o', color=BINC[n], ms=7 if big else 5, capsize=2,
+                   label=f'{bin_labels[b]} GeV: zero at {Z0[n].mean():.0f} $\\pm$ {Z0[n].std(ddof=1):.0f} m')
+        a.plot(zz, np.polyval(LINE[n].mean(0), zz), '-', color=BINC[n], lw=0.9)
+    for z_ in zs:
+        a.axvline(z_, color='k', lw=2)
+    a.text(zs[0], 0.06, ' sensitive\n planes', fontsize='small', va='bottom', ha='right')
+    for m, z_ in zip(mags, zm):
+        a.text(z_, 0.06, f'M{m}', ha='center', fontsize='small')
+    a.axhline(0, color=GREY, lw=0.6)
+    a.set_xlim(0, zs[1] + 3)
+    a.set_ylim(0, 1.25)
+    a.set_xlabel('z of the magnet\'s centre [m]')
+    a.set_ylabel('weight per unit $B_mL_m$, $c_m$ (mean 1)')
+    a.legend(frameon=False, loc='upper center', fontsize='small')
 
 
 def p_sum(a, big):
@@ -423,7 +498,7 @@ def p_collapse(a, big):
                   label=fr'{bin_labels[b]} GeV, $Y\propto\Xi^{{{elast[b]:.0f}}}$')
     a.axhline(0, color=GREY, lw=0.6)
     a.axvline(0, color=GREY, lw=0.6)
-    a.set_xlabel(r'$\log(\Xi/\Xi_0)$, $\Xi=\sum_m B_mL_m(z_s-z_m)$')
+    a.set_xlabel(r'$\log(\Xi/\Xi_0)$, $\Xi=\sum_m c_mB_mL_m$')
     a.set_ylabel(r'$\log(Y_b/Y_{b,0})$, other parameters removed')
     a.legend(frameon=False, loc='upper right', markerscale=3, fontsize='small')
 
@@ -465,10 +540,27 @@ def p_pairing(a, big):
         a.plot(x, m_[n][o], 'o-', ms=3 if not big else 4, lw=0.8, color=BINC[n], label=f'{bin_labels[b]} GeV')
     a.plot([list(o).index(ident)], [m_[hi.index(fb)][ident]], 'k*', ms=14 if big else 11, zorder=5, label='own magnet')
     a.set_xticks(x, [''.join(f'{p + 1}' for p in perms[i]) for i in o], rotation=90, fontsize='x-small')
-    a.set_xlabel(r'pairing: the length of M$_{\sigma(1)}$..M$_{\sigma(4)}$ with the fields of M1..M4')
+    a.set_xlabel(r'pairing: the lengths of M$_{\sigma(1)}$..M$_{\sigma(4)}$ with the fields of M1..M4')
     a.set_ylabel('variance of the field shares explained')
     a.axhline(0, color=GREY, lw=0.6)
     a.legend(frameon=False, loc='upper right', fontsize='small')
+
+
+def p_hessian(a, big):
+    for n, b in enumerate(hi):
+        if n == 0:
+            continue
+        h = HES[b]
+        a.scatter(h['pred'][h['keep']], h['meas'][h['keep']], s=14 if not big else 22, color=BINC[n], alpha=0.8,
+                  edgecolors='k', linewidths=0.3, label=f'{bin_labels[b]} GeV: $R^2$ {h["r2"]:.2f} '
+                  f'(no product term {h["r2_noprod"]:.2f})')
+    v = max(max(np.abs(HES[b]['meas'][HES[b]['keep']]).max() for b in hi[1:]), 1e-3) * 1.1
+    a.plot([-v, v], [-v, v], 'k-', lw=0.8)
+    a.axhline(0, color=GREY, lw=0.5)
+    a.axvline(0, color=GREY, lw=0.5)
+    a.set_xlabel(r"$f'\,\mathrm{Hess}(\log\Xi) + f''qq^\top$ (one number fitted)")
+    a.set_ylabel(r'$\partial^2\log Y/\partial u_i\partial u_j$, surrogate')
+    a.legend(frameon=False, loc='upper left', fontsize='small')
 
 
 def p_step(a, big):
@@ -492,15 +584,15 @@ def p_step(a, big):
 
 
 f1, f3 = frac[:, fb, 0].mean(), rho[hi.index(fb)].mean()
-PANELS = {   # name: (panel, report title, slide title)
+PANELS = {   # name: (panel, report title, slide title), in the order of the argument
     'dimension': (p_dimension, 'how many directions, per muon',
                   f'Above {edges[4]:g} GeV every muon sees the design through one variable'),
     'direction': (p_direction, f'the direction, $p_z$ {args.focus} GeV',
                   'That variable is field and length of M1-M4, in equal measure'),
-    'pairing': (p_pairing, 'which length goes with which field',
-                "Each field pairs with its own magnet's length: B_m L_m"),
-    'weights': (p_weights, "the magnets' shares: the lever arm",
-                'Each magnet counts by B L times its distance to the detector'),
+    'pairing': (p_pairing, f'which length goes with which field, across {N} designs',
+                "The hits see each field times its own magnet's length"),
+    'weights': (p_weights, 'the weight of each magnet: the lever arm',
+                'Each B L counts by its distance to near the detector'),
     'regimes': (p_regimes, 'the direction per $p_z$ bin',
                 'Two regimes: apertures for soft muons, field integral for hard ones'),
     'step': (p_step, 'soft muons: the two entrances, across 1024 designs',
@@ -509,6 +601,8 @@ PANELS = {   # name: (panel, report title, slide title)
             f'The magnets add up: a sum, not a product ($\\rho={f3:.2f}$)'),
     'collapse': (p_collapse, 'collapse on 1024 random designs',
                  'All designs fall on one curve per momentum bin'),
+    'hessian': (p_hessian, 'second order: fields and lengths of M1-M4 at nominal',
+                'The curvature has the structure of a sum of products'),
     'sim': (p_sim, 'M1-M4 changed: simulated and surrogate',
             'The simulator agrees: only the product B L matters'),
 }
@@ -528,8 +622,8 @@ def compose(names, name, shape, size):
     plt.close(fig)
 
 
-compose(['dimension', 'direction', 'pairing', 'weights', 'regimes', 'step'], 'discover_variable', (3, 2), (12, 12.6))
-compose(['sum', 'collapse', 'sim'], 'discover_action', (1, 3), (15, 4.6))
+compose(['dimension', 'direction', 'pairing', 'sum', 'weights', 'collapse'], 'discover_variable', (3, 2), (12, 12.6))
+compose(['hessian', 'sim', 'regimes', 'step'], 'discover_action', (2, 2), (12, 9.4))
 slides = os.path.join(figures(args.run), 'discover_slides')
 os.makedirs(slides, exist_ok=True)
 with plt.rc_context({'font.size': 13}):
