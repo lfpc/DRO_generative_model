@@ -8,6 +8,7 @@ main run also writes the report's figures as PDF, paths.save_figure):
   <var>_bins.npz     <var>_bins_{overview,sensitivity,alignment,walks,mc}.png
   scan_sim_*.npz     (scan_sim.py) the simulated points of robustness_scans.png
   tolerance_boxes.npz (tolerance_boxes.py) tolerance_boxes, tolerance_allocation .png
+  muon_kinds.npz     (muon_kinds.py) muon_kinds_{pz,maps,alignment}.png
 
     python -m analysis.plots outputs/results/robustness
 """
@@ -596,6 +597,107 @@ def tolerance_figures(t, ev):
     save(fig, 'tolerance_allocation.png')
 
 
+# =============================================================================
+# muon_kinds.npz
+# =============================================================================
+def muon_kind_figures(k):
+    from matplotlib.colors import LogNorm, TwoSlopeNorm
+    labels, PZN, PTN, PSN = list(k['labels']), list(k['pz_names']), list(k['pt_names']), list(k['psi_names'])
+    NZ, NT, NP, _ = k['shape']
+    G = NZ * NT * NP * 2
+    idx = np.array(np.unravel_index(np.arange(G), (NZ, NT, NP, 2))).T
+    zb = idx[:, 0]
+    E0, Ew, own, Ez = k['E0'], k['E_worst'], k['own'], k['E_z']
+    live = np.array([E0[zb == b].sum() > 1e-3 for b in range(NZ)])          # bins with hits
+    B = np.where(live)[0]
+    Z0 = np.array([E0[zb == b].sum() for b in range(NZ)])
+    ZZ = np.array([[Ez[d, zb == b].sum() for b in range(NZ)] for d in range(NZ)])
+    Zw = np.array([Ew[zb == b].sum() for b in range(NZ)])
+
+    # --- 1. each p_z bin's own worst design: what it does to every bin, and what it is made of
+    fig, ax = plt.subplots(1, 2, figsize=(15, 6.2), constrained_layout=True, gridspec_kw={'width_ratios': [1, 1.15]})
+    M = np.c_[ZZ[np.ix_(B, B)].T, Zw[B]] / Z0[B][:, None]            # rows: bins' hits; cols: designs
+    L = np.log2(M)
+    im = ax[0].imshow(L, cmap='RdBu_r', norm=TwoSlopeNorm(0, -2, 5), aspect='auto')
+    for i in range(L.shape[0]):
+        for j in range(L.shape[1]):
+            ax[0].text(j, i, f'{M[i, j]:.1f}', ha='center', va='center', fontsize=7.5,
+                       color='w' if abs(L[i, j]) > 2.5 else 'k')
+    ax[0].set_xticks(range(len(B) + 1), [PZN[b] for b in B] + ['"worst"'], rotation=45, ha='right')
+    ax[0].set_yticks(range(len(B)), [PZN[b] for b in B])
+    ax[0].axvline(len(B) - 0.5, color='k', lw=1.5)
+    ax[0].set(xlabel='design: the worst one of this $p_z$ bin [GeV]', ylabel='hits of the muons with $p_z$ in [GeV]',
+              title='Hits of each bin at each bin\'s worst design, / nominal ($|u| = 1$)')
+    cb = fig.colorbar(im, ax=ax[0], shrink=0.8)
+    cb.set_label('$Y_b / Y_{b,0}$ (log$_2$ scale)')
+    cb.set_ticks([-2, -1, 0, 1, 2, 3, 4, 5], labels=['1/4', '1/2', '1', '2', '4', '8', '16', '32'])
+    V = np.c_[k['V_z'][B].T, k['v_worst']]
+    V = V / np.linalg.norm(V, axis=0, keepdims=True)
+    top = np.argsort(-np.abs(V).max(1))[:18]
+    top = top[np.argsort([labels[i] for i in top])]
+    im = ax[1].imshow(V[top], cmap='RdBu_r', vmin=-0.8, vmax=0.8, aspect='auto')
+    ax[1].set_xticks(range(len(B) + 1), [PZN[b] for b in B] + ['"worst"'], rotation=45, ha='right')
+    ax[1].set_yticks(range(len(top)), [labels[i] for i in top], fontsize=8.5)
+    ax[1].axvline(len(B) - 0.5, color='k', lw=1.5)
+    ax[1].set(xlabel='worst design of the $p_z$ bin [GeV]', title='What the worst designs are made of (unit vectors)')
+    cb = fig.colorbar(im, ax=ax[1], shrink=0.8)
+    cb.set_label('component ($+$: the parameter grows)')
+    save(fig, 'muon_kinds_pz.png')
+
+    # --- 2. maps per kind: p_t x psi_q, the charges together in the frame of q p_x
+    psiq = np.where(idx[:, 3] == 0, idx[:, 2], NP - 1 - idx[:, 2])
+
+    def grid(v, b):
+        out = np.zeros((NT, NP))
+        m = zb == b
+        np.add.at(out, (idx[m, 1], psiq[m]), v[m])
+        return out
+
+    show = [b for b in range(NZ) if Z0[b] > 0.02 * Z0.sum()]
+    rows = [('hits at nominal, $Y_0$', E0), ('extra hits at "worst"', Ew - E0), ('extra hits at the cell\'s own worst design', own - E0)]
+    fig, ax = plt.subplots(len(rows), len(show), figsize=(2.55 * len(show) + 1.2, 7.6), constrained_layout=True,
+                           sharex=True, sharey=True, squeeze=False)
+    for i, (title, v) in enumerate(rows):
+        maps = [grid(v, b) for b in show]
+        vmax = max(m.max() for m in maps)
+        norm = LogNorm(max(vmax / 1e3, 1e-2), vmax)
+        for j, b in enumerate(show):
+            a = ax[i, j]
+            a.set_facecolor('0.92')
+            im = a.imshow(np.where(maps[j] > 0, maps[j], np.nan), origin='lower', aspect='auto', cmap='viridis', norm=norm,
+                          extent=(0, 180, -0.5, NT - 0.5))
+            if i == 0:
+                a.set_title(f'$p_z$ {PZN[b]} GeV', fontsize=10)
+            if j == 0:
+                a.set_ylabel('$p_t$ [GeV]')
+                a.set_yticks(range(NT), PTN)
+            if i == len(rows) - 1:
+                a.set_xlabel('$\\psi_q$ [deg]')
+                a.set_xticks([0, 45, 90, 135, 180])
+        cb = fig.colorbar(im, ax=ax[i, :], shrink=0.9, pad=0.01)
+        cb.set_label(title + f'\nper {float(k["n_ref"]):.0e} muons', fontsize=8.5)
+    fig.suptitle('Which muons hit, and which a design change adds. $\\psi_q$: direction of $(q\\,p_x, |p_y|)$; '
+                 '0 = towards $+x$ for $\\mu^+$, $-x$ for $\\mu^-$; grey: no hits, or fewer', fontsize=10.5)
+    save(fig, 'muon_kinds_maps.png')
+
+    # --- 3. are the cells' own worst directions the global one?
+    fig, ax = plt.subplots(figsize=(8.6, 5.6), constrained_layout=True)
+    m = (E0 > 0.5) & np.isfinite(k['cos_cw'])
+    COL = [plt.cm.viridis(b / max(NZ - 1, 1) * 0.9) for b in range(NZ)]
+    for b in range(NZ):
+        mm = m & (zb == b)
+        if mm.any():
+            ax.scatter(k['cos_cw'][mm], (own - E0)[mm], s=8 + 4 * np.sqrt(E0[mm]), color=COL[b], alpha=0.75,
+                       edgecolors='k', linewidths=0.3, label=f'$p_z$ {PZN[b]}')
+    ax.set_yscale('log')
+    ax.set(xlabel='cosine of the cell\'s own worst direction with "worst"',
+           ylabel=f'extra hits at the cell\'s own worst design (per {float(k["n_ref"]):.0e})',
+           title='Each kind of muon (a cell with $Y_0 > 0.5$; size: $Y_0$): its own worst design vs "worst"')
+    ax.axvline(0, color=GREY, lw=0.8, ls=':')
+    ax.legend(fontsize=8, ncol=2, loc='lower left', markerscale=0.8)
+    save(fig, 'muon_kinds_alignment.png')
+
+
 path = os.path.join(args.run, '{}.npz')
 if os.path.exists(path.format('robustness')):
     robustness_figures(dict(np.load(path.format('robustness'))))
@@ -608,3 +710,5 @@ for var in ('pz', 'pt', 'p', 'charge'):
         bin_figures(np.load(path.format(f'{var}_bins')))
 if os.path.exists(path.format('tolerance_boxes_eval')):
     tolerance_figures(np.load(path.format('tolerance_boxes')), np.load(path.format('tolerance_boxes_eval')))
+if os.path.exists(path.format('muon_kinds')):
+    muon_kind_figures(np.load(path.format('muon_kinds')))
