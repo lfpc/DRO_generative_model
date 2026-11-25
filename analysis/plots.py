@@ -677,7 +677,7 @@ def muon_kind_figures(k):
         cb = fig.colorbar(im, ax=ax[i, :], shrink=0.9, pad=0.01)
         cb.set_label(title + f'\nper {float(k["n_ref"]):.0e} muons', fontsize=8.5)
     fig.suptitle('Which muons hit, and which a design change adds. $\\psi_q$: direction of $(q\\,p_x, |p_y|)$; '
-                 '0 = towards $+x$ for $\\mu^+$, $-x$ for $\\mu^-$; grey: no hits, or fewer', fontsize=10.5)
+                 '0 = against the push of the first magnets ($+x$ for $\\mu^+$), 180 = along it; grey: no hits, or fewer', fontsize=10.5)
     save(fig, 'muon_kinds_maps.png')
 
     # --- 3. are the cells' own worst directions the global one?

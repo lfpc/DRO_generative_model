@@ -3,9 +3,11 @@ of muon (p_z, p_t, direction of p_t, charge).
 
 The muons are split into cells: p_z bin x p_t bin x psi bin x charge, with psi the azimuth of
 the transverse momentum measured from +x and folded to [0, 180] deg (the shield is symmetric
-under y -> -y). The shield is also symmetric under x -> -x with the charge flipped, so a mu+
-at psi and a mu- at 180 - psi should behave alike: the two charges are kept apart and that
-symmetry is a check. One pass of the surrogate over the --grid muon points gives every cell's
+under y -> -y). The first magnets push mu+ towards -x and mu- towards +x, so psi_q, the
+azimuth of (q p_x, |p_y|), is 0 for a muon that starts against that push and 180 along it. The
+magnets are symmetric under x -> -x with the charge flipped but the cavern is not, so a mu+ at
+psi and a mu- at 180 - psi follow the same pattern with about twice the hits for the mu+: the
+two charges are kept apart. One pass of the surrogate over the --grid muon points gives every cell's
 hits, gradient and Hessian at nominal (analysis.core: the accumulators of a cell are sums over
 its points, so a p_z bin's are the sums over its cells). Then:
 
@@ -231,13 +233,13 @@ cos_cw = np.array([unit(V_c[c]) @ unit(v_worst) if np.any(V_c[c]) else np.nan fo
 gain_own, gain_worst = own - E0, E_worst - E0
 
 say(f'\n=== kinds of muon: {len(live)} cells with muons')
-say('psi: azimuth of p_t from +x (folded |p_y|); the shield is symmetric under x -> -x with the charge flipped,\n'
-    'so mu+ at psi should match mu- at 180 - psi.')
+say('psi: azimuth of p_t from +x (folded |p_y|). The magnets are symmetric under x -> -x with the charge flipped,\n'
+    'the cavern is not: mu+ at psi and mu- at 180 - psi should follow one pattern, the mu+ with more hits.')
 sym = np.array([[E0[np.ravel_multi_index((iz, it, ip, 0), (NZ, NT, NP, 2))],
                  E0[np.ravel_multi_index((iz, it, NP - 1 - ip, 1), (NZ, NT, NP, 2))]]
                 for iz in range(NZ) for it in range(NT) for ip in range(NP)])
 ok = sym.sum(1) > args.min_hits
-say(f'symmetry check, nominal hits of mu+ at psi vs mu- at 180 - psi over {ok.sum()} cell pairs with > {args.min_hits:g} hits: '
+say(f'mirror check, nominal hits of mu+ at psi vs mu- at 180 - psi over {ok.sum()} cell pairs with > {args.min_hits:g} hits: '
     f'median ratio {np.median(sym[ok, 0] / np.maximum(sym[ok, 1], 1e-30)):.2f}, '
     f'correlation of the logs {np.corrcoef(np.log(sym[ok, 0] + 1e-3), np.log(sym[ok, 1] + 1e-3))[0, 1]:.2f}')
 
@@ -258,7 +260,8 @@ table(np.argsort(-gain_worst), 'the cells that gain the most under robustness.py
 
 # marginals over the variables: share of the nominal hits and of the gain under "worst"
 say('\nshares of the nominal hits and of the extra hits at "worst", per variable (psi_q: the azimuth of (q p_x, |p_y|),\n'
-    '0 = towards +x for mu+ and -x for mu-; mu+ at psi and mu- at 180 - psi together):')
+    '0 = towards +x for mu+ and -x for mu-, i.e. against the first magnets, which push mu+ to -x;\n'
+    'mu+ at psi and mu- at 180 - psi together):')
 for name, sel in (('p_z', None),):
     h0 = np.array([E0[ZB == k].sum() for k in range(NZ)])
     gw = np.array([gain_worst[ZB == k].sum() for k in range(NZ)])
