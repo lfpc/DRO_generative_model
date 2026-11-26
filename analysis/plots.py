@@ -8,7 +8,8 @@ main run also writes the report's figures as PDF, paths.save_figure):
   <var>_bins.npz     <var>_bins_{overview,sensitivity,alignment,walks,mc}.png
   scan_sim_*.npz     (scan_sim.py) the simulated points of robustness_scans.png
   tolerance_boxes.npz (tolerance_boxes.py) tolerance_boxes, tolerance_allocation .png
-  muon_kinds.npz     (muon_kinds.py) muon_kinds_{pz,maps,alignment}.png
+  muon_kinds.npz     (muon_kinds.py) muon_kinds_{pz,maps,alignment}.png, pz_bins_alignment_worst.png
+  collective.npz     (collective.py) collective.png
 
     python -m analysis.plots outputs/results/robustness
 """
@@ -28,6 +29,7 @@ from paths import RUN, figures, save_figure
 parser = cli.parser(__doc__)
 parser.add_argument('run', nargs='?', default=RUN)
 parser.add_argument('--n_sigma', type=float, default=3.0, help='significance for "resolved"')
+parser.add_argument('--only', default='', help='comma-separated result names (e.g. "collective"): draw only these')
 args = parser.parse_args()
 FIGS = figures(args.run)
 MAIN = os.path.abspath(args.run) == os.path.abspath(RUN)       # only the main run feeds the report
@@ -454,6 +456,21 @@ def pz_profile_figure(z):
     save(fig, 'sim_pz_profiles.png')
 
 
+def cosine_matrix(COS, names, title, name):
+    """A matrix of cosines between the directions of muon groups, annotated."""
+    B = len(names)
+    xb = np.arange(B)
+    fig, ax = plt.subplots(figsize=(1.6 + 0.8 * B, 1.2 + 0.8 * B), constrained_layout=True)
+    fig.colorbar(ax.imshow(COS, cmap='RdBu_r', vmin=-1, vmax=1), ax=ax, label='cosine')
+    for k in range(B):
+        for j in range(B):
+            ax.text(j, k, f'{COS[k, j]:+.2f}', ha='center', va='center', fontsize=7, color='k' if abs(COS[k, j]) < 0.6 else 'w')
+    ax.set_xticks(xb, names, rotation=45, ha='right', fontsize=8)
+    ax.set_yticks(xb, names, fontsize=8)
+    ax.set_title(title)
+    save(fig, name)
+
+
 # =============================================================================
 # <var>_bins.npz
 # =============================================================================
@@ -495,16 +512,8 @@ def bin_figures(b):
     fig.suptitle(f'Sensitivity per parameter and muon region ({var})')
     save(fig, f'{var}_bins_sensitivity.png')
 
-    COS = b['cos']
-    fig, ax = plt.subplots(figsize=(1.6 + 0.8 * B, 1.2 + 0.8 * B), constrained_layout=True)
-    fig.colorbar(ax.imshow(COS, cmap='RdBu_r', vmin=-1, vmax=1), ax=ax, label='cosine')
-    for k in range(B):
-        for j in range(B):
-            ax.text(j, k, f'{COS[k, j]:+.2f}', ha='center', va='center', fontsize=7, color='k' if abs(COS[k, j]) < 0.6 else 'w')
-    ax.set_xticks(xb, SHORT, rotation=45, ha='right', fontsize=8)
-    ax.set_yticks(xb, SHORT, fontsize=8)
-    ax.set_title('Alignment of the regions\' own worst directions')
-    save(fig, f'{var}_bins_alignment.png')
+    cosine_matrix(b['cos'], SHORT, 'Alignment of the regions\' gradients (steepest ascent at nominal)',
+                  f'{var}_bins_alignment.png')
 
     SIM = bool(b['simulated'])
     NAMES = [str(s) for s in b['dir_names']]
@@ -614,6 +623,8 @@ def muon_kind_figures(k):
     Z0 = np.array([E0[zb == b].sum() for b in range(NZ)])
     ZZ = np.array([[Ez[d, zb == b].sum() for b in range(NZ)] for d in range(NZ)])
     Zw = np.array([Ew[zb == b].sum() for b in range(NZ)])
+    cosine_matrix(k['cos_z'][np.ix_(B, B)], [PZN[b] for b in B],
+                  'Alignment of the $p_z$ bins\' worst directions (trust region)', 'pz_bins_alignment_worst.png')
 
     # --- 1. each p_z bin's own worst design: what it does to every bin, and what it is made of
     fig, ax = plt.subplots(1, 2, figsize=(15, 6.2), constrained_layout=True, gridspec_kw={'width_ratios': [1, 1.15]})
@@ -699,17 +710,89 @@ def muon_kind_figures(k):
     save(fig, 'muon_kinds_alignment.png')
 
 
+# =============================================================================
+# collective.npz
+# =============================================================================
+def collective_figure(c):
+    """The unit step along the worst direction taken apart: each parameter alone at its share of the
+    step and at 10%, and the largest changes together."""
+    names = [str(s) for s in c['names']]
+    idx = {nm: d for d, nm in enumerate(names)}
+    U, labels, SIM = c['U'], [str(s) for s in c['labels']], bool(c['simulated'])
+    P = c['pred'] / c['pred'][0]
+    S, S_se = poisson_ratio(c['sim'], c['sim'][0]) if SIM else (P, np.zeros_like(P))
+    dname, t = str(c['direction']), float(c['t'])
+    n_s = sum(nm.startswith('share') for nm in names)
+    tops = sorted([nm for nm in names if nm.startswith('top')], key=lambda nm: int(nm[3:]))
+    D = U.shape[1]
+    step = idx[dname]
+    k_of = [int(np.argmax(np.abs(U[idx[f'share{i + 1}']]))) for i in range(n_s)]
+    FULL = '#8C8C8C'
+
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 0.42 * n_s + 2.4), constrained_layout=True,
+                                 gridspec_kw={'width_ratios': [1.25, 1]}, sharex=True)
+    # --- left: each parameter alone
+    y = np.arange(n_s)[::-1]
+    sh = [idx[f'share{i + 1}'] for i in range(n_s)]
+    fu = [idx[f'full{i + 1}'] for i in range(n_s)]
+    a1.barh(y + 0.19, S[sh], 0.38, xerr=S_se[sh], color=BAD, capsize=2, error_kw={'lw': 0.8},
+            label=f'alone, by its share of the step')
+    a1.barh(y - 0.19, S[fu], 0.38, xerr=S_se[fu], color=FULL, capsize=2, error_kw={'lw': 0.8},
+            label='alone, by $\\pm10\\%$ (same sign)')
+    a1.plot(P[sh], y + 0.19, 'o', color=OK, ms=4, mfc='w', label='surrogate')
+    a1.plot(P[fu], y - 0.19, 'o', color=OK, ms=4, mfc='w')
+    a1.set_yticks(y, [f'{pretty(labels[k])}  {10 * U[step][k]:+.1f}%' for k in k_of], fontsize=9)
+    a1.set_ylim(-0.7, n_s - 0.3)
+    a1.set(xlabel='$Y/Y_0$', title=f'Each parameter alone (its change in the step: label)')
+    # --- right: together
+    groups = tops + [dname]
+    y2 = np.arange(len(groups))[::-1]
+    gd = [idx[nm] for nm in groups]
+    nmov = [int((U[d] != 0).sum()) for d in gd]
+    a2.barh(y2, S[gd], 0.55, xerr=S_se[gd], color=BAD, capsize=2, error_kw={'lw': 0.8}, label='together (simulator)')
+    a2.plot(P[gd], y2, 'o', color=OK, ms=4, mfc='w', label='surrogate')
+    prod = [np.prod(S[sh[:int(nm[3:])]]) if nm.startswith('top') and int(nm[3:]) <= n_s else np.nan for nm in groups]
+    a2.plot(prod, y2, 'D', color='k', ms=6, mfc='none', mew=1.2, label='product of the parameters alone')
+    for yi, s, e, p_, q in zip(y2, S[gd], S_se[gd], P[gd], prod):
+        a2.annotate(f'$\\times${s:.2f}', (np.nanmax([s + e, p_, q]), yi), xytext=(7, -3), textcoords='offset points',
+                    fontsize=8)
+    a2.set_yticks(y2, [f'largest {k}' if k > 1 else 'largest 1' for k in nmov[:-1]] + [f'all {nmov[-1]} (the unit step)'],
+                  fontsize=9)
+    a2.set(xlabel='$Y/Y_0$', title='The largest changes of the step, together')
+    for a, loc in ((a1, 'lower right'), (a2, 'upper right')):
+        a.axvline(1, color='k', lw=0.8, ls=':')
+        a.axvline(S[step], color=BAD, lw=1, ls='--')
+        a.legend(loc=loc, fontsize=8)
+    a2.set_xlim(None, max(S[gd] + S_se[gd]) * 1.12)
+    a1.annotate(f'all together: $\\times${S[step]:.2f}', (S[step], n_s - 0.5), xytext=(-4, 0), textcoords='offset points',
+                ha='right', va='center', fontsize=8, color=BAD)
+    a1.set_xlim(0.8 if min(S[sh].min(), S[fu].min()) > 0.85 else None, None)
+    vmax = 10 * np.abs(U[step]).max()
+    fig.suptitle(f'One unit step along the {dname} direction: {D} parameters, none by more than {vmax:.1f}%'
+                 + (f' (t = {t:g})' if t != 1 else ''))
+    save(fig, 'collective.png')
+
+
 path = os.path.join(args.run, '{}.npz')
-if os.path.exists(path.format('robustness')):
+ONLY = [o for o in args.only.split(',') if o]
+
+
+def want(name):
+    return os.path.exists(path.format(name)) and (not ONLY or name in ONLY)
+
+
+if want('robustness'):
     robustness_figures(dict(np.load(path.format('robustness'))))
-if os.path.exists(path.format('worst_cases')):
+if want('worst_cases'):
     worst_case_figures(dict(np.load(path.format('worst_cases'), allow_pickle=True)))
-if os.path.exists(path.format('pz_profiles')):
+if want('pz_profiles'):
     pz_profile_figure(np.load(path.format('pz_profiles')))
 for var in ('pz', 'pt', 'p', 'charge'):
-    if os.path.exists(path.format(f'{var}_bins')):
+    if want(f'{var}_bins'):
         bin_figures(np.load(path.format(f'{var}_bins')))
-if os.path.exists(path.format('tolerance_boxes_eval')):
+if want('tolerance_boxes_eval'):
     tolerance_figures(np.load(path.format('tolerance_boxes')), np.load(path.format('tolerance_boxes_eval')))
-if os.path.exists(path.format('muon_kinds')):
+if want('muon_kinds'):
     muon_kind_figures(np.load(path.format('muon_kinds')))
+if want('collective'):
+    collective_figure(np.load(path.format('collective')))
