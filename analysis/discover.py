@@ -21,7 +21,8 @@ next builds on it. Two objects, both from the surrogate alone:
      then a line in the magnets' positions, and where it reaches zero (the lever arm);
   5. collapse: log Y_b against Xi = sum c_m P_m on the random designs;
   6. second order: the nominal log-Hessian on the fields and lengths against f(log Xi);
-  7. the simulated check of analysis.relations --sim (<run>/relations_sim.npz), if present;
+  7. the simulated checks of analysis.relations --sim (<run>/relations_sim.npz) and analysis.soft_step
+     (<run>/soft_step_sim*.npz), if present;
   and the regimes (the first direction per bin) and the soft muons' entrance step.
 
 Figures: discover_variable (steps 1-5) and discover_action (6, 7, the regimes, the soft muons) for the report, and one PNG per step,
@@ -30,6 +31,7 @@ with larger type and a one-line conclusion as title, in <figures>/discover_slide
     python -m analysis.discover                      # surrogate on the designs and the muons, then plots
     python -m analysis.discover --plot_only
 """
+import glob
 import os
 
 import matplotlib
@@ -530,6 +532,46 @@ def p_sim(a, big):
 
 
 
+def soft_data():
+    """The soft_step.py runs, summed: (designs, simulated hits in the band, surrogate ratios (K, designs), band, n)."""
+    fs = sorted(glob.glob(os.path.join(args.run, 'soft_step_sim*.npz')))
+    qs = [np.load(f, allow_pickle=True) for f in fs]
+    keep = list(qs[0]['keep'])
+    sim = sum(q['sim'] for q in qs)[:, keep].sum(1)
+    pr = qs[0]['pred'][:, :, keep]                                   # (K, designs, bins), relative per bin
+    w = sum(q['sim'] for q in qs)[0, keep]
+    pred = (pr * w).sum(2) / w.sum()
+    return [str(d) for d in qs[0]['designs']], sim, pred, tuple(qs[0]['band']), sum(int(q['n_band']) for q in qs)
+
+
+def p_soft_sim(a, big):
+    names, sim, pred, band, n = soft_data()
+    rat = sim / sim[0]
+    err = rat * np.sqrt(1 / np.maximum(sim, 1) + 1 / sim[0])
+    err[0] = np.sqrt(1 / sim[0])
+    pm, ps = pred.mean(0), pred.std(0, ddof=1)
+    col = [GREY, '#999999', '#999999', COL_B, COL_L, '#009E73', '#009E73']
+    x = np.arange(len(names))
+    a.bar(x, pm, 0.6, yerr=ps, color=col, alpha=0.45, capsize=2, label='surrogate (bars)')
+    a.errorbar(x, rat, yerr=err, fmt='o', color='k', ms=6 if big else 5, label='simulated (dots)')
+    a.axhline(1, color='k', lw=0.6)
+    a.set_yscale('log')
+    a.set_yticks([0.1, 0.2, 0.5, 1, 2, 5], ['0.1', '0.2', '0.5', '1', '2', '5'])
+    a.minorticks_off()
+    a.grid(axis='y', alpha=0.3)
+    def short(d):
+        d = d.replace('M2 ', '$X_\\mathrm{core}^{(2)}$ ').replace('M3 ', '$X_\\mathrm{core}^{(3)}$ ')
+        if ': ' in d:
+            head, d = d.split(': ')
+            return head + '\n' + d.replace(', ', '\n')
+        return d.replace('both ', 'both\n')
+    short = [short(d) for d in names]
+    a.set_xticks(x, short, fontsize='x-small' if not big else 'small')
+    a.set_ylabel('$Y/Y_0$, $p_z$ %g-%g GeV' % band)
+    a.legend(frameon=False, loc='upper left', fontsize='small', title=f'{n:.1e} muons in the band, {sim[0]:.0f} nominal hits',
+             title_fontsize='x-small')
+
+
 def p_pairing(a, big):
     m_ = pr2.mean(1)                                       # (bins, perms)
     o = np.argsort(-m_[hi.index(fb)])
@@ -605,14 +647,21 @@ PANELS = {   # name: (panel, report title, slide title), in the order of the arg
                 'The curvature has the structure of a sum of products'),
     'sim': (p_sim, 'M1-M4 changed: simulated and surrogate',
             'The simulator agrees: only the product B L matters'),
+    'soft_sim': (p_soft_sim, 'soft muons: the two entrances changed, simulated and surrogate',
+                 'The simulator agrees: soft muons see the step from M2 to M3'),
 }
 sim_ok = os.path.exists(os.path.join(args.run, 'relations_sim.npz'))
+soft_ok = bool(glob.glob(os.path.join(args.run, 'soft_step_sim*.npz')))
+MISSING = {'sim': not sim_ok, 'soft_sim': not soft_ok}
 
 
-def compose(names, name, shape, size):
-    fig, ax = plt.subplots(*shape, figsize=size)
-    for n, (a, key) in enumerate(zip(np.ravel(ax), names)):
-        if key == 'sim' and not sim_ok:
+def compose(layout, name, size):
+    """Panels on a mosaic (rows of panel keys; a key repeated spans), lettered in reading order."""
+    fig, ax = plt.subplot_mosaic(layout, figsize=size)
+    order = list(dict.fromkeys(k for row in layout for k in row))
+    for n, key in enumerate(order):
+        a = ax[key]
+        if MISSING.get(key):
             a.axis('off')
             continue
         PANELS[key][0](a, False)
@@ -622,18 +671,18 @@ def compose(names, name, shape, size):
     plt.close(fig)
 
 
-compose(['dimension', 'direction', 'pairing', 'sum', 'weights', 'collapse'], 'discover_variable', (3, 2), (12, 12.6))
-compose(['hessian', 'sim', 'regimes', 'step'], 'discover_action', (2, 2), (12, 9.4))
+compose([['dimension', 'direction'], ['pairing', 'sum'], ['weights', 'collapse']], 'discover_variable', (12, 12.6))
+compose([['hessian', 'sim'], ['step', 'soft_sim'], ['regimes', 'regimes']], 'discover_action', (12, 14))
 slides = os.path.join(figures(args.run), 'discover_slides')
 os.makedirs(slides, exist_ok=True)
 with plt.rc_context({'font.size': 13}):
     for n, (key, (fn, _, title)) in enumerate(PANELS.items()):
-        if key == 'sim' and not sim_ok:
+        if MISSING.get(key):
             continue
         fig, a = plt.subplots(figsize=(8, 5.4))
         fn(a, True)
         a.set_title(title, fontsize=14, loc='left')
         fig.tight_layout()
-        fig.savefig(os.path.join(slides, f'{n + 1}_{key}.png'), dpi=200)
+        fig.savefig(os.path.join(slides, f'{n + 1}_{key}.png'), dpi=200, transparent=True)
         plt.close(fig)
 say(f'slides: {slides}/')
