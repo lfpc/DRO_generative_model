@@ -734,6 +734,28 @@ three) by more than it overestimates the outer yoke alone ($\times2.6$ for $\tim
   \label{fig:attribution}
 \end{figure}
 
+\paragraph{At one tolerance unit.}
+The same decomposition at the scale of the walks, one unit step along \texttt{worst}
+($\|u\|=1$; no parameter moves by more than $5.8\%$), simulated on $10^9$ muons
+(Fig.~\ref{fig:collective}): the step gives $\times3.73\pm0.11$. Each of its ten largest changes
+alone, by the same amount, gives at most $\times1.59$ (M7~$X_\mathrm{yoke}^\mathrm{out}$
+$-5.8\%$), and from the fourth on none more than $\times1.1$; even at a full $10\%$, no single
+parameter reaches the step (largest: M7~$X_\mathrm{core}^\mathrm{out}$, $\times2.99\pm0.09$).
+Together the largest three give $\times2.39$, about the product of their effects alone
+($\times2.52$); the largest five $\times3.19$ and ten $\times3.55$, above the products
+($\times2.73$ and $\times3.20$): the small changes, nearly harmless alone, add to the large ones.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{collective.pdf}
+  \caption{One unit step along \texttt{worst}, taken apart (simulator: bars, Poisson errors;
+  surrogate: circles). Left: each of its ten largest changes alone, by its share of the step
+  (orange; the change in the label) and by $10\%$ with the same sign (grey). Right: the step
+  with only its largest 1--20 changes, and all 58; diamonds: the product of the changes' effects
+  alone. Dashed: the whole step.}
+  \label{fig:collective}
+\end{figure}
+
 \FloatBarrier
 \subsection{The worst case for a given tolerance}
 \label{sec:tolerance}
