@@ -57,12 +57,14 @@ noise of $10^9$ muons.
 
 \paragraph{The shield.}
 The design is the hadron absorber M0 and the magnets M1--M7, with 65 free parameters
-(Table~\ref{tab:params}): lengths \texttt{Z\_len} and the gaps \texttt{Z\_gap} before each magnet
-(from M1 on), the transverse sizes \texttt{dXIn}, \texttt{dXOut}, the inner gaps \texttt{gapIn},
-\texttt{gapOut}, the yoke widths \texttt{dXYokeIn/Out}, the height \texttt{dYIn} of each magnet
-and the height \texttt{dY\_yokeIn} of its yoke (their exit values move with them; all in cm), and
-the field $B$ of each magnet (the \texttt{NI} column, the target field in tesla, from which the
-current is set). M0--M4 are rectangular (exit = entrance) and M5 has no free transverse size.
+(Table~\ref{tab:params}): lengths $Z_\mathrm{len}$ and the gaps $Z_\mathrm{gap}$ before each magnet
+(from M1 on), the core widths $X_\mathrm{core}$, the inner gaps $X_\mathrm{gap}$, the yoke
+widths $X_\mathrm{yoke}$, the core height $Y_\mathrm{core}$ of each magnet and the height
+$Y_\mathrm{yoke}$ of its yoke (all in cm), and the field $B_\mathrm{goal}$ of each magnet (the
+target field in tesla, from which the current is set; in the text $B$). M0--M4 are rectangular and
+M5 has no free transverse size; M6 and M7 are tapered, with free entrance and exit widths, written
+with a superscript ($X_\mathrm{core}^\mathrm{in}$, $X_\mathrm{core}^\mathrm{out}$, \dots) on
+those two magnets only. The heights are the same at entrance and exit.
 
 \paragraph{Parameters analysed.}
 The surrogate is trained on all 65 parameters, but the analysis holds the seven of M0 at nominal
@@ -296,7 +298,7 @@ OAT curvatures (cosine)         & $8.5\%$  & $31\%$ (0.95) \\
   \includegraphics[width=0.48\linewidth]{validation_hits_T1.pdf}\hfill
   \includegraphics[width=0.48\linewidth]{validation_hits_T1.5.pdf}
   \caption{Top: the one-at-a-time slope $b_i$ of each analysed parameter on the check sample (the
-  quadratic fitted to $u_i=0,\pm\tfrac12,\pm1$; \texttt{NI} is the field $B$): simulator (squares)
+  quadratic fitted to $u_i=0,\pm\tfrac12,\pm1$; $B_\mathrm{goal}$ is the field $B$): simulator (squares)
   and surrogate (circles). Bottom: predicted vs.\ simulated hits
   of the reference designs on the nominal muons (left) and the check sample (right), coloured by
   their distance from the nominal design; lower panels: the ratio, grey band $\pm10\%$.}
@@ -436,21 +438,21 @@ $0.01$); last column: the simulated change at the worse limit of the eight simul
 \toprule
 parameter & nominal & $g_i/Y_0$ & $Y/Y_0-1$ at $+10\%$ & at $-10\%$ & simulated \\
 \midrule
-M7:\texttt{dXOut}      & 69 cm    & $-0.334$ & $-0.11\pm0.01$ & $+1.81\pm0.04$ & $+1.84\pm0.10$ \\
-M7:\texttt{dXYokeOut}  & 94 cm    & $-0.227$ & $+0.05\pm0.01$ & $+1.59\pm0.01$ & $+1.37\pm0.08$ \\
-M2:\texttt{dXIn}       & 70 cm    & $-0.016$ & $+0.22\pm0.03$ & $+0.73\pm0.03$ & $+0.64\pm0.06$ \\
-M7:$B$                 & $-2.03$ T & $-0.303$ & $-0.17\pm0.01$ & $+0.56\pm0.02$ & $+0.51\pm0.06$ \\
-M3:$B$                 & 1.9 T    & $-0.171$ & $-0.02\pm0.02$ & $+0.36\pm0.02$ & $+0.30\pm0.05$ \\
-M3:\texttt{Z\_len}     & 225 cm   & $-0.199$ & $-0.10\pm0.02$ & $+0.35\pm0.02$ & $+0.29\pm0.05$ \\
-M2:\texttt{Z\_len}     & 225 cm   & $-0.169$ & $-0.07\pm0.01$ & $+0.33\pm0.02$ & $+0.34\pm0.05$ \\
-M4:\texttt{Z\_len}     & 225 cm   & $-0.190$ & $-0.15\pm0.01$ & $+0.29\pm0.01$ & $+0.22\pm0.05$ \\
-M3:\texttt{dXIn}       & 64 cm    & $-0.051$ & $+0.18\pm0.04$ & $+0.29\pm0.03$ & \\
-M4:$B$                 & 1.89 T   & $-0.152$ & $-0.08\pm0.01$ & $+0.27\pm0.01$ & \\
-M7:\texttt{dXYokeIn}   & 125 cm   & $+0.310$ & $+0.24\pm0.02$ & $+0.16\pm0.02$ & \\
-M2:$B$                 & 1.87 T   & $-0.099$ & $-0.04\pm0.01$ & $+0.22\pm0.01$ & \\
-M7:\texttt{Z\_len}     & 200 cm   & $-0.124$ & $-0.08\pm0.01$ & $+0.21\pm0.01$ & \\
-M1:\texttt{Z\_len}     & 150 cm   & $-0.107$ & $-0.05\pm0.01$ & $+0.19\pm0.01$ & \\
-M1:$B$                 & 1.875 T  & $-0.151$ & $-0.14\pm0.01$ & $+0.19\pm0.01$ & \\
+M7~$X_\mathrm{core}^\mathrm{out}$      & 69 cm    & $-0.334$ & $-0.11\pm0.01$ & $+1.81\pm0.04$ & $+1.84\pm0.10$ \\
+M7~$X_\mathrm{yoke}^\mathrm{out}$  & 94 cm    & $-0.227$ & $+0.05\pm0.01$ & $+1.59\pm0.01$ & $+1.37\pm0.08$ \\
+M2~$X_\mathrm{core}$       & 70 cm    & $-0.016$ & $+0.22\pm0.03$ & $+0.73\pm0.03$ & $+0.64\pm0.06$ \\
+M7~$B_\mathrm{goal}$                 & $-2.03$ T & $-0.303$ & $-0.17\pm0.01$ & $+0.56\pm0.02$ & $+0.51\pm0.06$ \\
+M3~$B_\mathrm{goal}$                 & 1.9 T    & $-0.171$ & $-0.02\pm0.02$ & $+0.36\pm0.02$ & $+0.30\pm0.05$ \\
+M3~$Z_\mathrm{len}$     & 225 cm   & $-0.199$ & $-0.10\pm0.02$ & $+0.35\pm0.02$ & $+0.29\pm0.05$ \\
+M2~$Z_\mathrm{len}$     & 225 cm   & $-0.169$ & $-0.07\pm0.01$ & $+0.33\pm0.02$ & $+0.34\pm0.05$ \\
+M4~$Z_\mathrm{len}$     & 225 cm   & $-0.190$ & $-0.15\pm0.01$ & $+0.29\pm0.01$ & $+0.22\pm0.05$ \\
+M3~$X_\mathrm{core}$       & 64 cm    & $-0.051$ & $+0.18\pm0.04$ & $+0.29\pm0.03$ & \\
+M4~$B_\mathrm{goal}$                 & 1.89 T   & $-0.152$ & $-0.08\pm0.01$ & $+0.27\pm0.01$ & \\
+M7~$X_\mathrm{yoke}^\mathrm{in}$   & 125 cm   & $+0.310$ & $+0.24\pm0.02$ & $+0.16\pm0.02$ & \\
+M2~$B_\mathrm{goal}$                 & 1.87 T   & $-0.099$ & $-0.04\pm0.01$ & $+0.22\pm0.01$ & \\
+M7~$Z_\mathrm{len}$     & 200 cm   & $-0.124$ & $-0.08\pm0.01$ & $+0.21\pm0.01$ & \\
+M1~$Z_\mathrm{len}$     & 150 cm   & $-0.107$ & $-0.05\pm0.01$ & $+0.19\pm0.01$ & \\
+M1~$B_\mathrm{goal}$                 & 1.875 T  & $-0.151$ & $-0.14\pm0.01$ & $+0.19\pm0.01$ & \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -576,40 +578,40 @@ relative and in physical units (cm, or T for $B$).}
 \toprule
 direction & largest changes & in words \\
 \midrule
-\texttt{worst}  & M7:\texttt{dXYokeOut} $-5.8\%$ ($-5.5$), M7:\texttt{dXYokeIn} $+5.6\%$ ($+7.0$),
-                  M7:\texttt{dXOut} $-4.7\%$ ($-3.2$), M7:$B$ $-1.7\%$ ($|B|$ $-0.03$ T),
-                  M2:\texttt{dXIn} $+1.4\%$ ($+1.0$), M7:\texttt{dXIn} $+1.1\%$ ($+0.4$),
-                  M4:\texttt{dXYokeIn} $+1.0\%$ ($+1.1$), M3:$B$ $-0.9\%$ ($-0.02$ T)
+\texttt{worst}  & M7~$X_\mathrm{yoke}^\mathrm{out}$ $-5.8\%$ ($-5.5$), M7~$X_\mathrm{yoke}^\mathrm{in}$ $+5.6\%$ ($+7.0$),
+                  M7~$X_\mathrm{core}^\mathrm{out}$ $-4.7\%$ ($-3.2$), M7~$B_\mathrm{goal}$ $-1.7\%$ ($|B|$ $-0.03$ T),
+                  M2~$X_\mathrm{core}$ $+1.4\%$ ($+1.0$), M7~$X_\mathrm{core}^\mathrm{in}$ $+1.1\%$ ($+0.4$),
+                  M4~$X_\mathrm{yoke}$ $+1.0\%$ ($+1.1$), M3~$B_\mathrm{goal}$ $-0.9\%$ ($-0.02$ T)
                 & M7's inner yoke wider, its outer yoke and exit narrower \\
 \midrule
-\texttt{hess1}  & M7:\texttt{dXYokeOut} $-6.1\%$ ($-5.7$), M7:\texttt{dXYokeIn} $+5.7\%$ ($+7.1$),
-                  M7:\texttt{dXOut} $-4.6\%$ ($-3.2$), M2:\texttt{dXIn} $+1.6\%$ ($+1.1$),
-                  M7:$B$ $-1.3\%$, M4:\texttt{dXYokeIn} $+1.2\%$ ($+1.3$), M7:\texttt{dXIn} $+1.0\%$
+\texttt{hess1}  & M7~$X_\mathrm{yoke}^\mathrm{out}$ $-6.1\%$ ($-5.7$), M7~$X_\mathrm{yoke}^\mathrm{in}$ $+5.7\%$ ($+7.1$),
+                  M7~$X_\mathrm{core}^\mathrm{out}$ $-4.6\%$ ($-3.2$), M2~$X_\mathrm{core}$ $+1.6\%$ ($+1.1$),
+                  M7~$B_\mathrm{goal}$ $-1.3\%$, M4~$X_\mathrm{yoke}$ $+1.2\%$ ($+1.3$), M7~$X_\mathrm{core}^\mathrm{in}$ $+1.0\%$
                 & as \texttt{worst} \\
 \midrule
-\texttt{ascent} & M7:\texttt{dXOut} $-4.2\%$ ($-2.9$), M7:\texttt{dXYokeIn} $+3.9\%$ ($+4.9$),
-                  M7:$B$ $-3.8\%$ ($|B|$ $-0.08$ T), M7:\texttt{dXYokeOut} $-2.9\%$ ($-2.7$),
-                  M3:\texttt{Z\_len} $-2.5\%$ ($-5.7$), M4:\texttt{Z\_len} $-2.4\%$ ($-5.4$),
-                  M3:$B$ $-2.2\%$ ($-0.04$ T)
+\texttt{ascent} & M7~$X_\mathrm{core}^\mathrm{out}$ $-4.2\%$ ($-2.9$), M7~$X_\mathrm{yoke}^\mathrm{in}$ $+3.9\%$ ($+4.9$),
+                  M7~$B_\mathrm{goal}$ $-3.8\%$ ($|B|$ $-0.08$ T), M7~$X_\mathrm{yoke}^\mathrm{out}$ $-2.9\%$ ($-2.7$),
+                  M3~$Z_\mathrm{len}$ $-2.5\%$ ($-5.7$), M4~$Z_\mathrm{len}$ $-2.4\%$ ($-5.4$),
+                  M3~$B_\mathrm{goal}$ $-2.2\%$ ($-0.04$ T)
                 & the gradient: weaker M7 with a narrower exit, shorter and weaker M1--M4 \\
 \midrule
 \texttt{corner} & all 58 parameters by exactly $\pm1.31\%$, each with the sign of its gradient
                 & the simplest uniform pattern \\
 \midrule
-\texttt{act1}   & M2, M3, M4:\texttt{Z\_len} $-3.7\%$ ($-8.3$), M2:$B$ $-3.6\%$, M3:$B$ $-3.1\%$,
-                  M4, M1:$B$ $-2.7\%$, $-2.6\%$ ($-0.05$ to $-0.07$ T),
-                  M1:\texttt{Z\_len} $-2.5\%$ ($-3.8$), M7:\texttt{dXIn} $+2.4\%$ ($+0.9$)
+\texttt{act1}   & M2, M3, M4~$Z_\mathrm{len}$ $-3.7\%$ ($-8.3$), M2~$B_\mathrm{goal}$ $-3.6\%$, M3~$B_\mathrm{goal}$ $-3.1\%$,
+                  M4, M1~$B_\mathrm{goal}$ $-2.7\%$, $-2.6\%$ ($-0.05$ to $-0.07$ T),
+                  M1~$Z_\mathrm{len}$ $-2.5\%$ ($-3.8$), M7~$X_\mathrm{core}^\mathrm{in}$ $+2.4\%$ ($+0.9$)
                 & M1--M4 shorter and weaker: less bending upstream \\
 \midrule
-\texttt{act2}   & M7:\texttt{dXOut} $-8.9\%$ ($-6.2$), M7:\texttt{Z\_len} $+3.0\%$ ($+6.0$),
-                  M7:$B$ $+2.0\%$ ($|B|$ $+0.04$ T), M4:\texttt{dY\_yokeIn} $+1.4\%$ ($+0.7$),
-                  M6:\texttt{Z\_len} $+1.1\%$ ($+1.9$)
+\texttt{act2}   & M7~$X_\mathrm{core}^\mathrm{out}$ $-8.9\%$ ($-6.2$), M7~$Z_\mathrm{len}$ $+3.0\%$ ($+6.0$),
+                  M7~$B_\mathrm{goal}$ $+2.0\%$ ($|B|$ $+0.04$ T), M4~$Y_\mathrm{yoke}$ $+1.4\%$ ($+0.7$),
+                  M6~$Z_\mathrm{len}$ $+1.1\%$ ($+1.9$)
                 & M7's exit narrower, M7 longer and stronger \\
 \midrule
-\texttt{worst2} & M2:\texttt{dXIn} $+4.4\%$ ($+3.1$), M3:$B$ $-3.9\%$ ($-0.07$ T), M3:\texttt{dXIn}
-                  $-3.5\%$ ($-2.3$), M2, M3:\texttt{Z\_len} $-3.2\%$ ($-7.3$, $-7.1$), M4:$B$
-                  $-2.8\%$ ($-0.05$ T), M4:\texttt{dXIn} $-2.5\%$ ($-1.1$), M1:\texttt{Z\_len} $-2.3\%$
-                  ($-3.4$), M3:\texttt{dXYokeIn} $+2.0\%$ ($+1.7$)
+\texttt{worst2} & M2~$X_\mathrm{core}$ $+4.4\%$ ($+3.1$), M3~$B_\mathrm{goal}$ $-3.9\%$ ($-0.07$ T), M3~$X_\mathrm{core}$
+                  $-3.5\%$ ($-2.3$), M2, M3~$Z_\mathrm{len}$ $-3.2\%$ ($-7.3$, $-7.1$), M4~$B_\mathrm{goal}$
+                  $-2.8\%$ ($-0.05$ T), M4~$X_\mathrm{core}$ $-2.5\%$ ($-1.1$), M1~$Z_\mathrm{len}$ $-2.3\%$
+                  ($-3.4$), M3~$X_\mathrm{yoke}$ $+2.0\%$ ($+1.7$)
                 & M7 fixed: M2's entrance wider, M3 and M4 narrower and weaker, M1--M3 shorter \\
 \bottomrule
 \end{tabular}
@@ -666,10 +668,10 @@ parameters stay well inside them, and the worst design within the tolerances is 
 \begin{table}[t]
 \centering
 \caption{Concrete designs, simulated (nominal $1206\pm35$ hits) and predicted. At
-$\varepsilon=10\%$ the worst direction changes M7:\texttt{dXYokeOut} by $-9.4$ cm,
-M7:\texttt{dXYokeIn} by $+12.0$ cm, M7:\texttt{dXOut} by $-5.5$ cm, M7:$B$ from $-2.03$ to $-1.97$
-T, M2:\texttt{dXIn} by $+1.7$ cm, M7:\texttt{dXIn} by $+0.7$ cm, M4:\texttt{dXYokeIn} by $+1.9$ cm,
-M3:$B$ by $-0.03$ T, M3:\texttt{dXIn} by $-0.9$ cm, M7:\texttt{Z\_len} by $-2.6$ cm,
+$\varepsilon=10\%$ the worst direction changes M7~$X_\mathrm{yoke}^\mathrm{out}$ by $-9.4$ cm,
+M7~$X_\mathrm{yoke}^\mathrm{in}$ by $+12.0$ cm, M7~$X_\mathrm{core}^\mathrm{out}$ by $-5.5$ cm, M7~$B_\mathrm{goal}$ from $-2.03$ to $-1.97$
+T, M2~$X_\mathrm{core}$ by $+1.7$ cm, M7~$X_\mathrm{core}^\mathrm{in}$ by $+0.7$ cm, M4~$X_\mathrm{yoke}$ by $+1.9$ cm,
+M3~$B_\mathrm{goal}$ by $-0.03$ T, M3~$X_\mathrm{core}$ by $-0.9$ cm, M7~$Z_\mathrm{len}$ by $-2.6$ cm,
 and 48 more parameters by at most $1.2\%$.}
 \label{tab:concrete}
 \small
@@ -685,19 +687,19 @@ worst, max 10\%  & all 58, RMS 2.2\%  & 8948  & $7.4\pm0.2$   & 9.6 \\
 opposite, max 5\% & all 58, signs reversed & 1097 & $0.91\pm0.04$ & 0.91 \\
 opposite, max 10\% & all 58, signs reversed & 1181 & $0.98\pm0.04$ & 1.03 \\
 \midrule
-worst, top 1 only  & M7:\texttt{dXYokeOut} $-10\%$ ($-9.4$ cm) & 2688 & $2.23\pm0.08$ & 2.59 \\
-worst, top 3 only  & + M7:\texttt{dXYokeIn} $+9.6\%$, M7:\texttt{dXOut} $-8.0\%$ & 4253 & $3.53\pm0.12$ & 5.15 \\
-worst, top 5 only  & + M7:$B$ $-2.9\%$, M2:\texttt{dXIn} $+2.5\%$ & 6892 & $5.72\pm0.18$ & 7.51 \\
+worst, top 1 only  & M7~$X_\mathrm{yoke}^\mathrm{out}$ $-10\%$ ($-9.4$ cm) & 2688 & $2.23\pm0.08$ & 2.59 \\
+worst, top 3 only  & + M7~$X_\mathrm{yoke}^\mathrm{in}$ $+9.6\%$, M7~$X_\mathrm{core}^\mathrm{out}$ $-8.0\%$ & 4253 & $3.53\pm0.12$ & 5.15 \\
+worst, top 5 only  & + M7~$B_\mathrm{goal}$ $-2.9\%$, M2~$X_\mathrm{core}$ $+2.5\%$ & 6892 & $5.72\pm0.18$ & 7.51 \\
 worst, top 10 only & the ten largest changes & 7656 & $6.35\pm0.20$ & 8.98 \\
 \midrule
-single & M7:\texttt{dXOut} $-10\%$ ($-6.9$ cm)  & 3421 & $2.84\pm0.10$ & 2.81 \\
-single & M7:\texttt{dXYokeOut} $-10\%$ ($-9.4$ cm) & 2853 & $2.37\pm0.08$ & 2.59 \\
-single & M2:\texttt{dXIn} $-10\%$ ($-7.0$ cm)   & 1974 & $1.64\pm0.06$ & 1.73 \\
-single & M7:$B$ $-10\%$ ($|B|$ $2.03\to1.83$ T) & 1825 & $1.51\pm0.06$ & 1.56 \\
-single & M3:$B$ $-10\%$ ($1.9\to1.71$ T) & 1569 & $1.30\pm0.05$ & 1.36 \\
-single & M3:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1558 & $1.29\pm0.05$ & 1.35 \\
-single & M2:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1610 & $1.34\pm0.05$ & 1.33 \\
-single & M4:\texttt{Z\_len} $-10\%$ ($-22.5$ cm) & 1475 & $1.22\pm0.05$ & 1.29 \\
+single & M7~$X_\mathrm{core}^\mathrm{out}$ $-10\%$ ($-6.9$ cm)  & 3421 & $2.84\pm0.10$ & 2.81 \\
+single & M7~$X_\mathrm{yoke}^\mathrm{out}$ $-10\%$ ($-9.4$ cm) & 2853 & $2.37\pm0.08$ & 2.59 \\
+single & M2~$X_\mathrm{core}$ $-10\%$ ($-7.0$ cm)   & 1974 & $1.64\pm0.06$ & 1.73 \\
+single & M7~$B_\mathrm{goal}$ $-10\%$ ($|B|$ $2.03\to1.83$ T) & 1825 & $1.51\pm0.06$ & 1.56 \\
+single & M3~$B_\mathrm{goal}$ $-10\%$ ($1.9\to1.71$ T) & 1569 & $1.30\pm0.05$ & 1.36 \\
+single & M3~$Z_\mathrm{len}$ $-10\%$ ($-22.5$ cm) & 1558 & $1.29\pm0.05$ & 1.35 \\
+single & M2~$Z_\mathrm{len}$ $-10\%$ ($-22.5$ cm) & 1610 & $1.34\pm0.05$ & 1.33 \\
+single & M4~$Z_\mathrm{len}$ $-10\%$ ($-22.5$ cm) & 1475 & $1.22\pm0.05$ & 1.29 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -833,26 +835,26 @@ worst design of each allocation is simulated in the last row.}
 \toprule
 parameter & nominal & $\le3Y_0$ & $\le2Y_0$ & $\le1.5Y_0$ \\
 \midrule
-M7:\texttt{dXYokeOut}    & 94 cm    & 0.55 & 0.50 & 0.50 \\
-M7:\texttt{dXOut}        & 69 cm    & 0.69 & 0.50 & 0.50 \\
-M3:$B$                   & 1.9 T    & 0.86 & 0.55 & 0.50 \\
-M7:\texttt{dXYokeIn}     & 125 cm   & 0.86 & 0.55 & 0.50 \\
-M7:$B$                   & $-2.03$ T & 1.68 & 0.55 & 0.50 \\
-M2:\texttt{dXIn}         & 70 cm    & 0.86 & 0.69 & 0.50 \\
-M4:\texttt{dXYokeIn}     & 109 cm   & 0.86 & 0.69 & 0.50 \\
-M2:\texttt{Z\_len}       & 225 cm   & 1.07 & 0.69 & 0.50 \\
-M3:\texttt{dXIn}         & 64 cm    & 1.07 & 0.69 & 0.50 \\
-M3:\texttt{Z\_len}       & 225 cm   & 1.07 & 0.86 & 0.50 \\
-M4:$B$                   & 1.89 T   & 1.34 & 0.86 & 0.50 \\
-M1:\texttt{Z\_len}       & 150 cm   & 1.68 & 0.86 & 0.55 \\
-M3:\texttt{dXYokeIn}     & 83 cm    & 1.68 & 1.07 & 0.55 \\
-M4:\texttt{Z\_len}       & 225 cm   & 1.68 & 1.07 & 0.55 \\
-M2:$B$                   & 1.87 T   & 1.68 & 1.07 & 0.86 \\
-M7:\texttt{Z\_len}       & 200 cm   & 2.10 & 1.34 & 0.69 \\
+M7~$X_\mathrm{yoke}^\mathrm{out}$    & 94 cm    & 0.55 & 0.50 & 0.50 \\
+M7~$X_\mathrm{core}^\mathrm{out}$        & 69 cm    & 0.69 & 0.50 & 0.50 \\
+M3~$B_\mathrm{goal}$                   & 1.9 T    & 0.86 & 0.55 & 0.50 \\
+M7~$X_\mathrm{yoke}^\mathrm{in}$     & 125 cm   & 0.86 & 0.55 & 0.50 \\
+M7~$B_\mathrm{goal}$                   & $-2.03$ T & 1.68 & 0.55 & 0.50 \\
+M2~$X_\mathrm{core}$         & 70 cm    & 0.86 & 0.69 & 0.50 \\
+M4~$X_\mathrm{yoke}$     & 109 cm   & 0.86 & 0.69 & 0.50 \\
+M2~$Z_\mathrm{len}$       & 225 cm   & 1.07 & 0.69 & 0.50 \\
+M3~$X_\mathrm{core}$         & 64 cm    & 1.07 & 0.69 & 0.50 \\
+M3~$Z_\mathrm{len}$       & 225 cm   & 1.07 & 0.86 & 0.50 \\
+M4~$B_\mathrm{goal}$                   & 1.89 T   & 1.34 & 0.86 & 0.50 \\
+M1~$Z_\mathrm{len}$       & 150 cm   & 1.68 & 0.86 & 0.55 \\
+M3~$X_\mathrm{yoke}$     & 83 cm    & 1.68 & 1.07 & 0.55 \\
+M4~$Z_\mathrm{len}$       & 225 cm   & 1.68 & 1.07 & 0.55 \\
+M2~$B_\mathrm{goal}$                   & 1.87 T   & 1.68 & 1.07 & 0.86 \\
+M7~$Z_\mathrm{len}$       & 200 cm   & 2.10 & 1.34 & 0.69 \\
 \midrule
 parameters below $\pm1\%$ / $\pm2\%$ / $\pm5\%$ & & 6 / 15 / 27 & 12 / 19 / 36 & 20 / 27 / 46 \\
 median tolerance & & $5.1\%$ & $3.7\%$ & $2.6\%$ \\
-heights (\texttt{dYIn}, \texttt{dY\_yokeIn}) & & $3.3$--$10\%$ & $2.6$--$10\%$ & $1.1$--$6.4\%$ \\
+heights ($Y_\mathrm{core}$, $Y_\mathrm{yoke}$) & & $3.3$--$10\%$ & $2.6$--$10\%$ & $1.1$--$6.4\%$ \\
 \midrule
 worst design: surrogate & & $2.96\pm0.26$ & $1.98\pm0.06$ & $1.50\pm0.03$ \\
 worst design: simulator & & $1.99\pm0.07$ & $1.62\pm0.06$ & $1.39\pm0.05$ \\
@@ -1331,17 +1333,16 @@ returns this is a check that it learned the shield's physics, not only its train
 \section{Free parameters}
 \begin{table}[h]
 \centering
-\caption{Free parameters and nominal values (lengths in cm, $B$ in T): 65 in all, of which the
-surrogate is trained on all and the analysis holds the seven of M0 at nominal. The exit
-values \texttt{dYOut} and \texttt{dY\_yokeOut} equal \texttt{dYIn} and \texttt{dY\_yokeIn};
-M0--M4 are rectangular (\texttt{dXOut}, \texttt{gapOut}, \texttt{dXYokeOut} equal their entrance
-values). \texttt{Z\_gap} is the gap before the magnet.}
+\caption{Free parameters and nominal values (lengths in cm, $B_\mathrm{goal}$ in T): 65 in all, of which the
+surrogate is trained on all and the analysis holds the seven of M0 at nominal. The heights
+$Y_\mathrm{core}$ and $Y_\mathrm{yoke}$ are the same at entrance and exit; M0--M4 are rectangular
+(exit widths equal their entrance values). $Z_\mathrm{gap}$ is the gap before the magnet.}
 \label{tab:params}
 \small
 \setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{lrrrrrrrrrrr}
 \toprule
-magnet & \texttt{Z\_gap} & \texttt{Z\_len} & \texttt{dXIn} & \texttt{dXOut} & \texttt{dYIn} & \texttt{dY\_yokeIn} & \texttt{gapIn} & \texttt{gapOut} & \texttt{dXYokeIn} & \texttt{dXYokeOut} & $B$ \\
+magnet & $Z_\mathrm{gap}$ & $Z_\mathrm{len}$ & $X_\mathrm{core}^\mathrm{in}$ & $X_\mathrm{core}^\mathrm{out}$ & $Y_\mathrm{core}$ & $Y_\mathrm{yoke}$ & $X_\mathrm{gap}^\mathrm{in}$ & $X_\mathrm{gap}^\mathrm{out}$ & $X_\mathrm{yoke}^\mathrm{in}$ & $X_\mathrm{yoke}^\mathrm{out}$ & $B_\mathrm{goal}$ \\
 \midrule
 M0 &  --   & 115   & 40    & --    & 119   & 50    & 61.5  & --    & 61.5  & --     & 1.99 \\
 M1 & 15    & 150   & 62    & --    & 11    & 69    & 12    & --    & 62    & --     & 1.875 \\
